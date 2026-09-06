@@ -150,6 +150,8 @@ export interface RunGateDeps {
     checkSetupFn?: typeof checkSetup;
     /** Pass runner; injected so tests drive fake step results. */
     runPassFn?: typeof runPass;
+    /** Re-fetch git-tracked files after bootstrap (comply creates files). */
+    trackedFilesFn?: typeof trackedFiles;
     /** Report renderer. */
     reportFn?: typeof formatReport;
     /** Output sink. */
@@ -179,6 +181,7 @@ export async function runGate({
         runSetupFn = runSetup,
         checkSetupFn = checkSetup,
         runPassFn = runPass,
+        trackedFilesFn = trackedFiles,
         reportFn = formatReport,
         printFn = (line) => console.log(line),
         exitFn = (code) => process.exit(code),
@@ -186,8 +189,18 @@ export async function runGate({
 
     if (verb === "comply") {
         await runSetupFn({ startDir: repoRoot });
-        await runPassFn({ mode: "fix", repoRoot, files });
-        const verify = await runPassFn({ mode: "no-fix", repoRoot, files });
+        // Bootstrap writes .editorconfig, Directory.Build.props, AGENTS.md and
+        // a pinned .defined.json — files the pre-bootstrap snapshot (taken in
+        // main()) cannot contain. Re-fetch so both passes judge the repo as
+        // it exists after setup; otherwise the node step's prettier file list
+        // never sees the gate's own seeded files.
+        const filesAfterSetup = await trackedFilesFn({ repoRoot });
+        await runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup });
+        const verify = await runPassFn({
+            mode: "no-fix",
+            repoRoot,
+            files: filesAfterSetup,
+        });
         const lines = reportFn({
             verb: "comply",
             steps: [...verify].map(([id, result]) => ({ id, result })),

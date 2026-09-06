@@ -15,6 +15,17 @@
 // Fix:      prettier --write rewrites, then the step re-checks before
 //           reporting — a fix that leaves diffs can never read as success
 //
+// Scope is git's (decision: "gate scope = git scope"). Prettier runs over the
+// gate's tracked list (git ls-files -co --exclude-standard — tracked plus
+// untracked-but-not-ignored) filtered to the extensions prettier can parse,
+// NOT over the whole CWD tree: prettier does not honour .gitignore, so a
+// whole-tree walk would format gitignored build dirs (bin/obj/dist) and make
+// local vs CI disagree. Build dirs are gitignored, so they are absent from
+// the tracked list by construction. The travelling ignore still excludes
+// committed-but-not-for-prettier files (lockfiles, toml, properties) and a
+// consumer's own .prettierignore stays additive for the rare committed-but-
+// exempt case.
+//
 // Detection is sync and data-driven: activation = at least one tracked
 // package.json (any depth) OR a tracked *.md file. Prettier is repo-wide
 // (markdown, JSON/JSONC, YAML, CSS) regardless of Node, so a docs-only repo
@@ -52,6 +63,58 @@ export function filterMarkdownFiles({ files }: { files: string[] }): string[] {
 }
 
 /**
+ * File extensions prettier can parse with pure defaults (no plugins) —
+ * verified 2026-09-06 against prettier 3.9.6 in the gate image. Files outside
+ * this set are never handed to prettier as explicit paths: prettier errors
+ * on an explicitly-listed file it cannot parse ("No parser could be
+ * inferred"), whereas a whole-tree walk silently skips it.
+ */
+export const PRETTIER_EXTENSIONS = [
+    "js",
+    "mjs",
+    "cjs",
+    "jsx",
+    "ts",
+    "mts",
+    "cts",
+    "tsx",
+    "json",
+    "jsonc",
+    "json5",
+    "yml",
+    "yaml",
+    "md",
+    "markdown",
+    "mdx",
+    "css",
+    "scss",
+    "less",
+    "html",
+    "htm",
+    "vue",
+    "graphql",
+    "gql",
+    "hbs",
+    "handlebars",
+] as const;
+
+/**
+ * Keep only the tracked files prettier can parse. The input is already
+ * git-scoped (tracked + untracked-but-not-ignored), so gitignored build dirs
+ * never reach prettier and no per-tool build-dir ignore is needed.
+ */
+export function filterPrettierFiles({ files }: { files: string[] }): string[] {
+    return files.filter((file) => {
+        const dot = file.lastIndexOf(".");
+        if (dot === -1) {
+            return false;
+        }
+        const ext = file.slice(dot + 1);
+        return (PRETTIER_EXTENSIONS as readonly string[]).includes(ext);
+    });
+}
+
+/**
  * Effective prettier ignore args. The gate's travelling ignore is the base
  * (generic patterns like coverage/ and *.toml match from any location); the
  * host repo's own `.prettierignore` (if present) is additive and resolves
@@ -75,9 +138,10 @@ export async function prettierIgnoreArgs({
 }
 
 /**
- * Run prettier over the whole tracked tree when the project is a Node
- * project or has markdown. Returns skip with a notice when neither exists;
- * fail naming the unformatted-file count otherwise.
+ * Run prettier over the git-scoped tracked files prettier can parse when the
+ * project is a Node project or has markdown. Returns skip with a notice when
+ * neither exists, or when no tracked file is prettier-parseable; fail naming
+ * the unformatted-file count otherwise.
  */
 export async function runNodeStep({
     ctx,
@@ -96,6 +160,15 @@ export async function runNodeStep({
         });
     }
 
+    // Gate scope = git scope: format exactly the tracked files prettier can
+    // parse (see module header). Gitignored build dirs never appear here.
+    const prettierFiles = filterPrettierFiles({ files: trackedFiles });
+    if (prettierFiles.length === 0) {
+        return skipped({
+            notice: "node: no tracked files prettier can parse",
+        });
+    }
+
     const config = await gateConfigPath({ name: "prettier.config.mjs" });
     const sharedArgs = [
         "--config",
@@ -106,7 +179,7 @@ export async function runNodeStep({
     if (ctx.mode === "fix") {
         const write = runner({
             cmd: "prettier",
-            args: ["--write", ...sharedArgs, "."],
+            args: ["--write", ...sharedArgs, ...prettierFiles],
             cwd: ctx.repoRoot,
         });
         if (write.status !== 0) {
@@ -119,7 +192,7 @@ export async function runNodeStep({
     // Always verify clean — in fix mode this proves the rewrite left nothing.
     const check = runner({
         cmd: "prettier",
-        args: ["--check", ...sharedArgs, "."],
+        args: ["--check", ...sharedArgs, ...prettierFiles],
         cwd: ctx.repoRoot,
     });
     if (check.status !== 0) {
@@ -132,6 +205,6 @@ export async function runNodeStep({
     }
 
     return passed({
-        notice: `node: tree formatted (${manifests.length} package(s), ${markdownFiles.length} md)`,
+        notice: `node: tree formatted (${manifests.length} package(s), ${markdownFiles.length} md, ${prettierFiles.length} parseable)`,
     });
 }

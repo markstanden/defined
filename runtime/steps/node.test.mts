@@ -11,6 +11,7 @@ import { test } from "node:test";
 import {
     filterMarkdownFiles,
     filterPackageJsons,
+    filterPrettierFiles,
     prettierIgnoreArgs,
     runNodeStep,
 } from "./node.mts";
@@ -39,6 +40,38 @@ test("filterMarkdownFiles finds .md files at any depth", () => {
     );
 });
 
+test("filterPrettierFiles keeps parseable extensions and drops the rest", () => {
+    // The filter is extension-based: gitignored build dirs never reach the
+    // gate's tracked list upstream, so parseable committed content (even a
+    // force-tracked bin/obj JSON) is in scope.
+    assert.deepEqual(
+        filterPrettierFiles({
+            files: [
+                "package.json",
+                "src/app.ts",
+                "README.md",
+                "docs/guide.md",
+                "scripts/setup.sh",
+                "config/settings.toml",
+                ".editorconfig",
+                "bin/Debug/app.deps.json",
+                "obj/project.assets.json",
+                "dist/bundle.js",
+                "coverage/lcov.info",
+            ],
+        }),
+        [
+            "package.json",
+            "src/app.ts",
+            "README.md",
+            "docs/guide.md",
+            "bin/Debug/app.deps.json",
+            "obj/project.assets.json",
+            "dist/bundle.js",
+        ],
+    );
+});
+
 test("runNodeStep skips cleanly when neither package.json nor .md is tracked", async () => {
     const { runner, calls } = fakeRunner({});
     const result = await runNodeStep({
@@ -63,11 +96,11 @@ test("runNodeStep runs prettier for a docs-only repo (no package.json)", async (
     assert.equal(calls[0]![1], "--check");
 });
 
-test("check mode runs prettier --check with travelling config and ignore", async () => {
+test("check mode runs prettier --check with travelling config and the git-scoped file list", async () => {
     const { runner, calls } = fakeRunner({});
     const result = await runNodeStep({
         ctx: baseCtx,
-        trackedFiles: ["package.json"],
+        trackedFiles: ["package.json", "README.md", "scripts/setup.sh"],
         runner,
     });
     assert.equal(result.status, "pass");
@@ -79,7 +112,9 @@ test("check mode runs prettier --check with travelling config and ignore", async
     assert.match(args[2]!, /runtime\/config\/prettier\.config\.mjs$/u);
     assert.equal(args[3], "--ignore-path");
     assert.match(args[4]!, /runtime\/config\/prettierignore$/u);
-    assert.deepEqual(args.slice(5), ["."]);
+    // prettier gets exactly the parseable tracked files, never "." — build
+    // dirs are gitignored so already absent, and .sh is not prettier's.
+    assert.deepEqual(args.slice(5), ["package.json", "README.md"]);
 });
 
 test("fix mode writes then re-checks before reporting success", async () => {
