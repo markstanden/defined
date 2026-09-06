@@ -3,13 +3,18 @@
 // Run: node --test steps/dotnet-coverage.test.mts
 
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 
+import type { CommandResult } from "../../lib/proc.mts";
 import {
     checkMinimums,
     parseCobertura,
     runDotNetCoverageStep,
 } from "./dotnet-coverage.mts";
+import { cleanupScratch } from "../lib/scratch.mts";
 import {
     cleanupTempDirs,
     makeTempDir,
@@ -19,6 +24,31 @@ import {
 } from "../test-helpers.mts";
 
 afterEach(cleanupTempDirs);
+
+/**
+ * A runner that simulates the consumer's coverage command: on `sh` it writes
+ * the given Cobertura XML into `cwd` (the repo in fix mode, the scratch in
+ * no-fix) and records every call.
+ */
+function reportWriterRunner({
+    calls,
+    xml,
+    location,
+}: {
+    calls: string[][];
+    xml: string;
+    location: "coverage.cobertura.xml" | "TestResults/coverage.cobertura.xml";
+}): typeof import("../../lib/proc.mts").run {
+    return (({ cmd, args, cwd }) => {
+        calls.push([cmd, ...args, cwd ?? ""]);
+        if (cmd === "sh") {
+            const target = join(cwd!, location);
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(target, xml);
+        }
+        return { status: 0, stdout: "", stderr: "" } satisfies CommandResult;
+    }) as typeof import("../../lib/proc.mts").run;
+}
 
 const SAMPLE_XML = `<?xml version="1.0" encoding="utf-8"?>
 <coverage line-rate="0.85" branch-rate="0.7" version="1.9" timestamp="1234" lines-covered="85" lines-valid="100" branches-covered="35" branches-valid="50">
@@ -197,10 +227,10 @@ test("fails when no cobertura report after fix mode command", async () => {
 });
 
 test("passes when coverage meets default 80% minimum", async () => {
-    for (const reportPath of [
+    for (const location of [
         "coverage.cobertura.xml",
         "TestResults/coverage.cobertura.xml",
-    ]) {
+    ] as const) {
         const dir = await makeTempDir("quality-dc-");
         await setupCoverageRepo({
             root: dir,
@@ -208,16 +238,25 @@ test("passes when coverage meets default 80% minimum", async () => {
                 version: TEST_SHA,
                 coverage: { dotnet: { command: "dotnet test" } },
             },
-            reportPath,
-            reportContent: SAMPLE_XML,
         });
-        const { result } = await runCoverageScenario({
-            step: runDotNetCoverageStep,
-            repoRoot: dir,
-            trackedFiles: ["App.csproj"],
-        });
-        assert.equal(result.status, "pass");
-        assert.match(result.notice ?? "", /85\.0%/, reportPath);
+        await writeFile(join(dir, "App.csproj"), "<Project/>");
+        const calls: string[][] = [];
+        const scratch = { dir: null as string | null };
+        try {
+            const result = await runDotNetCoverageStep({
+                ctx: { mode: "fix", repoRoot: dir, scratch },
+                trackedFiles: ["App.csproj"],
+                runner: reportWriterRunner({
+                    calls,
+                    xml: SAMPLE_XML,
+                    location,
+                }),
+            });
+            assert.equal(result.status, "pass", location);
+            assert.match(result.notice ?? "", /85\.0%/, location);
+        } finally {
+            cleanupScratch(scratch);
+        }
     }
 });
 
@@ -249,23 +288,29 @@ test("gates line and branch coverage against the minimum", async () => {
             ).dotnet.minimums = minimums;
         }
         const dir = await makeTempDir("quality-dc-");
-        await setupCoverageRepo({
-            root: dir,
-            config,
-            reportPath: "coverage.cobertura.xml",
-            reportContent: xml,
-        });
-        const { result } = await runCoverageScenario({
-            step: runDotNetCoverageStep,
-            repoRoot: dir,
-            trackedFiles: ["App.csproj"],
-        });
-        assert.equal(result.status, status, label);
-        assert.match(result.notice ?? "", re, label);
+        await setupCoverageRepo({ root: dir, config });
+        await writeFile(join(dir, "App.csproj"), "<Project/>");
+        const calls: string[][] = [];
+        const scratch = { dir: null as string | null };
+        try {
+            const result = await runDotNetCoverageStep({
+                ctx: { mode: "fix", repoRoot: dir, scratch },
+                trackedFiles: ["App.csproj"],
+                runner: reportWriterRunner({
+                    calls,
+                    xml,
+                    location: "TestResults/coverage.cobertura.xml",
+                }),
+            });
+            assert.equal(result.status, status, label);
+            assert.match(result.notice ?? "", re, label);
+        } finally {
+            cleanupScratch(scratch);
+        }
     }
 });
 
-test("no-fix mode does not run the coverage command", async () => {
+test("no-fix runs the coverage command in a scratch workspace, isolated from the repo", async () => {
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({
         root: dir,
@@ -273,16 +318,69 @@ test("no-fix mode does not run the coverage command", async () => {
             version: TEST_SHA,
             coverage: { dotnet: { command: "dotnet test" } },
         },
+        // A report in the repo must NOT satisfy the pass: no-fix runs the
+        // command in the scratch (left empty by the fake) and reads the report
+        // from there too, so the repo's report is invisible.
         reportPath: "coverage.cobertura.xml",
         reportContent: SAMPLE_XML,
     });
-    const { result, calls } = await runCoverageScenario({
-        step: runDotNetCoverageStep,
-        repoRoot: dir,
-        trackedFiles: ["App.csproj"],
+    await writeFile(join(dir, "App.csproj"), "<Project/>");
+    const calls: string[][] = [];
+    const scratch = { dir: null as string | null };
+    try {
+        const runner = (({ cmd, args, cwd }) => {
+            calls.push([cmd, ...args, cwd ?? ""]);
+            return {
+                status: 0,
+                stdout: "",
+                stderr: "",
+            } satisfies CommandResult;
+        }) as typeof import("../../lib/proc.mts").run;
+        const result = await runDotNetCoverageStep({
+            ctx: { mode: "no-fix", repoRoot: dir, scratch },
+            trackedFiles: ["App.csproj"],
+            runner,
+        });
+        assert.equal(result.status, "fail");
+        assert.match(result.notice ?? "", /no coverage report/u);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0]![0], "sh");
+        const runCwd = calls[0]!.at(-1)!;
+        assert.notEqual(runCwd, dir);
+        assert.equal(scratch.dir, runCwd);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("no-fix validates the report the command writes into the scratch", async () => {
+    const dir = await makeTempDir("quality-dc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { dotnet: { command: "dotnet test" } },
+        },
     });
-    assert.equal(result.status, "pass");
-    assert.equal(calls.filter((c) => c[0] === "sh").length, 0);
+    await writeFile(join(dir, "App.csproj"), "<Project/>");
+    const calls: string[][] = [];
+    const scratch = { dir: null as string | null };
+    try {
+        const result = await runDotNetCoverageStep({
+            ctx: { mode: "no-fix", repoRoot: dir, scratch },
+            trackedFiles: ["App.csproj"],
+            runner: reportWriterRunner({
+                calls,
+                xml: SAMPLE_XML,
+                location: "TestResults/coverage.cobertura.xml",
+            }),
+        });
+        assert.equal(result.status, "pass");
+        assert.match(result.notice ?? "", /85\.0%/u);
+        assert.equal(scratch.dir, calls[0]!.at(-1));
+    } finally {
+        cleanupScratch(scratch);
+    }
 });
 
 test("fix mode runs the consumer command", async () => {

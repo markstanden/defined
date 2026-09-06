@@ -88,18 +88,24 @@ All` (plus the consumer's `TreatWarningsAsErrors` tightening), the template's
    a test-scoped CA1707 policy in standards or document the pattern.
    [NEEDS DECISION]
 
-10. **THE critical one: the dotnet step is not read-only-verify safe.** The
-    `dotnet` step runs `restore`/`build`/`test`, which write `obj/`+`bin/` into
-    the repo. Both `defined verify` and the CI reusable workflow mount the repo
-    **read-only** (`/repo:ro`), so a dotnet consumer's `verify` fails ("dotnet:
-    build failed"). This repo self-hosts only TS/bash, so the dotnet step was
-    never exercised in ro/no-fix mode — first real dotnet consumer breaks it.
-    **Local green ≠ merge green for dotnet until fixed.** Candidate fixes:
-    (a) relocate MSBuild output outside the mount for no-fix
-    (`-p:BaseIntermediateOutputPath=/tmp/.../$(MSBuildProjectName)/ -p:OutputPath=...`),
-    (b) build a snapshot copy in /tmp for no-fix, or (c) mount rw in CI (breaks
-    the read-only invariant). Needs design + tests + image republish + repin.
-    [NEEDS DECISION]
+10. **THE critical one: the dotnet step is not read-only-verify safe — resolved
+    with a no-fix scratch workspace.** The `dotnet` step runs
+    `restore`/`build`/`test`, which write `obj/`+`bin/` into the repo. Both
+    `defined verify` and the CI reusable workflow mount the repo **read-only**
+    (`/repo:ro`), so a dotnet consumer's `verify` failed ("dotnet: build
+    failed") — first real dotnet consumer breaks it. **Resolution:** `dotnet`
+    and `dotnet-coverage` run against a **scratch copy of the repo's git scope
+    under `/tmp`** (`runtime/lib/scratch.mts`), created only when dotnet
+    activates and shared between the two steps. Fix mode still builds in the
+    repo; no-fix (verify/CI) builds in scratch — MSBuild output relocation
+    hacks rejected (no `$(MSBuildProjectName)` expansion in `-p:` globals,
+    per-phase knobs). `dotnet-coverage` no-fix now runs the consumer's command
+    in scratch and validates the scratch report — a committed/staged report is
+    never required, so CI measures deterministically. **Proven end-to-end**:
+    an ro-mounted `verify` against a throwaway dotnet repo is `compliant` and
+    leaves the checkout byte-clean (no `bin/`/`obj/`, git unchanged). The
+    gate's own repo stays self-host green (no dotnet → scratch never created).
+    Requires image republish + repin before energy-comparison CI can go green.
 
 11. **Prettier flags gitignored build artifacts — resolved with "gate scope =
     git scope".** `prettier --check .` walks the whole tree and prettier does

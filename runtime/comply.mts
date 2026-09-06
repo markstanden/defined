@@ -35,12 +35,15 @@ import { runTofuStep } from "./steps/tofu.mts";
 import { runWorkflowStep } from "./steps/workflow.mts";
 import { runYamlStep } from "./steps/yaml.mts";
 import { failed, passed, type StepResult } from "./lib/step-result.mts";
+import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
 
 interface StepInput {
     mode: StepMode;
     repoRoot: string;
     /** Git-tracked files relative to repoRoot (lib/git.mts). */
     files: string[];
+    /** Shared scratch box: the dotnet steps build in /tmp for no-fix (finding #10). */
+    scratch?: Scratch;
 }
 
 interface Step {
@@ -85,13 +88,19 @@ const STEPS: Step[] = [
     },
     {
         id: "dotnet",
-        run: ({ mode, repoRoot, files }) =>
-            runDotNetStep({ ctx: { mode, repoRoot }, trackedFiles: files }),
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runDotNetStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
     },
     {
         id: "dotnet-coverage",
-        run: ({ mode, repoRoot }) =>
-            runDotNetCoverageStep({ ctx: { mode, repoRoot } }),
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runDotNetCoverageStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
     },
     {
         id: "shell",
@@ -132,9 +141,14 @@ export async function runPass({
     for (const step of steps) {
         results.set(step.id, failed({ notice: "not started" }));
     }
-    for (const step of steps) {
-        const result = await step.run({ mode, repoRoot, files });
-        results.set(step.id, result);
+    const scratch: Scratch = { dir: null };
+    try {
+        for (const step of steps) {
+            const result = await step.run({ mode, repoRoot, files, scratch });
+            results.set(step.id, result);
+        }
+    } finally {
+        cleanupScratch(scratch);
     }
     return results;
 }

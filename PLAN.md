@@ -83,10 +83,17 @@ something gets it excluded everywhere; committed content is always gated.
   `.yml`/`.yaml` for `yaml`, workflow files for `workflow`, root tofu files for
   `tofu`); missing ecosystems skip cleanly.
 - Coverage steps (`node-coverage`, `dotnet-coverage`) activate on a `.defined.json`
-  `coverage` entry for their ecosystem; absent entry = skip. They parse the
-  existing report (lcov for node, Cobertura XML for dotnet) and enforce the
-  configured line/branch/function minimums (default 80% line). In `fix` mode
-  they run the consumer's coverage command before validating.
+  `coverage` entry for their ecosystem; absent entry = skip. They run the
+  consumer's coverage command — in the repo for `fix`, in the no-fix scratch for
+  `verify` — then enforce the configured line/branch/function minimums (default
+  80% line) from the resulting lcov / Cobertura report. No committed or staged
+  report is ever required: `verify` generates and checks one deterministically.
+- The `dotnet` family must write `obj/`/`bin/`/`TestResults/`, which a read-only
+  `verify` (local `defined verify`, CI) cannot do in place. No-fix therefore
+  runs `dotnet` and `dotnet-coverage` against a **scratch copy of the repo's git
+  scope under `/tmp`** (`runtime/lib/scratch.mts`) — one copy shared by both
+  steps, created only when dotnet activates, cleaned after the pass. Fix mode
+  builds in the repo as before. The repo mount is never written by either mode.
 - `smoke` always probes the container's git.
 - Missing applicable tools fail loudly pointing at the Containerfile — there is
   no optional tier.
