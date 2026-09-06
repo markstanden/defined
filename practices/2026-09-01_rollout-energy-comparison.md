@@ -82,11 +82,14 @@ All` (plus the consumer's `TreatWarningsAsErrors` tightening), the template's
 
 9. **xUnit underscore test names vs the floor.** `AnalysisMode All` +
    `TreatWarningsAsErrors` turns CA1707 (underscores in identifiers) into a
-   build error for idiomatic xUnit `Method_State_Expected` test names. Resolved
-   with a nested `tests/<proj>/.editorconfig` scoping CA1707 off for test code
-   (the managed root `.editorconfig` stays byte-identical). Upstream: consider
-   a test-scoped CA1707 policy in standards or document the pattern.
-   [NEEDS DECISION]
+   build error for idiomatic xUnit `Method_State_Expected` test names. First
+   resolved with a nested `tests/<proj>/.editorconfig` scoping CA1707 (and
+   CA1515 — xUnit discovers only public test classes) off for test code.
+   **Upstreamed into standards**: the managed `.editorconfig` now carries a
+   `[tests/**/*.cs]` policy relaxing CA1707/CA1515 for test projects under
+   `tests/` (convention), so consumers need no nested file. Production code
+   keeps the strict floor and InternalsVisibleTo stays the supported pattern
+   for testing internals.
 
 10. **THE critical one: the dotnet step is not read-only-verify safe — resolved
     with a no-fix scratch workspace.** The `dotnet` step runs

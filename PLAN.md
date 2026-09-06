@@ -192,6 +192,14 @@ clobbering project content. Managed files are compared byte-for-byte: an
 identical file is left alone, any difference is drift and fails. There is no
 semantic merge — the managed files are the floor and must be an exact copy.
 
+The managed `.editorconfig` carries a test-code policy under the convention
+glob `[tests/**/*.cs]` (test projects live under `tests/`): xUnit idioms trip
+CA1707 (underscored `Method_State_Expected` names) and CA1515 (xUnit discovers
+only public test classes), both false positives for test code only, so they are
+relaxed there. Production code keeps the strict floor, and nothing must be made
+public just to be testable — `InternalsVisibleTo` is the supported pattern for
+reaching internal members from tests.
+
 ### Target repository shape
 
 ```text
