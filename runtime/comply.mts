@@ -194,7 +194,7 @@ export async function runGate({
         // main()) cannot contain. Re-fetch so both passes judge the repo as
         // it exists after setup; otherwise the node step's prettier file list
         // never sees the gate's own seeded files.
-        const filesAfterSetup = await trackedFilesFn({ repoRoot });
+        const filesAfterSetup = trackedFilesFn({ repoRoot });
         await runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup });
         const verify = await runPassFn({
             mode: "no-fix",

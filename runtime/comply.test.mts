@@ -88,7 +88,7 @@ test("runGate comply exits cleanly on a green pass", async () => {
         files: [],
         deps: {
             runSetupFn: async () => undefined,
-            trackedFilesFn: async () => [],
+            trackedFilesFn: () => [],
             runPassFn: async () => allGreen(),
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
@@ -107,7 +107,7 @@ test("runGate comply exits 1 when a finding survives repair", async () => {
         files: [],
         deps: {
             runSetupFn: async () => undefined,
-            trackedFilesFn: async () => [],
+            trackedFilesFn: () => [],
             runPassFn: async () => oneFail(),
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
@@ -125,7 +125,7 @@ test("runGate comply re-fetches tracked files after bootstrap", async () => {
         files: ["pre-setup.txt"],
         deps: {
             runSetupFn: async () => undefined,
-            trackedFilesFn: async () => ["post-setup.txt"],
+            trackedFilesFn: () => ["post-setup.txt"],
             runPassFn: async ({ files }) => {
                 passedFiles.push(files);
                 return allGreen();

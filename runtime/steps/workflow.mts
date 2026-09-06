@@ -52,7 +52,7 @@ export function filterWorkflowFiles({ files }: { files: string[] }): string[] {
 
 /** Escape a path for use as a regex literal (gitleaks allowlist paths are regexes). */
 export function escapeRegexPath(path: string): string {
-    return path.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    return path.replace(/[.*+?^${}()|[\]\\]/gu, String.raw`\$&`);
 }
 
 /**
