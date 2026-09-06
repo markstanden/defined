@@ -63,6 +63,12 @@ RUN set -eux; \
     test "$(tflint --version | sed -n 's/^TFLint version //p')" = "${TFLINT_VERSION}"; \
     test "$(node --version)" = "v${NODE_IMAGE_TAG%-slim}"
 
+# The gate mounts the consumer repo at /repo; in CI that checkout is owned by
+# the runner uid, not the container root, so git's dubious-ownership guard
+# (CVE-2022-24765) would refuse it. Whitelist the gate's own mount point in
+# the system config (protected scope) — the only path git ever touches here.
+RUN git config --system --add safe.directory /repo
+
 # Dotnet SDK: Debian main does not ship dotnet, so add Microsoft's Debian-13
 # apt feed (x64 + arm64) and install the SDK via apt. The pinned version is
 # asserted at build time like the other tools, so feed drift fails the build.
@@ -84,6 +90,13 @@ RUN set -eux; \
     . /usr/local/share/defined/tool-versions.env; \
     test "$(dotnet --version)" = "${DOTNET_SDK_VERSION}"; \
     dotnet --info >/dev/null
+
+# Suppress the .NET first-run experience (welcome banner, ASP.NET dev-cert
+# install) and telemetry: a fresh container would otherwise print the banner to
+# stderr on the first triggering dotnet call, polluting step failure output.
+ENV DOTNET_NOLOGO=1 \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1
 
 # Bake the runtime, shared lib and standards in so the published image is
 # self-contained. Local runs still bind-mount runtime/ + lib/ ro over these
