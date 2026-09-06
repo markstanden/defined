@@ -88,6 +88,7 @@ test("runGate comply exits cleanly on a green pass", async () => {
         files: [],
         deps: {
             runSetupFn: async () => undefined,
+            trackedFilesFn: () => [],
             runPassFn: async () => allGreen(),
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
@@ -106,6 +107,7 @@ test("runGate comply exits 1 when a finding survives repair", async () => {
         files: [],
         deps: {
             runSetupFn: async () => undefined,
+            trackedFilesFn: () => [],
             runPassFn: async () => oneFail(),
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
@@ -113,6 +115,27 @@ test("runGate comply exits 1 when a finding survives repair", async () => {
     });
     assert.equal(printed[0], "not compliant after repair");
     assert.deepEqual(exits, [1]);
+});
+
+test("runGate comply re-fetches tracked files after bootstrap", async () => {
+    const passedFiles: string[][] = [];
+    await runGate({
+        verb: "comply",
+        repoRoot: "/repo",
+        files: ["pre-setup.txt"],
+        deps: {
+            runSetupFn: async () => undefined,
+            trackedFilesFn: () => ["post-setup.txt"],
+            runPassFn: async ({ files }) => {
+                passedFiles.push(files);
+                return allGreen();
+            },
+            printFn: () => undefined,
+            exitFn: () => undefined,
+        },
+    });
+    // Both passes see the post-bootstrap snapshot, never the pre-setup one.
+    assert.deepEqual(passedFiles, [["post-setup.txt"], ["post-setup.txt"]]);
 });
 
 test("runGate verify checks setup then runs the no-fix pass", async () => {
