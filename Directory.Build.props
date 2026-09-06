@@ -9,6 +9,10 @@
 
     <!-- Enables debugging into NuGet packages by linking back to the original source code on GitHub -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <!-- SourceLink ships built into the .NET SDK (net8+): no Microsoft.SourceLink
+         package reference — an explicit one would suppress the built-in
+         (SuppressImplicitGitSourceLink) and break Central Package Management
+         consumers (inline versions are NU1008 under CPM). -->
     <!-- Includes source from non-tracked files (helpful for debugging modified but uncommitted code) -->
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <!-- Includes symbol packages when packing a NuGet package (snupkg) -->
@@ -30,9 +34,4 @@
     <!-- Suppresses warnings about missing XML comments while still generating docs for the comments that exist -->
     <NoWarn>$(NoWarn);CS1591</NoWarn> <!-- Missing XML comments -->
   </PropertyGroup>
-
-  <!-- Development dependency packages -->
-  <ItemGroup>
-    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All"/>
-  </ItemGroup>
 </Project>

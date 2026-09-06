@@ -67,6 +67,34 @@ the image.
     `command` generates the report in `comply` mode; omitted minimums default
     to 80% line coverage.
 
+    **Coverage command examples** — the command must land the report at a fixed
+    path: `coverage/lcov.info` (node) or `coverage.cobertura.xml` /
+    `TestResults/coverage.cobertura.xml` (dotnet).
+
+    ```jsonc
+    "coverage": {
+        "node": {
+            "command": "node --test --experimental-test-coverage --test-reporter=lcov --test-reporter-destination=coverage/lcov.info",
+            "minimums": { "line": 90 },
+        },
+        "dotnet": {
+            "command": "dotnet test && find . -path '*/TestResults/coverage.cobertura.xml' -exec cp {} TestResults/coverage.cobertura.xml \\;",
+            "minimums": { "line": 90 },
+        },
+    }
+    ```
+
+    - The node example uses the built-in lcov reporter (zero dependencies); a
+      vitest project instead runs `vitest run --coverage --reporter=lcov`.
+    - The dotnet example works with a coverlet-instrumented test project
+      (`CoverletOutput=TestResults/` in the csproj); the `find` stages the
+      per-project report to the gate's fixed path. The SDK's
+      `--collect:"XPlat Code Coverage"` works too but writes under a GUID
+      subfolder, so staging is still required.
+    - **Minimums are declared only here** (`.defined.json`) — CLI-declared.
+      Don't duplicate them in XML (e.g. a coverlet `Threshold`): the gate is
+      the single authority.
+
 3. **Gate locally** — run `defined comply`. It bootstraps `.editorconfig` and
    `Directory.Build.props` into the repo root and seeds the AGENTS.md managed
    block, repairs safe findings, then re-verifies. Managed files are installed
@@ -88,42 +116,17 @@ the image.
     immutability. Keep the workflow ref SHA and the `.defined.json` pin in
     step: only when they match is local green = merge green.
 
-## Quality badges
+## Quality pipeline
 
-SonarQube Cloud exposes quality-gate badges for the repo README. The badge
-reflects the Sonar quality gate on the default branch; the link goes to the
-new-code summary. This is **optional external integration** — SonarQube is
-separate from the `defined` gate and none of the `defined` workflows runs a
-Sonar scan in CI.
-
-```markdown
-[![Quality gate](https://sonarcloud.io/api/project_badges/quality_gate?project=<org>_<repo>)](https://sonarcloud.io/summary/new_code?id=<org>_<repo>)
-```
-
-- **Project key**: `<org>_<repo>` (the SonarQube Cloud project key — visible
-  on the project dashboard).
-- The badge works only once SonarQube Cloud has analysed the default branch
-  at least once (a blank badge means no analysis yet).
-- Add the same badge to client-project READMEs that adopt the gate — it is the
-  public "is it green?" signal for a repo, and points reviewers at the new-code
-  summary where the conditions are explained.
-
-## SonarQube Cloud project artifacts
-
-Two small files pin the SonarQube Cloud project identity so IDE analysis and
-standalone scanning agree. Neither contains secrets — tokens live in CI
-secrets, never in the repo.
-
-- `sonar-project.properties` — `sonar.projectKey` / `sonar.organization` /
-  `sonar.sources` for the standalone scanner.
-- `.sonarlint/connectedMode.json` — SonarLint connected mode (org, project
-  key, region). No credentials: SonarLint keeps them in the IDE's secret
-  store.
-
-Client projects adopting the gate should add both, substituting their own
-`<org>_<repo>` key, so IDE and CLI analysis agree. Keep the
-`sonar.projectKey` in this repo's `sonar-project.properties`,
-`.sonarlint/connectedMode.json` and the README badge in step.
+This repo's own CI (`defined--test.yml`) also runs a SonarQube Cloud scan,
+forcing an **issue-free SonarQube gate** on the default branch — the badge at
+the top is that signal for contributors. The `defined` gate feeds it: run
+`defined comply` locally so lint/format/coverage issues are caught before they
+reach the more sophisticated server gate. The two coexist — `defined` is the
+cheap early gate, SonarQube holds the deeper line, and no `defined` workflow
+runs a Sonar scan in CI. The identity files (`sonar-project.properties`,
+`.sonarlint/connectedMode.json`) keep IDE analysis and the scanner in step;
+neither contains secrets.
 
 ## Workflow templates
 

@@ -49,6 +49,14 @@ deployment, OpenTofu plan/apply/destroy, healthcheck orchestration, bespoke
 Playwright runners, hosted SonarQube wrappers, and workflow/pipeline-module
 catalogues generally.
 
+SonarQube is a **coexist, not gate, integration**: the producer repo's own CI
+runs an issue-free SonarQube gate as a deeper server-side line, while the gate
+enforces coverage locally (`node-coverage`/`dotnet-coverage` parse lcov/
+Cobertura against `.defined.json` minimums). SonarQube coverage gating would
+need committed-and-pushed server analysis — a round-trip that breaks local
+green = pipeline green — so it stays out of the step order. Consumers who want
+it run the scan in their own pipeline against the gate-generated report.
+
 ### Checks and step order
 
 Steps run in fixed order, strictly sequentially:
@@ -56,6 +64,19 @@ Steps run in fixed order, strictly sequentially:
 ```text
 naming → node → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow → tofu
 ```
+
+**Scope — the gate's universe is git's.** Every step judges the repo's git
+content (`git ls-files -co --exclude-standard`: tracked plus untracked-but-
+not-ignored). Gitignored paths — build dirs, local `.env`, scratch — are never
+analysed, locally or in CI, so a gitignored secret can never make local red /
+CI green (a whole-tree scan would). Tools that walk the filesystem rather than
+the git list are brought into scope explicitly: `prettier` runs over the
+tracked file list (filtered to parseable extensions) instead of `.`, and
+`gitleaks` runs against a generated config (default rules + an allowlist of
+the git-ignored paths) instead of a raw `dir .`. `comply` re-fetches the
+tracked list _after_ bootstrap, because setup itself writes `.defined.json`
+and the `AGENTS.md` block. Raises-only stands: a consumer who gitignores
+something gets it excluded everywhere; committed content is always gated.
 
 - Each ecosystem step activates on detection (a `package.json`/`*.md` for
   `node`, a `.csproj`/`.sln`/`.slnx` for `dotnet`, lowercase `*.sh` for `shell`,
