@@ -9,8 +9,13 @@
 # local edits run without a rebuild; only tool pins change this image's local
 # tag. Base image pins arrive as build args from comply.sh (which sources
 # tool-versions.env) so that file remains the single source of truth.
-ARG NODE_IMAGE_TAG
-ARG NODE_IMAGE_DIGEST
+# Base image pins arrive as build args from comply.sh (which sources
+# tool-versions.env) so that file remains the single source of truth. The
+# defaults below exist only so a bare `docker build` (or the buildkit linter)
+# has a valid base image name — they must mirror tool-versions.env, and the
+# node version assertion in the first RUN gates any drift loudly.
+ARG NODE_IMAGE_TAG=26.7.0-slim
+ARG NODE_IMAGE_DIGEST=sha256:5758d367d7b4f48b73a9bb3530e687e47efb289f3b43f9c0450a25225ae0db5d
 
 FROM docker.io/library/node:${NODE_IMAGE_TAG}@${NODE_IMAGE_DIGEST}
 
@@ -56,7 +61,7 @@ RUN set -eux; \
     unzip -o /tmp/tflint.zip -d /usr/local/bin; \
     rm /tmp/tflint.zip; \
     test "$(tflint --version | sed -n 's/^TFLint version //p')" = "${TFLINT_VERSION}"; \
-    node --version
+    test "$(node --version)" = "v${NODE_IMAGE_TAG%-slim}"
 
 # Dotnet SDK: Debian main does not ship dotnet, so add Microsoft's Debian-13
 # apt feed (x64 + arm64) and install the SDK via apt. The pinned version is
