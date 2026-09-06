@@ -197,8 +197,16 @@ export async function runDotNetCoverageStep({
         cwd: workingRoot,
     });
     if (result.status !== 0) {
+        // Show stdout first: dotnet writes test/build failures there, while a
+        // stray first-run banner (now suppressed in the image) or noise lands
+        // on stderr — stderr-first used to mask the real failure.
+        const detail = [result.stdout, result.stderr]
+            .filter((s) => typeof s === "string")
+            .map((s) => s.trim())
+            .filter((s) => s !== "")
+            .join("\n");
         return failed({
-            notice: `dotnet-coverage: coverage command failed: ${result.stderr.trim() || result.stdout.trim()}`,
+            notice: `dotnet-coverage: coverage command failed: ${detail || "no output"}`,
         });
     }
 
