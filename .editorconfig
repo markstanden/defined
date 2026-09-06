@@ -19,6 +19,16 @@ indent_style = space
 indent_size = 4
 max_line_length = 120
 
+# Test projects under tests/ (convention). xUnit idioms trip two analysers:
+# CA1707 (Method_State_Expected underscores in test names) and CA1515 (test
+# classes must stay public for xUnit discovery). Both are false positives for
+# test code only, so relax them here — production code keeps the strict floor
+# and nothing has to be made public just to be testable (InternalsVisibleTo
+# is the supported pattern for reaching internals).
+[tests/**/*.cs]
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1515.severity = none
+
 # .NET code style settings
 ## "This." and "Me." qualifiers
 dotnet_style_qualification_for_field = false:suggestion
