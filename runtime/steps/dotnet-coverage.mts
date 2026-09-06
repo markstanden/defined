@@ -1,8 +1,12 @@
 // steps/dotnet-coverage.mts — .NET coverage gate: parse Cobertura, enforce minimums.
 //
-// Tools:    none (parses existing coverage reports)
+// Tools:    none (runs the consumer's coverage command; parses Cobertura)
 // Config:   .defined.json "coverage.dotnet" — command + minimums
-// Fix:      runs the consumer's coverage command, then validates the report
+// Fix:      runs the consumer's coverage command in the repo (rw mount), then
+//           validates the report
+// No-fix:   runs the consumer's coverage command in a /tmp scratch copy of the
+//           git scope (a read-only verify cannot write a report into the repo)
+//           and validates the scratch report
 // Skip:     no .defined.json entry for "dotnet", or no Cobertura XML found
 //
 // Detection is config-driven: the step only activates when .defined.json
@@ -21,12 +25,15 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
+import { ensureScratch, type Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import { loadConfig, type CoverageMinimums } from "../lib/config.mts";
 
 export interface DotNetCoverageRunContext {
     mode: "fix" | "no-fix";
     repoRoot: string;
+    /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
+    scratch?: Scratch;
 }
 
 type Runner = typeof run;
@@ -146,9 +153,11 @@ function findCoberturaFile({ repoRoot }: { repoRoot: string }): string | null {
 }
 
 /**
- * Run dotnet coverage gate. Skips when no config entry; in fix mode, runs the
- * consumer's command; always validates the report against configured
- * minimums. Looks for coverage.cobertura.xml at repo root or TestResults/.
+ * Run dotnet coverage gate. Skips when no config entry; always runs the
+ * consumer's command — in the repo for fix mode, in a /tmp scratch copy of the
+ * git scope for no-fix (read-only verify cannot write a report into the repo)
+ * — then validates the report against configured minimums. Looks for
+ * coverage.cobertura.xml at the working root or TestResults/.
  */
 export async function runDotNetCoverageStep({
     ctx,
@@ -170,20 +179,30 @@ export async function runDotNetCoverageStep({
 
     const coverageConfig = config.coverage.dotnet;
 
-    if (ctx.mode === "fix") {
-        const result = runner({
-            cmd: "sh",
-            args: ["-c", coverageConfig.command],
-            cwd: ctx.repoRoot,
+    // Read-only verify cannot write a report into /repo, so no-fix runs the
+    // consumer's command against a scratch copy of the git scope (shared with
+    // the dotnet step via ctx.scratch) and validates the scratch report.
+    const workingRoot =
+        ctx.mode === "no-fix"
+            ? ensureScratch({
+                  scratch: ctx.scratch,
+                  repoRoot: ctx.repoRoot,
+                  files: trackedFiles,
+              })
+            : ctx.repoRoot;
+
+    const result = runner({
+        cmd: "sh",
+        args: ["-c", coverageConfig.command],
+        cwd: workingRoot,
+    });
+    if (result.status !== 0) {
+        return failed({
+            notice: `dotnet-coverage: coverage command failed: ${result.stderr.trim() || result.stdout.trim()}`,
         });
-        if (result.status !== 0) {
-            return failed({
-                notice: `dotnet-coverage: coverage command failed: ${result.stderr.trim() || result.stdout.trim()}`,
-            });
-        }
     }
 
-    const coberturaPath = findCoberturaFile({ repoRoot: ctx.repoRoot });
+    const coberturaPath = findCoberturaFile({ repoRoot: workingRoot });
     if (coberturaPath === null) {
         return failed({
             notice: `dotnet-coverage: no coverage report at ${COBERTURA_NAME} (or TestResults/coverage.cobertura.xml) — run coverage in a prior step or check command`,

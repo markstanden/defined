@@ -10,11 +10,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { CommandResult } from "../lib/proc.mts";
+import { cleanupScratch } from "./lib/scratch.mts";
 
 type RunResult = { status: number; stdout?: string; stderr?: string };
 
 type StepArgs = {
-    ctx: { mode: "fix" | "no-fix"; repoRoot: string };
+    ctx: {
+        mode: "fix" | "no-fix";
+        repoRoot: string;
+        scratch?: { dir: string | null };
+    };
     trackedFiles: string[];
     runner: typeof import("../lib/proc.mts").run;
     readFileFn: typeof readFile;
@@ -89,13 +94,18 @@ export async function runCoverageScenario<T>({
     runnerOutcomes?: Record<string, RunResult>;
 }): Promise<{ result: T; calls: string[][] }> {
     const { runner, calls } = fakeRunner(runnerOutcomes);
-    const result = await step({
-        ctx: { mode, repoRoot },
-        trackedFiles,
-        runner,
-        readFileFn: readFile,
-    });
-    return { result, calls };
+    const scratch = { dir: null };
+    try {
+        const result = await step({
+            ctx: { mode, repoRoot, scratch },
+            trackedFiles,
+            runner,
+            readFileFn: readFile,
+        });
+        return { result, calls };
+    } finally {
+        cleanupScratch(scratch);
+    }
 }
 
 /**

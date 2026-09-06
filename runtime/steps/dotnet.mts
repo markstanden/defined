@@ -13,6 +13,11 @@
 // *.csproj, *.sln, or *.slnx file. Workspace discovery follows
 // dev-tools' pattern: explicit flag/env → single slnx/sln at root → repo root.
 // The runner is injected so tests need no host binaries.
+//
+// Read-only verify (local `defined verify` and CI) cannot write obj/bin into
+// the repo, so no-fix mode runs against a scratch copy of the git scope under
+// /tmp (lib/scratch.mts, finding #10); the repo mount stays untouched. Fix
+// mode runs in the repo as before.
 
 import {
     failed,
@@ -20,11 +25,14 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
+import { ensureScratch, type Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 
 export interface DotNetRunContext {
     mode: "fix" | "no-fix";
     repoRoot: string;
+    /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
+    scratch?: Scratch;
 }
 
 type Runner = typeof run;
@@ -119,8 +127,20 @@ export async function runDotNetStep({
     const slnxFiles = trackedFiles.filter((f) => f.endsWith(".slnx"));
     const slnFiles = trackedFiles.filter((f) => f.endsWith(".sln"));
     const csprojFiles = trackedFiles.filter((f) => f.endsWith(".csproj"));
+    // no-fix (verify/CI) runs against a scratch copy of the git scope under
+    // /tmp: restore/build/test must write obj/bin/TestResults, which a
+    // read-only /repo mount cannot. The scratch is shared with the coverage
+    // step via ctx.scratch (lib/scratch.mts).
+    const workspaceRoot =
+        ctx.mode === "no-fix"
+            ? ensureScratch({
+                  scratch: ctx.scratch,
+                  repoRoot: ctx.repoRoot,
+                  files: trackedFiles,
+              })
+            : ctx.repoRoot;
     const workspace = discoverWorkspace({
-        repoRoot: ctx.repoRoot,
+        repoRoot: workspaceRoot,
         workspaceEnv: process.env.TOOL_WORKSPACE,
         slnxFiles,
         slnFiles,
@@ -132,7 +152,7 @@ export async function runDotNetStep({
     const restore = await runDotNetCommand(
         runner,
         ["restore", workspace],
-        ctx.repoRoot,
+        workspaceRoot,
     );
     if (restore.status !== 0) {
         return failed({
@@ -145,7 +165,7 @@ export async function runDotNetStep({
         const formatWrite = await runDotNetCommand(
             runner,
             ["format", workspace],
-            ctx.repoRoot,
+            workspaceRoot,
         );
         if (formatWrite.status !== 0) {
             return failed({
@@ -158,7 +178,7 @@ export async function runDotNetStep({
     const formatCheck = await runDotNetCommand(
         runner,
         ["format", "--verify-no-changes", workspace],
-        ctx.repoRoot,
+        workspaceRoot,
     );
     if (formatCheck.status !== 0) {
         return failed({
@@ -169,7 +189,7 @@ export async function runDotNetStep({
     const build = await runDotNetCommand(
         runner,
         ["build", workspace, "--no-restore"],
-        ctx.repoRoot,
+        workspaceRoot,
     );
     if (build.status !== 0) {
         return failed({
@@ -180,7 +200,7 @@ export async function runDotNetStep({
     const test = await runDotNetCommand(
         runner,
         ["test", workspace, "--no-build", "--no-restore"],
-        ctx.repoRoot,
+        workspaceRoot,
     );
     if (test.status !== 0) {
         return failed({

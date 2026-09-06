@@ -34,7 +34,9 @@ match (keep them in step).
 The gate detects the stack (steps run in order `naming → node → node-coverage →
 dotnet → dotnet-coverage → shell → smoke → yaml → workflow → tofu`), skips
 cleanly when an ecosystem is absent, and fails loudly when a pinned tool is
-missing. Tool versions are pinned in
+missing. Because `verify` never writes to the repo, the dotnet steps build in a
+scratch copy of the git scope under the container's `/tmp` (a read-only mount
+cannot host `obj/`/`bin/`); the repo checkout itself is never touched. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 
