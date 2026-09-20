@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-08-31 | scope=PLAN.md -->
+<!-- update: agent=opencode | date=2026-09-20 | scope=PLAN.md -->
 
 # PLAN — defined: portable quality gate
 
@@ -122,8 +122,9 @@ defined verify   # pipeline-only: the read-only check
 ### Commit hooks
 
 Defined does **not** install or manage git hooks — the managed bootstrap
-surface stays the four byte-identical artifacts, and `comply`/`verify` remain
-the whole enforcement loop. Instead `standards/githooks/pre-commit` is an
+surface stays the byte-identical root configs plus the AGENTS block, and
+`comply`/`verify` remain the whole enforcement loop. Instead
+`standards/githooks/pre-commit` is an
 optional **reference** hook the consumer owns and opts into (commit it to
 their repo, point `core.hooksPath` at it): it runs `defined verify` verbatim.
 Deferring to the gate makes it deterministic — same pinned image, SDK and rules
@@ -200,11 +201,17 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
 ### Bootstrap contract
 
 `comply` installs managed root configs (`.editorconfig`,
-`Directory.Build.props`) and a marker-delimited block in consumer `AGENTS.md`
-from the image-baked versions, and seeds that block idempotently without
-clobbering project content. Managed files are compared byte-for-byte: an
-identical file is left alone, any difference is drift and fails. There is no
-semantic merge — the managed files are the floor and must be an exact copy.
+`Directory.Build.props`, `.gitattributes`) and a marker-delimited block in
+consumer `AGENTS.md` from the image-baked versions, and seeds that block
+idempotently without clobbering project content. Managed files are compared
+byte-for-byte: an identical file is left alone, any difference is drift and
+fails. There is no semantic merge — the managed files are the floor and must be
+an exact copy.
+
+The managed `.gitattributes` pins the checkout line-ending contract
+(`* text=auto eol=lf whitespace=trailing-space,space-before-tab,cr-at-eol` plus
+binary rules), so it agrees with the managed `.editorconfig`'s
+`end_of_line = lf` and with `git diff --check`, locally and in CI.
 
 The managed `.editorconfig` carries a test-code policy under the convention
 glob `[tests/**/*.cs]` (test projects live under `tests/`): xUnit idioms trip
@@ -242,3 +249,30 @@ config (a self-referential `version` pin is impossible by construction, and an
 omitted version means the default image, which the source-development shim
 never consults anyway). `comply` on this repo is the coverage gate it ships,
 self-hosted on the gate's own test suite.
+
+## Open gaps (backlog)
+
+The gate is complete enough to adopt in parallel, but these capability gaps
+remain before it can replace a consumer's own overlapping scripts. Each is a
+GitHub issue; this table is the plan-of-record entry point so a fresh session
+knows what is left without trawling the issue list.
+
+| #                                                       | Gap                                                                           | Blocks                                         |
+| ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------- |
+| [#19](https://github.com/markstanden/defined/issues/19) | `node` step is Prettier-only — no consumer ESLint / `tsc --noEmit` / tests    | retiring a consumer's `quality/typescript.sh`  |
+| [#21](https://github.com/markstanden/defined/issues/21) | node checks must use the consumer's own toolchain and nested package location | monorepos, nested `lib/package.json`           |
+| [#24](https://github.com/markstanden/defined/issues/24) | `workflow` step ignores the consumer's `.gitleaksignore` baseline             | repos with documented false-positive baselines |
+| [#25](https://github.com/markstanden/defined/issues/25) | `naming` step is a disabled placeholder                                       | retiring `quality/naming.sh`                   |
+| [#26](https://github.com/markstanden/defined/issues/26) | general naming doctrine has no home in `standards/`                           | onboarding, and #25                            |
+
+Recently delivered (so the list above is not re-litigated): #20
+(`node-coverage` generates its report in the no-fix scratch), #22 (`yamllint
+-s` — warnings fail), #23 (zizmor at its own default severity), #27
+(consumer-owned prettier config wins), #28 (`.gitattributes` is managed).
+
+Not yet filed:
+
+- Launcher offline mode — the gate needs no network, but `pasta` fails on hosts
+  without the `tun` module.
+- `comply` should fail with the documented report contract, not a raw Node
+  stack, when a managed file drifts.
