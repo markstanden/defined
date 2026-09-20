@@ -49,15 +49,15 @@ RUN set -eux; \
         aarch64) ARCH="arm64"; ZIZMOR_ARCH="aarch64"; GITLEAKS_ARCH="arm64" ;; \
         *) echo "Unsupported arch: ${arch}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin actionlint; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin actionlint; \
     actionlint --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${ZIZMOR_ARCH}-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin zizmor; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${ZIZMOR_ARCH}-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin zizmor; \
     zizmor --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" | tar -xz -C /usr/local/bin gitleaks; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" | tar -xz -C /usr/local/bin gitleaks; \
     gitleaks --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin tofu; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin tofu; \
     tofu --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${ARCH}.zip" -o /tmp/tflint.zip; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${ARCH}.zip" -o /tmp/tflint.zip; \
     unzip -o /tmp/tflint.zip -d /usr/local/bin; \
     rm /tmp/tflint.zip; \
     test "$(tflint --version | sed -n 's/^TFLint version //p')" = "${TFLINT_VERSION}"; \
@@ -79,10 +79,10 @@ RUN set -eux; \
     . /usr/local/share/defined/tool-versions.env; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        wget \
         gpg \
     ; \
-    wget -qO /tmp/packages-microsoft-prod.deb \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors \
+        -o /tmp/packages-microsoft-prod.deb \
         "https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb"; \
     dpkg -i /tmp/packages-microsoft-prod.deb; \
     rm /tmp/packages-microsoft-prod.deb; \
