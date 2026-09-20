@@ -69,8 +69,11 @@ test("actionlint runs on workflow files, then zizmor, then gitleaks", async () =
     assert.deepEqual(cmds, ["actionlint", "zizmor", "git", "gitleaks"]);
     // actionlint gets the file as first arg
     assert.deepEqual(calls[0]!.slice(1, 2), [".github/workflows/ci.yml"]);
-    // zizmor gets --no-progress as first arg
-    assert.equal(calls[1]![1], "--no-progress");
+    // zizmor gets --no-progress and the file, with no severity cap
+    assert.deepEqual(calls[1]!.slice(1, -1), [
+        "--no-progress",
+        ".github/workflows/ci.yml",
+    ]);
     // git status --ignored gets --porcelain
     assert.deepEqual(calls[2]!.slice(1, 3), ["status", "--porcelain"]);
     // gitleaks gets "dir --config <temp>" and "." last

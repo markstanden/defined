@@ -2,7 +2,8 @@
 //
 // Tools:    actionlint, zizmor, gitleaks (all required — missing = loud fail)
 // Config:   .gitleaksignore at repo root (optional); per-project ignores via
-//           .defined.json when needed
+//           .defined.json when needed. zizmor runs at its own default
+//           min-severity (informational): every finding it reports fails.
 // Fix:      none — these are check-only tools
 //
 // Detection: actionlint/zizmor run only when tracked workflow files exist
@@ -153,7 +154,9 @@ export async function runWorkflowStep({
 
         const zizmor = runner({
             cmd: "zizmor",
-            args: ["--no-progress", "--min-severity", "high", ...workflowFiles],
+            // No --min-severity: zizmor's own default (informational) applies,
+            // so nothing is silently filtered out.
+            args: ["--no-progress", ...workflowFiles],
             cwd: ctx.repoRoot,
         });
         if (zizmor.status !== 0) {

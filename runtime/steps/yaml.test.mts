@@ -47,7 +47,7 @@ test("runYamlStep fails naming violation count when yamllint reports", async () 
     assert.ok((result.notice ?? "").includes("yamllint"));
 });
 
-test("config file is passed explicitly so it travels with the gate", async () => {
+test("config travels with the gate and -s makes warnings fail", async () => {
     const { runner, calls } = fakeRunner({});
     await runYamlStep({
         ctx: baseCtx,
@@ -58,6 +58,7 @@ test("config file is passed explicitly so it travels with the gate", async () =>
     assert.equal(call[1], "-c");
     assert.match(call[2]!, /runtime\/config\/yamllint\.yml$/u);
     assert.deepEqual(call.slice(3), [
+        "-s",
         "-f",
         "parsable",
         "ci.yml",

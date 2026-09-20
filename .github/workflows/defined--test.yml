@@ -26,6 +26,8 @@ jobs:
               with:
                   # Full history: SonarQube branch/PR analysis needs it.
                   fetch-depth: 0
+                  # zizmor (artipacked): leave no credentials in .git/config.
+                  persist-credentials: false
 
             - name: Setup Node
               uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
@@ -48,9 +50,14 @@ jobs:
 
             - name: Pre-pull published gate image
               shell: bash
+              env:
+                  # Passed via env, not interpolated into run:, so zizmor's
+                  # template-injection audit stays quiet (it cannot tell a hash
+                  # from attacker input).
+                  PINHASH: ${{ steps.pins.outputs.pinhash }}
               run: |
                   set -euo pipefail
-                  IMAGE="localhost/defined:${{ steps.pins.outputs.pinhash }}"
+                  IMAGE="localhost/defined:${PINHASH}"
                   if docker image inspect "${IMAGE}" >/dev/null 2>&1; then
                     echo "image already present"
                     exit 0
@@ -59,8 +66,8 @@ jobs:
                   # Only reuse it when the baked ENTRYPOINT matches the current
                   # source (comply.mts) — a stale entrypoint (pre-rebrand image)
                   # would exec a file that no longer exists under the bind-mount.
-                  if docker pull "ghcr.io/markstanden/defined:${{ steps.pins.outputs.pinhash }}" 2>/dev/null; then
-                    PUBLISHED="ghcr.io/markstanden/defined:${{ steps.pins.outputs.pinhash }}"
+                  if docker pull "ghcr.io/markstanden/defined:${PINHASH}" 2>/dev/null; then
+                    PUBLISHED="ghcr.io/markstanden/defined:${PINHASH}"
                     if docker image inspect --format '{{.Config.Entrypoint}}' "${PUBLISHED}" \
                         | grep -q 'comply.mts'; then
                       docker tag "${PUBLISHED}" "${IMAGE}"

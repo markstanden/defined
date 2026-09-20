@@ -12,6 +12,7 @@ import {
     filterMarkdownFiles,
     filterPackageJsons,
     filterPrettierFiles,
+    prettierConfigArgs,
     prettierIgnoreArgs,
     runNodeStep,
 } from "./node.mts";
@@ -172,6 +173,39 @@ test("prettierIgnoreArgs passes the travelling ignore and adds the host .prettie
         const withHost = await prettierIgnoreArgs({ repoRoot: root });
         assert.equal(withHost.filter((a) => a === "--ignore-path").length, 2);
         assert.equal(withHost[3], join(root, ".prettierignore"));
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("prettierConfigArgs falls back to the travelling config with no consumer file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "quality-node-config-bare-"));
+    try {
+        const args = await prettierConfigArgs({ repoRoot: root });
+        assert.equal(args[0], "--config");
+        assert.match(args[1]!, /runtime\/config\/prettier\.config\.mjs$/u);
+    } finally {
+        await rm(root, { recursive: true, force: true });
+    }
+});
+
+test("a consumer-owned prettier config replaces the travelling default", async () => {
+    const root = await mkdtemp(join(tmpdir(), "quality-node-config-"));
+    try {
+        await writeFile(
+            join(root, "prettier.config.mjs"),
+            "export default {};\n",
+        );
+        const { runner, calls } = fakeRunner({});
+        const result = await runNodeStep({
+            ctx: { ...baseCtx, repoRoot: root },
+            trackedFiles: ["package.json"],
+            runner,
+        });
+        assert.equal(result.status, "pass");
+        const [, ...args] = calls[0]!;
+        assert.equal(args[1], "--config");
+        assert.equal(args[2], join(root, "prettier.config.mjs"));
     } finally {
         await rm(root, { recursive: true, force: true });
     }
