@@ -64,6 +64,12 @@ export async function createBrokenFixture({
         cwd: root,
     });
     run({ cmd: "git", args: ["config", "user.name", "fixture"], cwd: root });
+    // Disable git's background auto-maintenance: `git commit` would otherwise
+    // spawn `maintenance run --auto`, which transiently creates and removes
+    // .git/objects/maintenance.lock while the tests walk the tree — a race that
+    // surfaces as ENOENT in hashTree.
+    run({ cmd: "git", args: ["config", "maintenance.auto", "false"], cwd: root });
+    run({ cmd: "git", args: ["config", "gc.auto", "0"], cwd: root });
     run({ cmd: "git", args: ["add", "-A"], cwd: root });
     run({ cmd: "git", args: ["commit", "-qm", "broken fixture"], cwd: root });
     return root;
