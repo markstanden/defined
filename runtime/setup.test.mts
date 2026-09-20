@@ -105,13 +105,21 @@ test("runSetup is idempotent: re-run leaves AGENTS.md byte-identical", async () 
     }
 });
 
-test("runSetup fails loudly when a root config drifts from the managed copy", async () => {
+test("runSetup leaves a drifted root config untouched (raises-only)", async () => {
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
-        await assert.rejects(
-            () => runSetup({ startDir: repo }),
-            /byte-identical/u,
+        await runSetup({ startDir: repo });
+        assert.equal(
+            await readFile(join(repo, ".editorconfig"), "utf8"),
+            "indent_size = 2\n",
+            "the gate never overwrites or merges a drifted managed file",
+        );
+        const check = await checkSetup({ startDir: repo });
+        assert.equal(
+            check.configs.find((c) => c.name === ".editorconfig")?.status,
+            "drift",
+            "drift surfaces through checkSetup for the report contract",
         );
     } finally {
         await rm(repo, { recursive: true, force: true });

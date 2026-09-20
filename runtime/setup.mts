@@ -6,9 +6,9 @@
 // the AGENTS.md managed block from config/agents-block.md, and creates a
 // pinned .defined.json when the repo has none. Idempotent: re-runs rewrite
 // the block only, leave unchanged configs alone, and never touch an existing
-// .defined.json (raises-only — differences fail loudly). checkSetup is the
-// read-only path used by `verify`; it reports bootstrap state without
-// writing a byte.
+// .defined.json (raises-only — a differing config is left in place and
+// surfaces as drift). checkSetup is the read-only path used by `verify`; it
+// reports bootstrap state without writing a byte.
 //
 // Pure module: no top-level main — comply.mts owns the entry point, so this
 // file is never double-executed when imported.

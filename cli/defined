@@ -15,6 +15,14 @@
 # The runtime's .defined.json parser is exercised here end-to-end; the
 # producer repo commits its own versionless config (a coverage pin, see the
 # repo root .defined.json).
+#
+# Environment:
+#   DEFINED_ENGINE   force a container engine (podman preferred otherwise)
+#   DEFINED_OFFLINE  run with no container network (--network=none): the
+#                    gate's checks need none, and this avoids podman's pasta
+#                    backend, which fails on hosts without the tun module.
+#                    Dependency restore then relies on the named volumes'
+#                    cache; the image must already be present locally.
 
 set -euo pipefail
 
@@ -87,11 +95,15 @@ pick_engine() {
     fi
 }
 
-# Ensure the exact image is present; pull on first use, fail offline.
+# Ensure the exact image is present. Pull on first use; in offline mode never
+# touch the network — the image must already be local.
 ensure_image() {
-    local engine="$1" image="$2"
+    local engine="$1" image="$2" offline="$3"
     if "${engine}" image inspect "${image}" >/dev/null 2>&1; then
         return 0
+    fi
+    if [[ -n "${offline}" ]]; then
+        die "image ${image} not present locally — pre-pull it, or run without DEFINED_OFFLINE"
     fi
     if ! "${engine}" pull "${image}" >/dev/null 2>&1; then
         die "image ${image} unavailable (offline, or pin not yet published?)"
@@ -110,12 +122,13 @@ main() {
         return 2
     fi
 
-    local root engine pin image
+    local root engine pin image offline
     root="$(repo_root)" || return 1
     engine="$(pick_engine)" || return 1
     pin="$(read_pin "${root}")" || return 1
     image="${IMAGE_REPO}:${pin}"
-    ensure_image "${engine}" "${image}" || return 1
+    offline="${DEFINED_OFFLINE:-}"
+    ensure_image "${engine}" "${image}" "${offline}" || return 1
 
     # Decision #3: project deps restore inside the container onto named
     # volumes keyed by pin + repo, so host↔image ABI mismatches never leak in
@@ -137,9 +150,20 @@ main() {
         user_args=(--user "$(id -u):$(id -g)")
     fi
 
+    # Offline mode (DEFINED_OFFLINE=1): no container network. The gate's checks
+    # need none, and --network=none sidesteps podman's pasta backend on hosts
+    # without the tun module.
+    local -a net_args
+    if [[ -n "${offline}" ]]; then
+        net_args=(--network=none)
+    else
+        net_args=()
+    fi
+
     # shellcheck disable=SC2086 # mount_arg is two words by design
     "${engine}" run --rm \
         "${user_args[@]}" \
+        "${net_args[@]}" \
         ${mount_arg} \
         -v "defined-node-${pin}-${repo_hash}:/repo/node_modules" \
         -v "defined-npm-${repo_hash}:/home/node/.npm" \

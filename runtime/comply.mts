@@ -187,9 +187,10 @@ export interface RunGateDeps {
 
 /**
  * Run the full two-verb flow against a repo. `comply` bootstraps → repair
- * (fix) pass → fresh verify (no-fix) pass; `verify` checks bootstrap state
- * then a complete no-fix pass. Green = report's first line is `compliant`,
- * anything else exits 1. All deps are injectable for tests.
+ * (fix) pass → fresh verify (no-fix) pass, then reports bootstrap state
+ * alongside the step findings; `verify` checks bootstrap state then a complete
+ * no-fix pass. Green = report's first line is `compliant`, anything else exits
+ * 1. All deps are injectable for tests.
  */
 export async function runGate({
     verb,
@@ -226,8 +227,14 @@ export async function runGate({
             repoRoot,
             files: filesAfterSetup,
         });
+        // Setup is raises-only: a managed config that differs from the gate
+        // copy is left in place (repair cannot fix it), so report it as
+        // bootstrap drift through the same contract as the step findings —
+        // never a raw stack.
+        const setup = await checkSetupFn({ startDir: repoRoot });
         const lines = reportFn({
             verb: "comply",
+            setup,
             steps: [...verify].map(([id, result]) => ({ id, result })),
         });
         for (const line of lines) {

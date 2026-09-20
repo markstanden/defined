@@ -365,3 +365,37 @@ test("honours DEFINED_ENGINE override", async () => {
         assert.ok(dockerLog.includes("run --rm"));
     });
 });
+
+test("offline mode runs the container with no network", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            env: { DEFINED_OFFLINE: "1" },
+        });
+        assert.equal(r.status, 0);
+        const run = r.log.find((line) => line.startsWith("run --rm"));
+        assert.ok(run, "offline comply must still invoke the engine");
+        assert.match(run!, /--network=none/);
+    });
+});
+
+test("offline mode never pulls: a missing image fails loudly", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["verify"],
+            env: { DEFINED_OFFLINE: "1", FAKE_INSPECT_FAIL: "1" },
+        });
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /not present locally/u);
+        assert.ok(
+            !r.log.some((line) => line.startsWith("pull")),
+            "offline mode must not attempt a network pull",
+        );
+        assert.ok(
+            !r.log.some((line) => line.startsWith("run --rm")),
+            "no run when the image is missing offline",
+        );
+    });
+});

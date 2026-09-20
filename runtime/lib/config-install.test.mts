@@ -94,24 +94,41 @@ test("leaves an identical existing file untouched and reports unchanged", async 
     });
 });
 
-test("throws loudly on a differing existing file and does not overwrite it", async () => {
+test("reports drift on a differing existing file and never overwrites it", async () => {
     await withFixture(async ({ src, repo }) => {
         await seedSource(src, { ".editorconfig": "indent_size = 4\n" });
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
 
-        await assert.rejects(
-            () =>
-                installRootConfigs({
-                    sourceDir: src,
-                    names: [".editorconfig"],
-                    repoRoot: repo,
-                }),
-            /byte-identical/u,
-        );
+        const result = await installRootConfigs({
+            sourceDir: src,
+            names: [".editorconfig"],
+            repoRoot: repo,
+        });
+        assert.deepEqual(result, [{ name: ".editorconfig", status: "drift" }]);
         assert.equal(
             await readFile(join(repo, ".editorconfig"), "utf8"),
             "indent_size = 2\n",
         );
+    });
+});
+
+test("drift does not stop the pass: later configs are still installed", async () => {
+    await withFixture(async ({ src, repo }) => {
+        await seedSource(src, {
+            ".editorconfig": "indent_size = 4\n",
+            ".gitattributes": "* text=auto eol=lf\n",
+        });
+        await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
+
+        const result = await installRootConfigs({
+            sourceDir: src,
+            names: [".editorconfig", ".gitattributes"],
+            repoRoot: repo,
+        });
+        assert.deepEqual(result, [
+            { name: ".editorconfig", status: "drift" },
+            { name: ".gitattributes", status: "installed" },
+        ]);
     });
 });
 
