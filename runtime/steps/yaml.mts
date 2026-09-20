@@ -4,7 +4,9 @@
 //           is prettier's job once the node step lands)
 // Config:   runtime/config/yamllint.yml, passed explicitly (-c) so it
 //           travels with the gate regardless of CWD (prototype lesson:
-//           yamllint resolves config relative to CWD unless told)
+//           yamllint resolves config relative to CWD unless told).
+//           Runs with -s: warnings are failures, so the bar is identical
+//           locally and in CI.
 // Fix:      none; the step is check-only in both modes
 //
 // Detection is data-driven: the orchestrator supplies tracked files. The
@@ -54,6 +56,7 @@ export async function runYamlStep({
     }
 
     // -f parsable gives one finding per line, machine-countable.
+    // -s makes warnings failures too: the same bar locally and in CI.
     // Config resolves from the gate's own directory (lib/paths.mts), never
     // the CWD — consumer repos have no runtime/ of their own.
     const result = runner({
@@ -61,6 +64,7 @@ export async function runYamlStep({
         args: [
             "-c",
             await gateConfigPath({ name: "yamllint.yml" }),
+            "-s",
             "-f",
             "parsable",
             ...files,

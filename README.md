@@ -155,6 +155,7 @@ A full example pipeline is in [`standards/workflows/pipeline.example.yml`](stand
 ## Standards
 
 - [`standards/naming.md`](standards/naming.md) — workflow filename grammar
+- [`standards/yaml.md`](standards/yaml.md) — YAML lint/format behaviour (`yamllint -s` + prettier)
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)
 - [`practices/architecture.md`](practices/architecture.md) — delivery/structure/code preferences
