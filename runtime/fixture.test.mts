@@ -167,8 +167,9 @@ test(
             });
             assert.equal(comply.status, 1, "workflow is still check-only-red");
 
-            // Semantic repair: give the workflow job a runs-on. The fix must
-            // also be prettier-formatted (4-space indent, per the .editorconfig
+            // Semantic repair: give the workflow a job-level permissions block
+            // (zizmor: excessive-permissions) and a runs-on. The fix must also
+            // be prettier-formatted (4-space indent, per the .editorconfig
             // comply installed), or the node step stays red.
             const workflowPath = join(root, ".github/workflows/ci.yml");
             const repaired = [
@@ -177,6 +178,8 @@ test(
                 "jobs:",
                 "    build:",
                 "        runs-on: ubuntu-latest",
+                "        permissions:",
+                "            contents: read",
                 "        steps:",
                 "            - run: echo hi",
                 "",
