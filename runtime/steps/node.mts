@@ -3,10 +3,12 @@
 // Tools:    prettier
 // Config:   runtime/config/prettier.config.mjs (pure defaults) + prettierignore,
 //           passed explicitly (--config/--ignore-path) so they travel with the
-//           gate. Indentation comes from the project's .editorconfig, which
-//           prettier reads natively and gives higher priority than --config
-//           (verified 2026-08-30) — so gate setup installing .editorconfig
-//           makes prettier, shfmt and IDEs agree from one source.
+//           gate. A consumer-owned prettier config at the repo root wins when
+//           present (see prettierConfigArgs). Indentation comes from the
+//           project's .editorconfig, which prettier reads natively and gives
+//           higher priority than --config (verified 2026-08-30) — so gate setup
+//           installing .editorconfig makes prettier, shfmt and IDEs agree from
+//           one source, and a consumer config cannot break the indent invariant.
 //           NOTE (2026-08-30): prettier resolves ignore patterns relative to
 //           the ignore FILE, not CWD (getRelativePath(file, ignoreFile)) — a
 //           travelling/temp ignore must live at the repo root for
@@ -138,6 +140,52 @@ export async function prettierIgnoreArgs({
 }
 
 /**
+ * Prettier config file names a consumer may own at the repo root, in prettier's
+ * own resolution order. The gate's travelling config is pure defaults
+ * (`export default {}`), so a consumer config replaces rather than layers —
+ * which is equivalent to layering over an empty base.
+ */
+export const CONSUMER_PRETTIER_CONFIGS = [
+    "prettier.config.mjs",
+    "prettier.config.js",
+    "prettier.config.cjs",
+    "prettier.config.mts",
+    "prettier.config.cts",
+    "prettier.config.ts",
+    ".prettierrc",
+    ".prettierrc.json",
+    ".prettierrc.json5",
+    ".prettierrc.yml",
+    ".prettierrc.yaml",
+    ".prettierrc.js",
+    ".prettierrc.mjs",
+    ".prettierrc.cjs",
+    ".prettierrc.ts",
+] as const;
+
+/**
+ * Effective prettier config args. The gate's own config travels with the image
+ * so a repo with no preferences still formats to house defaults; a
+ * consumer-owned config at the repo root wins when present, so a project can
+ * express its own Prettier preferences without forking the gate. Indentation
+ * stays owned by `.editorconfig` (installed by bootstrap): prettier gives
+ * `.editorconfig` higher priority than `--config`, so the two cannot disagree.
+ */
+export async function prettierConfigArgs({
+    repoRoot,
+}: {
+    repoRoot: string;
+}): Promise<string[]> {
+    for (const name of CONSUMER_PRETTIER_CONFIGS) {
+        const candidate = join(repoRoot, name);
+        if (existsSync(candidate)) {
+            return ["--config", candidate];
+        }
+    }
+    return ["--config", await gateConfigPath({ name: "prettier.config.mjs" })];
+}
+
+/**
  * Run prettier over the git-scoped tracked files prettier can parse when the
  * project is a Node project or has markdown. Returns skip with a notice when
  * neither exists, or when no tracked file is prettier-parseable; fail naming
@@ -169,10 +217,8 @@ export async function runNodeStep({
         });
     }
 
-    const config = await gateConfigPath({ name: "prettier.config.mjs" });
     const sharedArgs = [
-        "--config",
-        config,
+        ...(await prettierConfigArgs({ repoRoot: ctx.repoRoot })),
         ...(await prettierIgnoreArgs({ repoRoot: ctx.repoRoot })),
     ];
 

@@ -105,6 +105,12 @@ the image.
    from the image and must stay byte-identical — any difference is drift and
    fails. Use `comply` every time — it is the whole local loop; `verify` is
    reserved for CI.
+
+    Prettier runs to house defaults; a consumer-owned `prettier.config.mjs` (or
+    any `.prettierrc*` / `prettier.config.*` file) at the repo root is honoured
+    instead, so project preferences need no fork. Indentation stays owned by
+    `.editorconfig`, which prettier gives higher priority than any config.
+
 4. **Gate in CI** — call the reusable `defined--verify.yml` workflow, pinned
    to the same git sha as the pin:
 
