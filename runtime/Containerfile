@@ -70,9 +70,13 @@ RUN set -eux; \
 RUN git config --system --add safe.directory /repo
 
 # Dotnet SDK: Debian main does not ship dotnet, so add Microsoft's Debian-13
-# apt feed (x64 + arm64) and install the SDK via apt. The pinned version is
-# asserted at build time like the other tools, so feed drift fails the build.
+# apt feed (x64 + arm64) and install the SDK via apt. Unlike the Debian main
+# tools, `dotnet-sdk-10.0` is a rolling package, so the exact build is pinned
+# (`${DOTNET_SDK_VERSION}-${DOTNET_SDK_DEB_REVISION}`) rather than left to the
+# feed's newest patch. The result is asserted at build time like the other
+# tools, so a feed that no longer carries the pin fails the build.
 RUN set -eux; \
+    . /usr/local/share/defined/tool-versions.env; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         wget \
@@ -84,10 +88,9 @@ RUN set -eux; \
     rm /tmp/packages-microsoft-prod.deb; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        dotnet-sdk-10.0 \
+        "dotnet-sdk-10.0=${DOTNET_SDK_VERSION}-${DOTNET_SDK_DEB_REVISION}" \
     ; \
     rm -rf /var/lib/apt/lists/*; \
-    . /usr/local/share/defined/tool-versions.env; \
     test "$(dotnet --version)" = "${DOTNET_SDK_VERSION}"; \
     dotnet --info >/dev/null
 
