@@ -88,12 +88,13 @@ something gets it excluded everywhere; committed content is always gated.
   `verify` — then enforce the configured line/branch/function minimums (default
   80% line) from the resulting lcov / Cobertura report. No committed or staged
   report is ever required: `verify` generates and checks one deterministically.
-- The `dotnet` family must write `obj/`/`bin/`/`TestResults/`, which a read-only
-  `verify` (local `defined verify`, CI) cannot do in place. No-fix therefore
-  runs `dotnet` and `dotnet-coverage` against a **scratch copy of the repo's git
-  scope under `/tmp`** (`runtime/lib/scratch.mts`) — one copy shared by both
-  steps, created only when dotnet activates, cleaned after the pass. Fix mode
-  builds in the repo as before. The repo mount is never written by either mode.
+- Coverage and build steps must write into the repo (`coverage/lcov.info` for
+  node, `obj/`/`bin/`/`TestResults/` for dotnet), which a read-only `verify`
+  (local `defined verify`, CI) cannot do in place. No-fix therefore runs
+  `node-coverage`, `dotnet` and `dotnet-coverage` against a **scratch copy of the
+  repo's git scope under `/tmp`** (`runtime/lib/scratch.mts`) — one copy shared
+  across those steps, created on first use, cleaned after the pass. Fix mode
+  works in the repo as before. The repo mount is never written by either mode.
 - `smoke` always probes the container's git.
 - Missing applicable tools fail loudly pointing at the Containerfile — there is
   no optional tier.
@@ -187,8 +188,9 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
 
 - Absent `coverage` section (or absent ecosystem entry) = that coverage step
   skips.
-- `command` is the shell command that generates the coverage report; it runs
-  in `fix` mode, while `no-fix` mode only parses an existing report.
+- `command` is the shell command that generates the coverage report; it runs in
+  `fix` mode in the repo, and in `no-fix` mode against the scratch copy of the
+  git scope (so a read-only `verify` can still generate and check a report).
 - `minimums` per metric are optional; an omitted metric is not checked. When
   the `minimums` key is absent, the step defaults to 80% line coverage.
 - The gate parses `node` reports as lcov (`coverage/lcov.info`) and `dotnet`
