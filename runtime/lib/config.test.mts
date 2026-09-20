@@ -138,6 +138,113 @@ test("loadConfig rejects invalid version values", async () => {
     }
 });
 
+test("loadConfig parses the flat node checks form", async () => {
+    const dir = await makeTempDir("quality-config-");
+    const cfg = {
+        node: {
+            install: "npm ci",
+            checks: [
+                { name: "lint", command: "eslint ." },
+                {
+                    name: "test",
+                    command: "vitest run",
+                    fix: "vitest run --update",
+                },
+            ],
+        },
+    };
+    await writeConfig(dir, JSON.stringify(cfg));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.node?.packages.length, 1);
+    const pkg = config.node!.packages[0]!;
+    assert.equal(pkg.dir, undefined);
+    assert.equal(pkg.install, "npm ci");
+    assert.deepEqual(pkg.checks, [
+        { name: "lint", command: "eslint .", fix: undefined },
+        { name: "test", command: "vitest run", fix: "vitest run --update" },
+    ]);
+});
+
+test("loadConfig parses a multi-package node config and normalises dirs", async () => {
+    const dir = await makeTempDir("quality-config-");
+    const cfg = {
+        node: {
+            packages: [
+                {
+                    dir: "packages/a/",
+                    install: false,
+                    checks: [{ name: "a", command: "eslint ." }],
+                },
+                {
+                    dir: ".",
+                    checks: [{ name: "root", command: "tsc --noEmit" }],
+                },
+            ],
+        },
+    };
+    await writeConfig(dir, JSON.stringify(cfg));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.node?.packages[0]?.dir, "packages/a");
+    assert.equal(config.node?.packages[0]?.install, false);
+    assert.equal(config.node?.packages[1]?.dir, "");
+});
+
+test("loadConfig treats a node key without checks as absent", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ node: {} }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.node, undefined);
+});
+
+test("loadConfig rejects malformed node configs", async () => {
+    const cases: Array<{ config: unknown; re: RegExp }> = [
+        { config: { node: "lint" }, re: /"node" must be an object/u },
+        {
+            config: { node: { packages: [] } },
+            re: /"node\.packages" must be a non-empty array/u,
+        },
+        {
+            config: { node: { packages: [], checks: [] } },
+            re: /cannot set both "packages" and "checks"/u,
+        },
+        {
+            config: { node: { checks: [] } },
+            re: /"node\.checks" must be a non-empty array/u,
+        },
+        {
+            config: { node: { checks: [{ name: "", command: "x" }] } },
+            re: /"node\.checks\[0\]\.name" must be a non-empty string/u,
+        },
+        {
+            config: { node: { checks: [{ name: "x", command: " " }] } },
+            re: /"node\.checks\[0\]\.command" must be a non-empty string/u,
+        },
+        {
+            config: { node: { checks: [{ name: "x", command: "y", fix: 1 }] } },
+            re: /"node\.checks\[0\]\.fix" must be a non-empty string/u,
+        },
+        {
+            config: {
+                node: { install: 7, checks: [{ name: "x", command: "y" }] },
+            },
+            re: /"node\.install" must be a non-empty string or false/u,
+        },
+        {
+            config: {
+                node: { typo: true, checks: [{ name: "x", command: "y" }] },
+            },
+            re: /unknown node key "typo"/u,
+        },
+    ];
+    for (const { config, re } of cases) {
+        await rejectsLoad({
+            dir: await makeTempDir("quality-config-"),
+            config: config as Record<string, unknown>,
+            re,
+        });
+    }
+});
+
 test("loadConfig accepts a config with no version and keeps coverage", async () => {
     const dir = await makeTempDir("quality-config-");
     const cfg = {
@@ -199,6 +306,53 @@ test("loadConfig rejects unknown minimum metric", async () => {
         () => loadConfig({ repoRoot: dir }),
         /unknown minimum metric "statements"/u,
     );
+});
+
+test("loadConfig parses naming rules with an optional fix", async () => {
+    const dir = await makeTempDir("quality-config-");
+    const cfg = {
+        naming: { command: "check-names.sh", fix: "fix-names.sh" },
+    };
+    await writeConfig(dir, JSON.stringify(cfg));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.naming?.command, "check-names.sh");
+    assert.equal(config.naming?.fix, "fix-names.sh");
+});
+
+test("loadConfig treats a naming key without rules as absent", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ naming: {} }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.naming, undefined);
+});
+
+test("loadConfig rejects malformed naming configs", async () => {
+    const cases: Array<{ config: unknown; re: RegExp }> = [
+        { config: { naming: "check" }, re: /"naming" must be an object/u },
+        {
+            config: { naming: { command: " " } },
+            re: /"naming\.command" must be a non-empty string/u,
+        },
+        {
+            config: { naming: { command: "check", fix: 7 } },
+            re: /"naming\.fix" must be a non-empty string/u,
+        },
+        {
+            config: { naming: { fix: "fix-names.sh" } },
+            re: /"naming\.fix" requires "naming\.command"/u,
+        },
+        {
+            config: { naming: { command: "check", typo: true } },
+            re: /unknown naming key "typo"/u,
+        },
+    ];
+    for (const { config, re } of cases) {
+        await rejectsLoad({
+            dir: await makeTempDir("quality-config-"),
+            config: config as Record<string, unknown>,
+            re,
+        });
+    }
 });
 
 test("loadConfig accepts minimum at the boundary of 0 and 100", async () => {

@@ -25,7 +25,7 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
-import { runCoverageCommand } from "../lib/coverage.mts";
+import { runScopedCommand } from "../lib/coverage.mts";
 import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import { loadConfig, type CoverageMinimums } from "../lib/config.mts";
@@ -180,17 +180,18 @@ export async function runNodeCoverageStep({
     // Read-only verify cannot write a report into /repo, so no-fix runs the
     // consumer's command against a scratch copy of the git scope (shared with
     // the dotnet steps via ctx.scratch) and validates the scratch report.
-    const { workingRoot, failure } = runCoverageCommand({
+    const { workingRoot, failure } = runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
         trackedFiles,
         command: coverageConfig.command,
-        label: "node-coverage",
         runner,
     });
     if (failure !== null) {
-        return failure;
+        return failed({
+            notice: `node-coverage: coverage command failed: ${failure}`,
+        });
     }
 
     const lcovPath = join(workingRoot, LCOV_PATH);

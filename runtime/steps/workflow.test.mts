@@ -3,16 +3,26 @@
 // Run: node --test steps/workflow.test.mts
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { afterEach, test } from "node:test";
 
 import {
     buildGitleaksConfig,
     escapeRegexPath,
     filterWorkflowFiles,
+    gitleaksIgnoreArgs,
     parseIgnoredPaths,
     runWorkflowStep,
 } from "./workflow.mts";
-import { baseCtx, fakeRunner } from "../test-helpers.mts";
+import {
+    baseCtx,
+    cleanupTempDirs,
+    fakeRunner,
+    makeTempDir,
+} from "../test-helpers.mts";
+
+afterEach(cleanupTempDirs);
 
 test("filterWorkflowFiles finds .github/workflows/*.yml and dependabot.yml", () => {
     assert.deepEqual(
@@ -135,6 +145,35 @@ test("gitleaks scans repo scope, not just workflow files", async () => {
     const gitleaksCall = calls.find((c) => c[0] === "gitleaks")!;
     assert.deepEqual(gitleaksCall.slice(1, 3), ["dir", "--config"]);
     assert.equal(gitleaksCall[4], ".");
+});
+
+test("runWorkflowStep pins the consumer .gitleaksignore as an explicit ignore path", async () => {
+    const { runner, calls } = fakeRunner({}, true);
+    await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+        existsSyncFn: () => true,
+    });
+    const gitleaksCall = calls.find((c) => c[0] === "gitleaks")!;
+    assert.deepEqual(gitleaksCall.slice(4, 6), [
+        "--gitleaks-ignore-path",
+        baseCtx.repoRoot,
+    ]);
+    // The scan target stays last; the ignore path is an added flag.
+    assert.equal(gitleaksCall[6], ".");
+});
+
+test("gitleaksIgnoreArgs pins the repo root only when the baseline exists", async () => {
+    const bare = await makeTempDir("quality-gitleaks-bare-");
+    assert.deepEqual(gitleaksIgnoreArgs({ repoRoot: bare }), []);
+
+    const withFile = await makeTempDir("quality-gitleaks-ignore-");
+    await writeFile(join(withFile, ".gitleaksignore"), "a.md:rule:1\n");
+    assert.deepEqual(gitleaksIgnoreArgs({ repoRoot: withFile }), [
+        "--gitleaks-ignore-path",
+        withFile,
+    ]);
 });
 
 test("parseIgnoredPaths keeps ignored dirs and files, drops other entries", () => {

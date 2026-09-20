@@ -23,12 +23,15 @@ export function run({
     cmd,
     args = [],
     cwd,
+    env,
 }: {
     cmd: string;
     args?: string[];
     cwd?: string;
+    /** Full child environment; omitted means inherit the parent's. */
+    env?: NodeJS.ProcessEnv;
 }): CommandResult {
-    const result = spawnSync(cmd, args, { encoding: "utf8", cwd });
+    const result = spawnSync(cmd, args, { encoding: "utf8", cwd, env });
     if (result.error) {
         const reason =
             (result.error as NodeJS.ErrnoException).code === "ENOENT"

@@ -171,7 +171,10 @@ test(
             // (zizmor: excessive-permissions) and a runs-on. The fix must also
             // be prettier-formatted (4-space indent, per the .editorconfig
             // comply installed), or the node step stays red.
-            const workflowPath = join(root, ".github/workflows/ci.yml");
+            const workflowPath = join(
+                root,
+                ".github/workflows/fixture--build.yml",
+            );
             const repaired = [
                 "name: CI",
                 "on: push",

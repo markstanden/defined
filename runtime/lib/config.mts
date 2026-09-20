@@ -2,7 +2,8 @@
 //
 // Reads the consumer's .defined.json at the repo root. The file is the single
 // source of truth: it holds the optional immutable image pin (replacing the
-// old .defined-version) and optional per-ecosystem coverage configuration.
+// old .defined-version), optional per-ecosystem coverage configuration, and
+// optional consumer Node project checks ("node" key).
 //
 // Version contract: an omitted `version` means "use the current published
 // default image" (the launcher resolves it); a present `version` is an
@@ -38,6 +39,42 @@ export interface CoverageConfig {
     minimums?: CoverageMinimums;
 }
 
+/** One consumer-declared Node check (lint/typecheck/test/...). */
+export interface NodeCheck {
+    /** Stable label used in gate output. */
+    name: string;
+    /** Shell command to run; resolved against the package's local binaries. */
+    command: string;
+    /** Optional deterministic autofix run before `command` in fix mode only. */
+    fix?: string;
+}
+
+/** A Node package the checks run against. */
+export interface NodePackageConfig {
+    /**
+     * Package directory relative to the repo root; `""` is the repo root.
+     * Omitted means "the sole tracked package.json", whatever its depth.
+     */
+    dir?: string;
+    /** Dependency-restore command; `false` skips restore; absent auto-detects. */
+    install?: string | false;
+    /** Checks to run, in order. */
+    checks: NodeCheck[];
+}
+
+/** Node project-checks configuration (`.defined.json` `node` key). */
+export interface NodeChecksConfig {
+    packages: NodePackageConfig[];
+}
+
+/** Consumer-supplied naming rules (`.defined.json` `naming` key). */
+export interface NamingConfig {
+    /** Command that checks naming over the repo's git scope. */
+    command?: string;
+    /** Optional deterministic autofix run before `command` in fix mode only. */
+    fix?: string;
+}
+
 export interface DefinedConfig {
     /**
      * Immutable image tag (7–40 hex chars). Empty when omitted — the launcher
@@ -49,6 +86,10 @@ export interface DefinedConfig {
         node?: CoverageConfig;
         dotnet?: CoverageConfig;
     };
+    /** Node project checks. Absent key = the node-checks step skips. */
+    node?: NodeChecksConfig;
+    /** Consumer naming rules. Absent key = no consumer rules. */
+    naming?: NamingConfig;
 }
 
 /** Empty config: all coverage steps skip, version is empty. */
@@ -133,6 +174,181 @@ function validateCoverage(raw: unknown): DefinedConfig["coverage"] {
     return result;
 }
 
+const NODE_KEYS = new Set(["packages", "checks", "dir", "install"]);
+const NODE_PACKAGE_KEYS = new Set(["dir", "install", "checks"]);
+const NODE_CHECK_KEYS = new Set(["name", "command", "fix"]);
+
+function rejectUnknownKeys(
+    entry: Record<string, unknown>,
+    allowed: Set<string>,
+    where: string,
+): void {
+    for (const key of Object.keys(entry)) {
+        if (!allowed.has(key)) {
+            throw new Error(`.defined.json: unknown ${where} key "${key}"`);
+        }
+    }
+}
+
+function validateNodeCheck(where: string, raw: unknown): NodeCheck {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new Error(`.defined.json: "${where}" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, NODE_CHECK_KEYS, where);
+    if (typeof entry.name !== "string" || entry.name.trim() === "") {
+        throw new Error(
+            `.defined.json: "${where}.name" must be a non-empty string`,
+        );
+    }
+    if (typeof entry.command !== "string" || entry.command.trim() === "") {
+        throw new Error(
+            `.defined.json: "${where}.command" must be a non-empty string`,
+        );
+    }
+    if (
+        entry.fix !== undefined &&
+        (typeof entry.fix !== "string" || entry.fix.trim() === "")
+    ) {
+        throw new Error(
+            `.defined.json: "${where}.fix" must be a non-empty string`,
+        );
+    }
+    return {
+        name: entry.name,
+        command: entry.command,
+        fix: entry.fix as string | undefined,
+    };
+}
+
+function validateNodePackage(raw: unknown, where: string): NodePackageConfig {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new Error(`.defined.json: "${where}" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, NODE_PACKAGE_KEYS, where);
+
+    let dir: string | undefined;
+    if (entry.dir !== undefined) {
+        if (typeof entry.dir !== "string") {
+            throw new Error(`.defined.json: "${where}.dir" must be a string`);
+        }
+        const normalised = entry.dir.replace(/\/+$/u, "").replace(/^\.\//u, "");
+        dir = normalised === "." ? "" : normalised;
+    }
+
+    let install: string | false | undefined;
+    if (entry.install !== undefined) {
+        if (entry.install === false) {
+            install = false;
+        } else if (
+            typeof entry.install === "string" &&
+            entry.install.trim() !== ""
+        ) {
+            install = entry.install;
+        } else {
+            throw new Error(
+                `.defined.json: "${where}.install" must be a non-empty string or false`,
+            );
+        }
+    }
+
+    if (!Array.isArray(entry.checks) || entry.checks.length === 0) {
+        throw new Error(
+            `.defined.json: "${where}.checks" must be a non-empty array`,
+        );
+    }
+
+    return {
+        dir,
+        install,
+        checks: entry.checks.map((check, index) =>
+            validateNodeCheck(`${where}.checks[${index}]`, check),
+        ),
+    };
+}
+
+function validateNode(raw: unknown): NodeChecksConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error(`.defined.json: "node" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, NODE_KEYS, "node");
+    if (entry.packages !== undefined && entry.checks !== undefined) {
+        throw new Error(
+            `.defined.json: "node" cannot set both "packages" and "checks"`,
+        );
+    }
+    if (entry.packages !== undefined) {
+        if (!Array.isArray(entry.packages) || entry.packages.length === 0) {
+            throw new Error(
+                `.defined.json: "node.packages" must be a non-empty array`,
+            );
+        }
+        return {
+            packages: entry.packages.map((pkg, index) =>
+                validateNodePackage(pkg, `node.packages[${index}]`),
+            ),
+        };
+    }
+    if (entry.checks !== undefined) {
+        // Flat form: one package, whose directory may be inferred from the
+        // sole tracked package.json when `dir` is omitted.
+        return {
+            packages: [
+                validateNodePackage(
+                    {
+                        dir: entry.dir,
+                        install: entry.install,
+                        checks: entry.checks,
+                    },
+                    "node",
+                ),
+            ],
+        };
+    }
+    // `node` present but no checks declared: nothing to run, so skip cleanly.
+    return undefined;
+}
+
+const NAMING_KEYS = new Set(["command", "fix"]);
+
+function validateNaming(raw: unknown): NamingConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error(`.defined.json: "naming" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, NAMING_KEYS, "naming");
+    const result: NamingConfig = {};
+    for (const key of ["command", "fix"] as const) {
+        const value = entry[key];
+        if (value !== undefined) {
+            if (typeof value !== "string" || value.trim() === "") {
+                throw new Error(
+                    `.defined.json: "naming.${key}" must be a non-empty string`,
+                );
+            }
+            result[key] = value;
+        }
+    }
+    // An empty `naming` object declares nothing: treat it as absent.
+    if (Object.keys(result).length === 0) {
+        return undefined;
+    }
+    if (result.fix !== undefined && result.command === undefined) {
+        throw new Error(
+            `.defined.json: "naming.fix" requires "naming.command"`,
+        );
+    }
+    return result;
+}
+
 function validateParsed(raw: unknown): DefinedConfig {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new Error(`.defined.json: must be a JSON object`);
@@ -143,7 +359,9 @@ function validateParsed(raw: unknown): DefinedConfig {
     const version =
         obj.version === undefined ? "" : validateVersion(obj.version);
     const coverage = validateCoverage(obj.coverage);
-    return { version, coverage };
+    const node = validateNode(obj.node);
+    const naming = validateNaming(obj.naming);
+    return { version, coverage, node, naming };
 }
 
 /**

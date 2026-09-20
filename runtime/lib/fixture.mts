@@ -26,8 +26,10 @@ export function brokenFixtureFiles(): Record<string, string> {
         // then yamllint passes.
         "broken.yml": "key:\n  nested: value  \n",
 
-        // workflow: actionlint finding — check-only, the tripwire that must STAY red.
-        ".github/workflows/ci.yml":
+        // workflow: actionlint finding — check-only, the tripwire that must STAY
+        // red. The filename follows the naming grammar so the always-on naming
+        // step stays green; only the workflow finding gates.
+        ".github/workflows/fixture--build.yml":
             "name: CI\non: push\njobs:\n  build:\n    steps:\n      - run: echo hi\n",
 
         // tofu: fmt drift (misaligned closing brace); tofu fmt repairs. Content is
