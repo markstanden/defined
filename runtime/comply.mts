@@ -206,11 +206,11 @@ export async function runGate({
 
     if (verb === "comply") {
         await runSetupFn({ startDir: repoRoot });
-        // Bootstrap writes .editorconfig, Directory.Build.props, AGENTS.md and
-        // a pinned .defined.json — files the pre-bootstrap snapshot (taken in
-        // main()) cannot contain. Re-fetch so both passes judge the repo as
-        // it exists after setup; otherwise the node step's prettier file list
-        // never sees the gate's own seeded files.
+        // Bootstrap writes .editorconfig, Directory.Build.props, .gitattributes,
+        // AGENTS.md and a pinned .defined.json — files the pre-bootstrap
+        // snapshot (taken in main()) cannot contain. Re-fetch so both passes
+        // judge the repo as it exists after setup; otherwise the node step's
+        // prettier file list never sees the gate's own seeded files.
         const filesAfterSetup = trackedFilesFn({ repoRoot });
         await runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup });
         const verify = await runPassFn({

@@ -30,6 +30,11 @@ test("runSetup installs root configs and seeds the AGENTS.md managed block", asy
                 await readFile(join(repo, "Directory.Build.props"), "utf8")
             ).includes("<Project>"),
         );
+        assert.ok(
+            (await readFile(join(repo, ".gitattributes"), "utf8")).includes(
+                "eol=lf",
+            ),
+        );
         const agents = await readFile(join(repo, "AGENTS.md"), "utf8");
         assert.ok(agents.includes(BLOCK_START));
     } finally {
@@ -119,7 +124,7 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
         const before = await checkSetup({ startDir: repo });
         assert.deepEqual(
             before.configs.map((c) => c.status),
-            ["absent", "absent"],
+            ["absent", "absent", "absent"],
         );
         assert.equal(before.agents, "absent");
 
@@ -127,7 +132,7 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
         const after = await checkSetup({ startDir: repo });
         assert.deepEqual(
             after.configs.map((c) => c.status),
-            ["present", "present"],
+            ["present", "present", "present"],
         );
         assert.equal(after.agents, "present");
     } finally {

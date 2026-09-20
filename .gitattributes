@@ -1,0 +1,21 @@
+# Checkout / archive: LF only (matches .editorconfig end_of_line = lf).
+# whitespace=… flags problems in `git diff --check` / `git apply` (does not
+# auto-trim; EditorConfig + Prettier / shfmt own that).
+
+* text=auto eol=lf whitespace=trailing-space,space-before-tab,cr-at-eol
+
+# Binary — never treat as text (none required today; keep for future assets).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.zip binary
+*.gz binary
+*.7z binary
+*.pdf binary

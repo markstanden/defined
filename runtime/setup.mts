@@ -35,8 +35,14 @@ import { deriveRepoRoot } from "../lib/paths.mts";
 
 // Root configs shared with every consumer repo. standards/ is the single
 // source of truth (decision #19): these files live there and are installed
-// from it — no copied config/root/ that can drift.
-const ROOT_CONFIG_NAMES = [".editorconfig", "Directory.Build.props"] as const;
+// from it — no copied config/root/ that can drift. `.gitattributes` carries
+// the same LF/whitespace contract as .editorconfig's end_of_line, so checkout
+// line endings and `git diff --check` agree locally and in CI.
+const ROOT_CONFIG_NAMES = [
+    ".editorconfig",
+    "Directory.Build.props",
+    ".gitattributes",
+] as const;
 
 const CONFIG_FILE = ".defined.json";
 

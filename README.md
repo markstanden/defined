@@ -99,12 +99,12 @@ the image.
       Don't duplicate them in XML (e.g. a coverlet `Threshold`): the gate is
       the single authority.
 
-3. **Gate locally** — run `defined comply`. It bootstraps `.editorconfig` and
-   `Directory.Build.props` into the repo root and seeds the AGENTS.md managed
-   block, repairs safe findings, then re-verifies. Managed files are installed
-   from the image and must stay byte-identical — any difference is drift and
-   fails. Use `comply` every time — it is the whole local loop; `verify` is
-   reserved for CI.
+3. **Gate locally** — run `defined comply`. It bootstraps `.editorconfig`,
+   `Directory.Build.props` and `.gitattributes` into the repo root and seeds
+   the AGENTS.md managed block, repairs safe findings, then re-verifies.
+   Managed files are installed from the image and must stay byte-identical —
+   any difference is drift and fails. Use `comply` every time — it is the whole
+   local loop; `verify` is reserved for CI.
 
     Prettier runs to house defaults; a consumer-owned `prettier.config.mjs` (or
     any `.prettierrc*` / `prettier.config.*` file) at the repo root is honoured
@@ -167,6 +167,7 @@ A full example pipeline is in [`standards/workflows/pipeline.example.yml`](stand
 - [`practices/architecture.md`](practices/architecture.md) — delivery/structure/code preferences
 - [`standards/.editorconfig`](standards/.editorconfig) — editor + dotnet code style (installed by gate setup)
 - [`standards/Directory.Build.props`](standards/Directory.Build.props) — common MSBuild properties (installed by gate setup)
+- [`standards/.gitattributes`](standards/.gitattributes) — LF/whitespace checkout contract (installed by gate setup)
 - [`standards/githooks/pre-commit`](standards/githooks/pre-commit) — optional reference commit hook that runs `defined verify` (opt-in, repo-owned)
 
 ## Project structure
