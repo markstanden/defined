@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-08-31 | scope=AGENTS.md -->
+<!-- update: agent=opencode | date=2026-09-20 | scope=AGENTS.md -->
 
 # AGENTS.md
 
@@ -32,15 +32,17 @@ end-to-end gate.
   deliberate: it is a template for consumer pipelines, not a real workflow
   here. The `.yml` extension means the gate's `yaml` step lints it, so the
   template stays valid YAML.
-- `standards/.editorconfig` and `standards/Directory.Build.props` are the
-  single source of truth for shared root configs — `comply`'s bootstrap
-  installs them into consumer repo roots from the baked image. The repo's own
-  root `.editorconfig` and `Directory.Build.props` are copies of the
-  `standards/` versions (self-hosted: `comply` on this repo bootstraps nothing
-  beyond the AGENTS block but runs the coverage gate on its own tests). Managed
-  files are compared byte-for-byte: any
-  difference is drift and fails — there is no semantic merge. It drives prettier
-  (pure-defaults config reads it natively), shfmt and IDEs from one source.
+- `standards/.editorconfig`, `standards/Directory.Build.props` and
+  `standards/.gitattributes` are the single source of truth for shared root
+  configs — `comply`'s bootstrap installs them into consumer repo roots from
+  the baked image. The repo's own root `.editorconfig`,
+  `Directory.Build.props` and `.gitattributes` are copies of the `standards/`
+  versions (self-hosted: `comply` on this repo bootstraps nothing beyond the
+  AGENTS block but runs the coverage gate on its own tests). Managed files are
+  compared byte-for-byte: any difference is drift and fails — there is no
+  semantic merge. `.editorconfig` drives prettier (pure-defaults config reads it
+  natively), shfmt and IDEs from one source; `.gitattributes` pins the matching
+  LF/whitespace checkout contract.
 
 ## The gate: how it works
 
