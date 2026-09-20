@@ -31,6 +31,12 @@ pinned in the repo's `.defined.json` — so local green = merge green: CI runs
 that same image as long as the workflow ref and the `.defined.json` pin
 match (keep them in step).
 
+Set `DEFINED_ENGINE` to force an engine, and `DEFINED_OFFLINE=1` to run the
+container with no network (`--network=none`). The gate's checks need no network,
+and offline mode avoids podman's pasta backend, which fails on hosts without the
+`tun` kernel module; dependency restore then uses the named volumes' cache, so
+the image must already be present locally.
+
 The gate detects the stack (steps run in order `naming → node → node-checks →
 node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow →
 tofu`), skips cleanly when an ecosystem is absent, and fails loudly when a

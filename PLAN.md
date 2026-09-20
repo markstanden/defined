@@ -309,9 +309,12 @@ workflow-filename grammar and runs consumer-declared rules), #26 (general naming
 doctrine lives in `standards/naming.md` + `standards/naming/`), #27
 (consumer-owned prettier config wins), #28 (`.gitattributes` is managed).
 
-Not yet filed:
+Both previously unfiled items are now delivered:
 
-- Launcher offline mode — the gate needs no network, but `pasta` fails on hosts
-  without the `tun` module.
-- `comply` should fail with the documented report contract, not a raw Node
-  stack, when a managed file drifts.
+- Launcher offline mode — `DEFINED_OFFLINE=1` runs the container with
+  `--network=none`, avoiding podman's pasta backend on hosts without the `tun`
+  module. The image must already be present locally; dependency restore then
+  uses the named volumes' cache.
+- Managed-file drift now fails `comply` through the report contract
+  (`not compliant after repair` + `fail bootstrap — …`), never a raw Node
+  stack.

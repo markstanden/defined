@@ -88,6 +88,7 @@ test("runGate comply exits cleanly on a green pass", async () => {
         files: [],
         deps: {
             runSetupFn: async () => undefined,
+            checkSetupFn: async () => cleanSetup(),
             trackedFilesFn: () => [],
             runPassFn: async () => allGreen(),
             printFn: (line) => printed.push(line),
@@ -107,6 +108,7 @@ test("runGate comply exits 1 when a finding survives repair", async () => {
         files: [],
         deps: {
             runSetupFn: async () => undefined,
+            checkSetupFn: async () => cleanSetup(),
             trackedFilesFn: () => [],
             runPassFn: async () => oneFail(),
             printFn: (line) => printed.push(line),
@@ -114,6 +116,35 @@ test("runGate comply exits 1 when a finding survives repair", async () => {
         },
     });
     assert.equal(printed[0], "not compliant after repair");
+    assert.deepEqual(exits, [1]);
+});
+
+test("runGate comply reports bootstrap drift through the contract", async () => {
+    const printed: string[] = [];
+    const exits: number[] = [];
+    await runGate({
+        verb: "comply",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            runSetupFn: async () => undefined,
+            checkSetupFn: async () => ({
+                configs: [
+                    { name: ".editorconfig", status: "drift" },
+                    { name: "Directory.Build.props", status: "present" },
+                ],
+                agents: "present",
+            }),
+            trackedFilesFn: () => [],
+            runPassFn: async () => allGreen(),
+            printFn: (line) => printed.push(line),
+            exitFn: (code) => exits.push(code),
+        },
+    });
+    assert.deepEqual(printed, [
+        "not compliant after repair",
+        "fail bootstrap — .editorconfig: differs from gate copy",
+    ]);
     assert.deepEqual(exits, [1]);
 });
 
@@ -125,6 +156,7 @@ test("runGate comply re-fetches tracked files after bootstrap", async () => {
         files: ["pre-setup.txt"],
         deps: {
             runSetupFn: async () => undefined,
+            checkSetupFn: async () => cleanSetup(),
             trackedFilesFn: () => ["post-setup.txt"],
             runPassFn: async ({ files }) => {
                 passedFiles.push(files);
