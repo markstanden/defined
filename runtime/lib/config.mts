@@ -190,6 +190,15 @@ function rejectUnknownKeys(
     }
 }
 
+/** Normalise a declared package dir: strip a leading "./" and trailing slashes. */
+function normaliseDir(dir: string): string {
+    let result = dir.startsWith("./") ? dir.slice(2) : dir;
+    while (result.endsWith("/")) {
+        result = result.slice(0, -1);
+    }
+    return result;
+}
+
 function validateNodeCheck(where: string, raw: unknown): NodeCheck {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new Error(`.defined.json: "${where}" must be an object`);
@@ -231,9 +240,11 @@ function validateNodePackage(raw: unknown, where: string): NodePackageConfig {
     let dir: string | undefined;
     if (entry.dir !== undefined) {
         if (typeof entry.dir !== "string") {
-            throw new Error(`.defined.json: "${where}.dir" must be a string`);
+            throw new TypeError(
+                `.defined.json: "${where}.dir" must be a string`,
+            );
         }
-        const normalised = entry.dir.replace(/\/+$/u, "").replace(/^\.\//u, "");
+        const normalised = normaliseDir(entry.dir);
         dir = normalised === "." ? "" : normalised;
     }
 
@@ -273,7 +284,7 @@ function validateNode(raw: unknown): NodeChecksConfig | undefined {
         return undefined;
     }
     if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new Error(`.defined.json: "node" must be an object`);
+        throw new TypeError(`.defined.json: "node" must be an object`);
     }
     const entry = raw as Record<string, unknown>;
     rejectUnknownKeys(entry, NODE_KEYS, "node");
@@ -321,7 +332,7 @@ function validateNaming(raw: unknown): NamingConfig | undefined {
         return undefined;
     }
     if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new Error(`.defined.json: "naming" must be an object`);
+        throw new TypeError(`.defined.json: "naming" must be an object`);
     }
     const entry = raw as Record<string, unknown>;
     rejectUnknownKeys(entry, NAMING_KEYS, "naming");

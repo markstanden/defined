@@ -47,7 +47,7 @@ type Runner = typeof run;
  * `-` joins words within a segment, so a `--` inside a segment is impossible by
  * construction. `.yaml` is accepted alongside `.yml`.
  */
-const SEGMENT = String.raw`[a-z0-9]+(?:-[a-z0-9]+)*`;
+const SEGMENT = `[a-z0-9]+(?:-[a-z0-9]+)*`;
 export const WORKFLOW_NAME_RE = new RegExp(
     String.raw`^${SEGMENT}--${SEGMENT}(?:--${SEGMENT})?\.ya?ml$`,
     "u",

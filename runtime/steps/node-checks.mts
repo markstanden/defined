@@ -32,7 +32,11 @@ import {
 } from "../lib/step-result.mts";
 import { ensureScratch, type Scratch } from "../lib/scratch.mts";
 import { run, type CommandResult } from "../../lib/proc.mts";
-import { loadConfig, type NodePackageConfig } from "../lib/config.mts";
+import {
+    loadConfig,
+    type NodeCheck,
+    type NodePackageConfig,
+} from "../lib/config.mts";
 
 export interface NodeChecksRunContext {
     mode: "fix" | "no-fix";
@@ -141,6 +145,135 @@ function detail(result: CommandResult): string {
     );
 }
 
+/** Restore a package's dependencies; null when skipped or successful. */
+function installPackage({
+    pkg,
+    packageDir,
+    workingRoot,
+    runner,
+    existsSyncFn,
+}: {
+    pkg: NodePackageConfig;
+    packageDir: string;
+    workingRoot: string;
+    runner: Runner;
+    existsSyncFn: Exists;
+}): string | null {
+    const install =
+        pkg.install === false
+            ? null
+            : (pkg.install ??
+              defaultInstall({ packageDir, exists: existsSyncFn }));
+    if (install === null) {
+        return null;
+    }
+    const restored = runWithLocalBin({
+        runner,
+        packageDir,
+        workingRoot,
+        command: install,
+    });
+    return restored.status === 0 ? null : detail(restored);
+}
+
+/** Run one check (with its fix in fix mode); null when it passes. */
+function runCheck({
+    mode,
+    check,
+    packageDir,
+    workingRoot,
+    runner,
+    label,
+}: {
+    mode: "fix" | "no-fix";
+    check: NodeCheck;
+    packageDir: string;
+    workingRoot: string;
+    runner: Runner;
+    label: string;
+}): string | null {
+    if (mode === "fix" && check.fix !== undefined) {
+        const fixed = runWithLocalBin({
+            runner,
+            packageDir,
+            workingRoot,
+            command: check.fix,
+        });
+        if (fixed.status !== 0) {
+            return `${label}: fix "${check.name}" failed: ${detail(fixed)}`;
+        }
+    }
+    const result = runWithLocalBin({
+        runner,
+        packageDir,
+        workingRoot,
+        command: check.command,
+    });
+    return result.status === 0
+        ? null
+        : `${label}: ${check.name} failed: ${detail(result)}`;
+}
+
+/** Resolve, restore and check one package; returns its failures and pass count. */
+function runPackage({
+    mode,
+    pkg,
+    workingRoot,
+    trackedFiles,
+    runner,
+    existsSyncFn,
+}: {
+    mode: "fix" | "no-fix";
+    pkg: NodePackageConfig;
+    workingRoot: string;
+    trackedFiles: string[];
+    runner: Runner;
+    existsSyncFn: Exists;
+}): { failures: string[]; ran: number } {
+    const resolved = resolvePackageDir({ files: trackedFiles, dir: pkg.dir });
+    if ("error" in resolved) {
+        return { failures: [resolved.error], ran: 0 };
+    }
+    const label = packageLabel(resolved.dir);
+    const packageDir = join(workingRoot, resolved.dir);
+    if (!existsSyncFn(join(packageDir, "package.json"))) {
+        return { failures: [`no package.json at ${label}`], ran: 0 };
+    }
+
+    const installFailure = installPackage({
+        pkg,
+        packageDir,
+        workingRoot,
+        runner,
+        existsSyncFn,
+    });
+    if (installFailure !== null) {
+        return {
+            failures: [`${label}: install failed: ${installFailure}`],
+            ran: 0,
+        };
+    }
+
+    const failures: string[] = [];
+    let ran = 0;
+    for (const check of pkg.checks) {
+        const failure = runCheck({
+            mode,
+            check,
+            packageDir,
+            workingRoot,
+            runner,
+            label,
+        });
+        if (failure === null) {
+            ran += 1;
+        } else {
+            failures.push(failure);
+        }
+    }
+    return { failures, ran };
+}
+
 /**
  * Run the consumer's declared Node checks. Skips when `.defined.json` declares
  * none; otherwise restores each package's dependencies and runs its checks,
@@ -181,68 +314,16 @@ export async function runNodeChecksStep({
     const failures: string[] = [];
     let ran = 0;
     for (const pkg of packages) {
-        const resolved = resolvePackageDir({
-            files: trackedFiles,
-            dir: pkg.dir,
+        const outcome = runPackage({
+            mode: ctx.mode,
+            pkg,
+            workingRoot,
+            trackedFiles,
+            runner,
+            existsSyncFn,
         });
-        if ("error" in resolved) {
-            failures.push(resolved.error);
-            continue;
-        }
-        const label = packageLabel(resolved.dir);
-        const packageDir = join(workingRoot, resolved.dir);
-        if (!existsSyncFn(join(packageDir, "package.json"))) {
-            failures.push(`no package.json at ${label}`);
-            continue;
-        }
-
-        const install =
-            pkg.install === false
-                ? null
-                : (pkg.install ??
-                  defaultInstall({ packageDir, exists: existsSyncFn }));
-        if (install !== null) {
-            const restored = runWithLocalBin({
-                runner,
-                packageDir,
-                workingRoot,
-                command: install,
-            });
-            if (restored.status !== 0) {
-                failures.push(`${label}: install failed: ${detail(restored)}`);
-                continue;
-            }
-        }
-
-        for (const check of pkg.checks) {
-            if (ctx.mode === "fix" && check.fix !== undefined) {
-                const fixed = runWithLocalBin({
-                    runner,
-                    packageDir,
-                    workingRoot,
-                    command: check.fix,
-                });
-                if (fixed.status !== 0) {
-                    failures.push(
-                        `${label}: fix "${check.name}" failed: ${detail(fixed)}`,
-                    );
-                    continue;
-                }
-            }
-            const result = runWithLocalBin({
-                runner,
-                packageDir,
-                workingRoot,
-                command: check.command,
-            });
-            if (result.status !== 0) {
-                failures.push(
-                    `${label}: ${check.name} failed: ${detail(result)}`,
-                );
-                continue;
-            }
-            ran += 1;
-        }
+        failures.push(...outcome.failures);
+        ran += outcome.ran;
     }
 
     if (failures.length > 0) {
