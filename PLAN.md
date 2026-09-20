@@ -118,6 +118,18 @@ defined verify   # pipeline-only: the read-only check
   chatter suppressed); failure = non-zero + stable agent-actionable detail
   (phase, step, tool/rule, files, whether repair attempted, what remains).
 
+### Commit hooks
+
+Defined does **not** install or manage git hooks — the managed bootstrap
+surface stays the four byte-identical artifacts, and `comply`/`verify` remain
+the whole enforcement loop. Instead `standards/githooks/pre-commit` is an
+optional **reference** hook the consumer owns and opts into (commit it to
+their repo, point `core.hooksPath` at it): it runs `defined verify` verbatim.
+Deferring to the gate makes it deterministic — same pinned image, SDK and rules
+as CI, so a hook can never format to different rules — but it is a full pass
+(heavier for dotnet repos), it checks the working tree (not just the index),
+and `--no-verify` bypasses it, so it is convenience, not a guarantee.
+
 ### Launcher and release identity
 
 - Installable `cli/defined` bash launcher (`#!/usr/bin/env bash`, `[[ ]]`),
