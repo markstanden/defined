@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# standards/githooks/pre-commit — reference commit hook (opt-in, repo-owned).
+#
+# Adopt by committing this file to your repo (convention: .githooks/pre-commit)
+# and pointing core.hooksPath at that directory:
+#
+#   git config core.hooksPath .githooks
+#
+# It defers entirely to the gate, so it can never diverge from the gate's rules
+# or toolchain:
+#
+#   defined verify   # the exact read-only CI pass: pinned image, ro mount
+#
+# That is the whole hook — there is deliberately no partial surface here (no
+# hand-rolled format-only check). The gate is the single source of format/lint
+# rules and the only sanctioned way to run them. Consequences:
+#   - deterministic: the same pinned image, SDK and rules as CI — no host skew
+#   - a full pass, so it is heavier for dotnet repos (restore/build/test in the
+#     gate's scratch); drop the hook if you prefer `defined comply` before push
+#     and CI alone
+#   - checks the working tree (staged and unstaged alike); `--no-verify`
+#     bypasses it, so it is convenience, not a guarantee
+#   - requires the `defined` launcher on PATH and a prior `defined comply`
+#     (verify is read-only and needs the bootstrapped managed files)
+
+set -euo pipefail
+
+if ! command -v defined >/dev/null 2>&1; then
+    echo "pre-commit: 'defined' launcher not found — install cli/defined or run 'defined comply' manually" >&2
+    exit 1
+fi
+
+exec defined verify

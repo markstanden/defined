@@ -158,6 +158,7 @@ A full example pipeline is in [`standards/workflows/pipeline.example.yml`](stand
 - [`practices/architecture.md`](practices/architecture.md) — delivery/structure/code preferences
 - [`standards/.editorconfig`](standards/.editorconfig) — editor + dotnet code style (installed by gate setup)
 - [`standards/Directory.Build.props`](standards/Directory.Build.props) — common MSBuild properties (installed by gate setup)
+- [`standards/githooks/pre-commit`](standards/githooks/pre-commit) — optional reference commit hook that runs `defined verify` (opt-in, repo-owned)
 
 ## Project structure
 

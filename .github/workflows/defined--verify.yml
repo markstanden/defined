@@ -63,7 +63,8 @@ jobs:
                   REPO_ROOT="$(git -C "${GITHUB_WORKSPACE}" rev-parse --show-toplevel)"
 
                   docker run --rm \
+                    --user "$(id -u):$(id -g)" \
                     -v "${REPO_ROOT}:/repo:ro" \
-                    -e "NUGET_PACKAGES=/root/.nuget/packages" \
+                    -e "NUGET_PACKAGES=/home/node/.nuget/packages" \
                     --workdir /repo \
                     "${IMAGE}" verify

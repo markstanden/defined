@@ -49,15 +49,15 @@ RUN set -eux; \
         aarch64) ARCH="arm64"; ZIZMOR_ARCH="aarch64"; GITLEAKS_ARCH="arm64" ;; \
         *) echo "Unsupported arch: ${arch}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin actionlint; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin actionlint; \
     actionlint --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${ZIZMOR_ARCH}-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin zizmor; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${ZIZMOR_ARCH}-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin zizmor; \
     zizmor --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" | tar -xz -C /usr/local/bin gitleaks; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" | tar -xz -C /usr/local/bin gitleaks; \
     gitleaks --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin tofu; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin tofu; \
     tofu --version >/dev/null; \
-    curl -fsSL --retry 3 --retry-all-errors "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${ARCH}.zip" -o /tmp/tflint.zip; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${ARCH}.zip" -o /tmp/tflint.zip; \
     unzip -o /tmp/tflint.zip -d /usr/local/bin; \
     rm /tmp/tflint.zip; \
     test "$(tflint --version | sed -n 's/^TFLint version //p')" = "${TFLINT_VERSION}"; \
@@ -70,24 +70,27 @@ RUN set -eux; \
 RUN git config --system --add safe.directory /repo
 
 # Dotnet SDK: Debian main does not ship dotnet, so add Microsoft's Debian-13
-# apt feed (x64 + arm64) and install the SDK via apt. The pinned version is
-# asserted at build time like the other tools, so feed drift fails the build.
+# apt feed (x64 + arm64) and install the SDK via apt. Unlike the Debian main
+# tools, `dotnet-sdk-10.0` is a rolling package, so the exact build is pinned
+# (`${DOTNET_SDK_VERSION}-${DOTNET_SDK_DEB_REVISION}`) rather than left to the
+# feed's newest patch. The result is asserted at build time like the other
+# tools, so a feed that no longer carries the pin fails the build.
 RUN set -eux; \
+    . /usr/local/share/defined/tool-versions.env; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        wget \
         gpg \
     ; \
-    wget -qO /tmp/packages-microsoft-prod.deb \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors \
+        -o /tmp/packages-microsoft-prod.deb \
         "https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb"; \
     dpkg -i /tmp/packages-microsoft-prod.deb; \
     rm /tmp/packages-microsoft-prod.deb; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        dotnet-sdk-10.0 \
+        "dotnet-sdk-10.0=${DOTNET_SDK_VERSION}-${DOTNET_SDK_DEB_REVISION}" \
     ; \
     rm -rf /var/lib/apt/lists/*; \
-    . /usr/local/share/defined/tool-versions.env; \
     test "$(dotnet --version)" = "${DOTNET_SDK_VERSION}"; \
     dotnet --info >/dev/null
 
@@ -105,6 +108,23 @@ ENV DOTNET_NOLOGO=1 \
 COPY runtime /opt/defined/runtime
 COPY lib /opt/defined/lib
 COPY standards /opt/defined/standards
+
+# Run as the base image's unprivileged `node` user (uid 1000), never root
+# (SonarQube docker:S6471). The gate only ever writes to the mounted repo and
+# its dependency caches, so the run sites map the invoking host user onto this
+# uid — podman via `--userns=keep-id`, docker via `--user` (see comply.sh and
+# cli/defined). The home, the cache mount points and the node_modules mount
+# point are world-writable so whichever uid ends up mapped can use them: podman
+# chowns fresh named volumes to the mapped user, but docker (rootful) does not,
+# so the image's modes are what the volume inherits. The home holds no secrets.
+RUN install -d -m 0777 \
+        /home/node \
+        /home/node/.npm \
+        /home/node/.nuget/packages \
+        /repo/node_modules
+ENV HOME=/home/node \
+    NUGET_PACKAGES=/home/node/.nuget/packages
+USER node
 
 WORKDIR /repo
 ENTRYPOINT ["node", "/opt/defined/runtime/comply.mts"]

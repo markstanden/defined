@@ -71,14 +71,26 @@ if ! "${ENGINE}" image inspect "${IMAGE}" >/dev/null 2>&1; then
         -t "${IMAGE}" "${GATE_ROOT}"
 fi
 
+# The image runs as non-root (uid 1000); map the invoking host user onto that
+# uid so the mounted repo and the cache volumes stay writable. podman maps the
+# host user to uid 1000 via --userns=keep-id; docker (rootful) runs the
+# container as the host uid via --user. Either way the host user owns
+# everything the gate writes, and no root is ever needed.
+if [[ "${ENGINE}" == "podman" ]]; then
+    USER_ARGS=("--userns=keep-id:uid=1000,gid=1000")
+else
+    USER_ARGS=(--user "$(id -u):$(id -g)")
+fi
+
 exec "${ENGINE}" run --rm \
+    "${USER_ARGS[@]}" \
     -v "${REPO_ROOT}:/repo" \
     -v "${RUNTIME_DIR}:/opt/defined/runtime:ro" \
     -v "${LIB_DIR}:/opt/defined/lib:ro" \
     -v "${STANDARDS_DIR}:/opt/defined/standards:ro" \
     -v "defined-node-${PINHASH}-${REPO_HASH}:/repo/node_modules" \
-    -v "defined-npm-${REPO_HASH}:/root/.npm" \
-    -v "defined-nuget-${REPO_HASH}:/root/.nuget/packages" \
-    -e "NUGET_PACKAGES=/root/.nuget/packages" \
+    -v "defined-npm-${REPO_HASH}:/home/node/.npm" \
+    -v "defined-nuget-${REPO_HASH}:/home/node/.nuget/packages" \
+    -e "NUGET_PACKAGES=/home/node/.nuget/packages" \
     --workdir /repo \
     "${IMAGE}" "${VERB}" "$@"
