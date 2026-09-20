@@ -9,10 +9,10 @@
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
 // `verify` shares the orchestrator. Steps run in fixed order (naming → node →
-// node-coverage → dotnet → dotnet-coverage → shell → yaml → workflow → tofu),
-// strictly sequentially. Output follows the report contract (decision #24):
-// green runs print exactly one `compliant` line; anything else prints a
-// stable, agent-actionable breakdown.
+// node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke →
+// yaml → workflow → tofu), strictly sequentially. Output follows the report
+// contract (decision #24): green runs print exactly one `compliant` line;
+// anything else prints a stable, agent-actionable breakdown.
 
 import { spawnSync } from "node:child_process";
 
@@ -28,6 +28,7 @@ import { formatReport } from "./lib/report.mts";
 import { runDotNetStep } from "./steps/dotnet.mts";
 import { runDotNetCoverageStep } from "./steps/dotnet-coverage.mts";
 import { runNamingStep } from "./steps/naming.mts";
+import { runNodeChecksStep } from "./steps/node-checks.mts";
 import { runNodeStep } from "./steps/node.mts";
 import { runNodeCoverageStep } from "./steps/node-coverage.mts";
 import { runShellStep } from "./steps/shell.mts";
@@ -69,17 +70,24 @@ export async function runSmoke(_input: StepInput): Promise<StepResult> {
 const STEPS: Step[] = [
     {
         id: "naming",
-        run: ({ mode, repoRoot, files }) =>
+        run: ({ mode, repoRoot, files, scratch }) =>
             runNamingStep({
-                ctx: { mode, repoRoot },
+                ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
-                enabled: false,
             }),
     },
     {
         id: "node",
         run: ({ mode, repoRoot, files }) =>
             runNodeStep({ ctx: { mode, repoRoot }, trackedFiles: files }),
+    },
+    {
+        id: "node-checks",
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runNodeChecksStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
     },
     {
         id: "node-coverage",

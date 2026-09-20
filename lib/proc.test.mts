@@ -33,3 +33,12 @@ test("run honours cwd for the invoked command", () => {
     const result = run({ cmd: "pwd", cwd: "/tmp" });
     assert.equal(result.stdout.trim(), "/tmp");
 });
+
+test("run passes a supplied environment to the command", () => {
+    const result = run({
+        cmd: "sh",
+        args: ["-c", "printf '%s' \"$DEFINED_TEST_ENV\""],
+        env: { ...process.env, DEFINED_TEST_ENV: "local-bin" },
+    });
+    assert.equal(result.stdout, "local-bin");
+});

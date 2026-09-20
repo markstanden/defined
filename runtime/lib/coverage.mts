@@ -1,38 +1,36 @@
-// lib/coverage.mts — shared plumbing for the coverage steps.
+// lib/coverage.mts — shared plumbing for steps that run a consumer command.
 //
-// node-coverage and dotnet-coverage both run the consumer's coverage command,
-// then parse the report it writes. A read-only `verify` cannot write into the
-// repo, so no-fix runs the command against a scratch copy of the git scope under
-// /tmp (shared across steps via ctx.scratch) and parses the report from there;
-// fix mode runs in the repo. This module owns that shared command step so the
-// two coverage steps differ only in config key, report format and parser.
+// Coverage steps and the naming step all run a consumer-supplied command, then
+// act on its exit code. A read-only `verify` cannot write into the repo, so
+// no-fix runs the command against a scratch copy of the git scope under /tmp
+// (shared across steps via ctx.scratch); fix mode runs in the repo. This module
+// owns that shared command step so callers differ only in config key and what
+// they do with the result.
 
-import { failed, type StepResult } from "./step-result.mts";
 import { ensureScratch, type Scratch } from "./scratch.mts";
 import { run } from "../../lib/proc.mts";
 
 type Runner = typeof run;
 
-export interface CoverageCommandOutcome {
+export interface ScopedCommandOutcome {
     /** Repo root (fix) or scratch dir (no-fix) the command ran in. */
     workingRoot: string;
-    /** Non-null when the command failed; the step returns it verbatim. */
-    failure: StepResult | null;
+    /** Failure detail when the command exited non-zero, else null. */
+    failure: string | null;
 }
 
 /**
- * Run the consumer's coverage command in the right working root: the repo for
- * fix mode, a shared /tmp scratch copy of the git scope for no-fix. Returns the
- * working root (so the caller parses the report from the same place) and a
- * failure result when the command exits non-zero.
+ * Run a consumer command in the right working root: the repo for fix mode, a
+ * shared /tmp scratch copy of the git scope for no-fix. Returns the working
+ * root (so the caller reads generated artifacts from the same place) and the
+ * failure detail when the command exits non-zero.
  */
-export function runCoverageCommand({
+export function runScopedCommand({
     mode,
     repoRoot,
     scratch,
     trackedFiles,
     command,
-    label,
     runner,
 }: {
     mode: "fix" | "no-fix";
@@ -40,9 +38,8 @@ export function runCoverageCommand({
     scratch?: Scratch;
     trackedFiles: string[];
     command: string;
-    label: string;
     runner: Runner;
-}): CoverageCommandOutcome {
+}): ScopedCommandOutcome {
     const workingRoot =
         mode === "no-fix"
             ? ensureScratch({ scratch, repoRoot, files: trackedFiles })
@@ -62,12 +59,7 @@ export function runCoverageCommand({
             .map((s) => s.trim())
             .filter((s) => s !== "")
             .join("\n");
-        return {
-            workingRoot,
-            failure: failed({
-                notice: `${label}: coverage command failed: ${detail || "no output"}`,
-            }),
-        };
+        return { workingRoot, failure: detail || "no output" };
     }
 
     return { workingRoot, failure: null };

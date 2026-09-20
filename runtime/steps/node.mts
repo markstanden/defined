@@ -32,9 +32,9 @@
 // package.json (any depth) OR a tracked *.md file. Prettier is repo-wide
 // (markdown, JSON/JSONC, YAML, CSS) regardless of Node, so a docs-only repo
 // still gets markdown formatting — the house prettier config claims repo-wide
-// scope and the step must honour it. ESLint/tsc/vitest deliberately wait for
-// in-container dependency restore (decision #3): they need project-local
-// plugins and types a global install cannot supply.
+// scope and the step must honour it. ESLint/tsc/vitest are not here: they run
+// in the dedicated `node-checks` step, which restores the consumer's own
+// dependencies and resolves the consumer's local binaries (issue #19/#21).
 // The runner is injected so tests need no host binaries.
 
 import { existsSync } from "node:fs";

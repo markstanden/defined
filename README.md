@@ -31,14 +31,14 @@ pinned in the repo's `.defined.json` — so local green = merge green: CI runs
 that same image as long as the workflow ref and the `.defined.json` pin
 match (keep them in step).
 
-The gate detects the stack (steps run in order `naming → node → node-coverage →
-dotnet → dotnet-coverage → shell → smoke → yaml → workflow → tofu`), skips
-cleanly when an ecosystem is absent, and fails loudly when a pinned tool is
-missing. Because `verify` never writes to the repo, the steps that must write —
-`node-coverage` and the `dotnet` family — work in a scratch copy of the git
-scope under the container's `/tmp` (a read-only mount cannot host
-`coverage/lcov.info` or `obj/`/`bin/`); the repo checkout itself is never
-touched. Tool versions are pinned in
+The gate detects the stack (steps run in order `naming → node → node-checks →
+node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow →
+tofu`), skips cleanly when an ecosystem is absent, and fails loudly when a
+pinned tool is missing. Because `verify` never writes to the repo, the steps
+that must write — `node-checks`, `node-coverage` and the `dotnet` family — work
+in a scratch copy of the git scope under the container's `/tmp` (a read-only
+mount cannot host `node_modules/`, `coverage/lcov.info` or `obj/`/`bin/`); the
+repo checkout itself is never touched. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 
@@ -70,6 +70,42 @@ the image.
     Absent `coverage` (or an absent ecosystem entry) skips that coverage step;
     `command` generates the report in `comply` mode; omitted minimums default
     to 80% line coverage.
+
+    Add optional `node` project checks to run the consumer's own
+    ESLint/`tsc`/tests (and any other declared command) — the gate restores the
+    package's dependencies first and resolves the consumer's local binaries, not
+    the gate's:
+
+    ```jsonc
+    "node": {
+        "checks": [
+            { "name": "lint", "command": "eslint .", "fix": "eslint --fix ." },
+            { "name": "typecheck", "command": "tsc --noEmit" },
+            { "name": "test", "command": "vitest run" },
+        ],
+    }
+    ```
+
+    The flat form targets the sole tracked `package.json` (any depth); set `dir`
+    for an explicit package, or `packages: [{ dir, install, checks }]` for a
+    monorepo. Restore auto-detects `npm`/`yarn`/`pnpm` from the lockfile (override
+    with `install`, or `false` to skip); a check's `fix` command runs in `comply`
+    only, then the check re-runs. Absent `node` (or no `checks`) skips cleanly.
+
+    Add optional `naming` rules to enforce your project's naming doctrine — the
+    gate always enforces the workflow-filename grammar
+    ([`standards/naming.md`](standards/naming.md)) and runs your command over
+    the git scope:
+
+    ```jsonc
+    "naming": {
+        "command": "quality/naming.sh",
+        "fix": "quality/naming.sh --fix",
+    }
+    ```
+
+    `command` must exit non-zero on violations; `fix` runs first in `comply`
+    only. Absent `naming` runs the workflow grammar alone.
 
     **Coverage command examples** — the command must land the report at a fixed
     path: `coverage/lcov.info` (node) or `coverage.cobertura.xml` /
@@ -160,7 +196,9 @@ A full example pipeline is in [`standards/workflows/pipeline.example.yml`](stand
 
 ## Standards
 
-- [`standards/naming.md`](standards/naming.md) — workflow filename grammar
+- [`standards/naming.md`](standards/naming.md) — naming doctrine index + workflow filename grammar
+- [`standards/naming/shell.md`](standards/naming/shell.md) — shell function tiers, word order, verb vocabulary, file names
+- [`standards/naming/typescript.md`](standards/naming/typescript.md) — TypeScript identifiers, CLI entry, module file names
 - [`standards/yaml.md`](standards/yaml.md) — YAML lint/format behaviour (`yamllint -s` + prettier)
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)

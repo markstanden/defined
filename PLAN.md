@@ -62,7 +62,7 @@ it run the scan in their own pipeline against the gate-generated report.
 Steps run in fixed order, strictly sequentially:
 
 ```text
-naming → node → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow → tofu
+naming → node → node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow → tofu
 ```
 
 **Scope — the gate's universe is git's.** Every step judges the repo's git
@@ -73,7 +73,10 @@ CI green (a whole-tree scan would). Tools that walk the filesystem rather than
 the git list are brought into scope explicitly: `prettier` runs over the
 tracked file list (filtered to parseable extensions) instead of `.`, and
 `gitleaks` runs against a generated config (default rules + an allowlist of
-the git-ignored paths) instead of a raw `dir .`. `comply` re-fetches the
+the git-ignored paths) instead of a raw `dir .`, and the consumer's optional
+`.gitleaksignore` fingerprint baseline is honoured via an explicit
+`--gitleaks-ignore-path` pinned to the repo root (so known-good findings stay
+suppressed and scope never widens). `comply` re-fetches the
 tracked list _after_ bootstrap, because setup itself writes `.defined.json`
 and the `AGENTS.md` block. Raises-only stands: a consumer who gitignores
 something gets it excluded everywhere; committed content is always gated.
@@ -81,20 +84,27 @@ something gets it excluded everywhere; committed content is always gated.
 - Each ecosystem step activates on detection (a `package.json`/`*.md` for
   `node`, a `.csproj`/`.sln`/`.slnx` for `dotnet`, lowercase `*.sh` for `shell`,
   `.yml`/`.yaml` for `yaml`, workflow files for `workflow`, root tofu files for
-  `tofu`); missing ecosystems skip cleanly.
+  `tofu`); missing ecosystems skip cleanly. `node-checks` activates on a
+  `.defined.json` `node` entry and runs the consumer's declared lint/typecheck/
+  test commands against the consumer's own installed toolchain (nested and
+  monorepo `package.json` locations supported; the sole tracked manifest needs
+  no `dir`). Absent entry = skip; a declared package without a manifest fails
+  loudly.
 - Coverage steps (`node-coverage`, `dotnet-coverage`) activate on a `.defined.json`
   `coverage` entry for their ecosystem; absent entry = skip. They run the
   consumer's coverage command — in the repo for `fix`, in the no-fix scratch for
   `verify` — then enforce the configured line/branch/function minimums (default
   80% line) from the resulting lcov / Cobertura report. No committed or staged
   report is ever required: `verify` generates and checks one deterministically.
-- Coverage and build steps must write into the repo (`coverage/lcov.info` for
-  node, `obj/`/`bin/`/`TestResults/` for dotnet), which a read-only `verify`
+- Coverage, node-checks and build steps must write into the repo
+  (`coverage/lcov.info` for node, `node_modules/` for node-checks,
+  `obj/`/`bin/`/`TestResults/` for dotnet), which a read-only `verify`
   (local `defined verify`, CI) cannot do in place. No-fix therefore runs
-  `node-coverage`, `dotnet` and `dotnet-coverage` against a **scratch copy of the
-  repo's git scope under `/tmp`** (`runtime/lib/scratch.mts`) — one copy shared
-  across those steps, created on first use, cleaned after the pass. Fix mode
-  works in the repo as before. The repo mount is never written by either mode.
+  `node-checks`, `node-coverage`, `dotnet` and `dotnet-coverage` against a
+  **scratch copy of the repo's git scope under `/tmp`**
+  (`runtime/lib/scratch.mts`) — one copy shared across those steps, created on
+  first use, cleaned after the pass. Fix mode works in the repo as before. The
+  repo mount is never written by either mode.
 - `smoke` always probes the container's git.
 - Missing applicable tools fail loudly pointing at the Containerfile — there is
   no optional tier.
@@ -169,7 +179,9 @@ pin is the override that restores immutability.
 `.defined.json` at the repo root is the single consumer configuration file.
 `version` is optional — omitted means the launcher uses the current published
 default image; a written pin is immutable (a 7–40 char hex SHA). Optional
-`coverage` configuration activates the per-ecosystem coverage gate:
+`coverage` configuration activates the per-ecosystem coverage gate, an optional
+`node` configuration activates consumer Node project checks, and an optional
+`naming` configuration supplies consumer naming rules:
 
 ```jsonc
 {
@@ -184,6 +196,17 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
             "minimums": { "line": 80 },
         },
     },
+    "node": {
+        "checks": [
+            { "name": "lint", "command": "eslint .", "fix": "eslint --fix ." },
+            { "name": "typecheck", "command": "tsc --noEmit" },
+            { "name": "test", "command": "vitest run" },
+        ],
+    },
+    "naming": {
+        "command": "quality/naming.sh",
+        "fix": "quality/naming.sh --fix",
+    },
 }
 ```
 
@@ -197,6 +220,22 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
 - The gate parses `node` reports as lcov (`coverage/lcov.info`) and `dotnet`
   reports as Cobertura XML (`coverage.cobertura.xml` or
   `TestResults/coverage.cobertura.xml`).
+
+- Absent `node` section (or an entry with no `checks`) = the `node-checks` step
+  skips. Checks run against the consumer's own toolchain: the gate restores the
+  package's dependencies first (`npm ci` / `yarn` / `pnpm` by lockfile, or an
+  explicit `install` command; `false` skips restore) and prepends the package's
+  `node_modules/.bin` to `PATH`, so `eslint`/`tsc`/`vitest` resolve to the
+  consumer's versions, never the gate's.
+- The flat form above targets the sole tracked `package.json` (any depth); set
+  `dir` for an explicit package, or use `packages: [{ dir, install, checks }]`
+  for a monorepo. A per-check `fix` command runs first in `comply` only, then
+  the check always re-runs before reporting.
+- The `naming` step always enforces the workflow-filename grammar over tracked
+  `.github/workflows/*.yml|yaml` files (see `standards/naming.md`). An optional
+  `naming` section adds the consumer's own rules: `command` runs over the git
+  scope and must exit non-zero on violations; `fix` runs first in `comply` only,
+  then `command` always re-runs. Absent `naming` = grammar only.
 
 ### Bootstrap contract
 
@@ -252,22 +291,22 @@ self-hosted on the gate's own test suite.
 
 ## Open gaps (backlog)
 
-The gate is complete enough to adopt in parallel, but these capability gaps
-remain before it can replace a consumer's own overlapping scripts. Each is a
-GitHub issue; this table is the plan-of-record entry point so a fresh session
+The gate is complete enough to adopt in parallel; there are currently no filed
+capability gaps. This table is the plan-of-record entry point so a fresh session
 knows what is left without trawling the issue list.
 
-| #                                                       | Gap                                                                           | Blocks                                         |
-| ------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------- |
-| [#19](https://github.com/markstanden/defined/issues/19) | `node` step is Prettier-only — no consumer ESLint / `tsc --noEmit` / tests    | retiring a consumer's `quality/typescript.sh`  |
-| [#21](https://github.com/markstanden/defined/issues/21) | node checks must use the consumer's own toolchain and nested package location | monorepos, nested `lib/package.json`           |
-| [#24](https://github.com/markstanden/defined/issues/24) | `workflow` step ignores the consumer's `.gitleaksignore` baseline             | repos with documented false-positive baselines |
-| [#25](https://github.com/markstanden/defined/issues/25) | `naming` step is a disabled placeholder                                       | retiring `quality/naming.sh`                   |
-| [#26](https://github.com/markstanden/defined/issues/26) | general naming doctrine has no home in `standards/`                           | onboarding, and #25                            |
+| #   | Gap        | Blocks |
+| --- | ---------- | ------ |
+| —   | none filed | —      |
 
-Recently delivered (so the list above is not re-litigated): #20
-(`node-coverage` generates its report in the no-fix scratch), #22 (`yamllint
--s` — warnings fail), #23 (zizmor at its own default severity), #27
+Recently delivered (so the list above is not re-litigated): #19 (`node-checks`
+runs the consumer's declared ESLint/`tsc`/tests), #20 (`node-coverage` generates
+its report in the no-fix scratch), #21 (node checks use the consumer's own
+toolchain and nested package locations), #22 (`yamllint -s` — warnings fail),
+#23 (zizmor at its own default severity), #24 (the `workflow` step honours the
+consumer's `.gitleaksignore` baseline), #25 (the `naming` step enforces the
+workflow-filename grammar and runs consumer-declared rules), #26 (general naming
+doctrine lives in `standards/naming.md` + `standards/naming/`), #27
 (consumer-owned prettier config wins), #28 (`.gitattributes` is managed).
 
 Not yet filed:

@@ -1,10 +1,21 @@
-<!-- update: agent=opencode | date=2026-08-31 | scope=standards/naming.md -->
+<!-- update: agent=opencode | date=2026-09-20 | scope=standards/naming.md -->
 
 # Naming conventions
 
-House filename grammar for the gate's own workflow files. The gate exposes
-exactly one consumer-facing reusable workflow and keeps two for its own CI; the
-filename encodes the segments.
+House naming doctrine. One question, one answer:
+
+> **What you type is kebab (`-`), what you call is snake (`_`), what you export is camel (nothing).**
+
+If a rule is unclear or a name does not fit, change the relevant document — do
+not silently invent a fourth style.
+
+## Doctrine
+
+| Area               | Document                                       | Covers                                                  |
+| ------------------ | ---------------------------------------------- | ------------------------------------------------------- |
+| **Shell**          | [`naming/shell.md`](naming/shell.md)           | Function tiers, word order, verb vocabulary, file names |
+| **TypeScript**     | [`naming/typescript.md`](naming/typescript.md) | Identifiers, CLI entry, module file names               |
+| **Workflow files** | this document                                  | `.github/workflows/` filename grammar                   |
 
 ## Workflow files: `<namespace>--<loose-verb>[--<target>].yml`
 
@@ -39,9 +50,26 @@ Consequences:
 
 ## Scope and enforcement
 
-This grammar covers the gate's workflow files. Internal modules
-(`runtime/steps/*.mts` where filename == step id, `lib/*.mts` shared helpers)
-and `standards/` files are not part of the segmented scheme.
+This grammar covers tracked `.github/workflows/*.yml` and `*.yaml` files.
+Internal modules (`runtime/steps/*.mts` where filename == step id, `lib/*.mts`
+shared helpers) and `standards/` files are not part of the segmented scheme;
+their names follow the shell/TypeScript doctrine above.
 
-The grammar is currently upheld by convention (naming is reviewed, not yet
-mechanically enforced — the gate's `naming` step is reserved and disabled).
+- **Workflow grammar** is mechanically enforced by the gate's `naming` step —
+  always, over every tracked workflow file. A filename that breaks the grammar
+  fails the gate.
+- **Shell and TypeScript** rules are enforced by a project-supplied rules
+  command, declared under the `.defined.json` `naming` key:
+
+    ```json
+    {
+        "naming": {
+            "command": "quality/naming.sh",
+            "fix": "quality/naming.sh --fix"
+        }
+    }
+    ```
+
+    The `command` runs over the git scope and must exit non-zero on violations;
+    the optional `fix` runs first in `comply` (fix) mode only. The gate provides
+    the framework and the workflow grammar; projects bring their own doctrine.

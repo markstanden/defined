@@ -15,9 +15,22 @@ indentation):
 | ---------- | -------- | ---------------------- |
 | Formatting | prettier | `comply` (repair pass) |
 
-The gate does not run ESLint, `tsc --noEmit`, or project tests for consumers —
-those need project-local dependency restore and stay with the project (or a
-future gate extension).
+The `node-checks` step then runs the consumer's own project checks — ESLint,
+`tsc --noEmit`, tests — when the repo declares them under `.defined.json`'s
+`node` key (see the README). The gate restores the package's dependencies and
+prepends the package's `node_modules/.bin` to `PATH`, so the consumer's pinned
+toolchain is used, never the gate's global tools; nested and monorepo
+`package.json` locations are supported. An absent declaration skips cleanly.
+
+```jsonc
+"node": {
+    "checks": [
+        { "name": "lint", "command": "eslint .", "fix": "eslint --fix ." },
+        { "name": "typecheck", "command": "tsc --noEmit" },
+        { "name": "test", "command": "vitest run" },
+    ],
+}
+```
 
 ## Testing stack (gate-internal, guidance)
 

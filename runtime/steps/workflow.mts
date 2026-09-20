@@ -1,9 +1,11 @@
 // steps/workflow.mts — GitHub Actions workflows: actionlint + zizmor + gitleaks.
 //
 // Tools:    actionlint, zizmor, gitleaks (all required — missing = loud fail)
-// Config:   .gitleaksignore at repo root (optional); per-project ignores via
-//           .defined.json when needed. zizmor runs at its own default
-//           min-severity (informational): every finding it reports fails.
+// Config:   .gitleaksignore at repo root (optional) — honoured via an explicit
+//           --gitleaks-ignore-path pinned to the repo root, so the consumer's
+//           fingerprint baseline survives regardless of CWD. zizmor runs at
+//           its own default min-severity (informational): every finding it
+//           reports fails.
 // Fix:      none — these are check-only tools
 //
 // Detection: actionlint/zizmor run only when tracked workflow files exist
@@ -21,6 +23,7 @@
 // cannot bleed onto a tracked `.env.example`). Effective scope = the same
 // git content every other step sees.
 
+import { existsSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -125,6 +128,27 @@ export async function writeGitleaksConfig({
 }
 
 /**
+ * Explicit gitleaks ignore-path args. gitleaks reads the consumer's
+ * `.gitleaksignore` fingerprint baseline from `--gitleaks-ignore-path`
+ * (default ".", resolved against the process CWD). The gate pins it to the
+ * repo root so the baseline is honoured regardless of CWD, and only when the
+ * file exists (an absent path is not handed to the tool). The baseline
+ * suppresses known-good findings; it never widens scope — the generated config
+ * still allowlists exactly the repo's git-ignored paths.
+ */
+export function gitleaksIgnoreArgs({
+    repoRoot,
+    exists = existsSync,
+}: {
+    repoRoot: string;
+    exists?: typeof existsSync;
+}): string[] {
+    return exists(join(repoRoot, ".gitleaksignore"))
+        ? ["--gitleaks-ignore-path", repoRoot]
+        : [];
+}
+
+/**
  * Run actionlint, zizmor on workflow files, and gitleaks on the whole repo.
  * Returns pass when all clean; fail naming the offending tool.
  * If no workflow files tracked, skips actionlint/zizmor but still runs gitleaks.
@@ -133,10 +157,12 @@ export async function runWorkflowStep({
     ctx,
     trackedFiles,
     runner = run,
+    existsSyncFn = existsSync,
 }: {
     ctx: WorkflowRunContext;
     trackedFiles: string[];
     runner?: Runner;
+    existsSyncFn?: typeof existsSync;
 }): Promise<StepResult> {
     const workflowFiles = filterWorkflowFiles({ files: trackedFiles });
 
@@ -170,7 +196,9 @@ export async function runWorkflowStep({
     // filesystem and ignores .gitignore (no flag as of 8.30.x), so the gate
     // generates a config that keeps default rules and allowlists exactly the
     // repo's git-ignored paths — a local gitignored .env with a real secret
-    // must not fail the gate while CI (no .env) stays green.
+    // must not fail the gate while CI (no .env) stays green. The consumer's
+    // `.gitleaksignore` fingerprint baseline is honoured via an explicit
+    // --gitleaks-ignore-path pinned to the repo root (issue #24).
     const ignoredStatus = runner({
         cmd: "git",
         args: ["status", "--porcelain", "--ignored"],
@@ -186,7 +214,16 @@ export async function runWorkflowStep({
     });
     const gitleaks = runner({
         cmd: "gitleaks",
-        args: ["dir", "--config", configPath, "."],
+        args: [
+            "dir",
+            "--config",
+            configPath,
+            ...gitleaksIgnoreArgs({
+                repoRoot: ctx.repoRoot,
+                exists: existsSyncFn,
+            }),
+            ".",
+        ],
         cwd: ctx.repoRoot,
     });
     if (gitleaks.status !== 0) {
