@@ -1,8 +1,12 @@
 // steps/node-coverage.mts — Node/JS coverage gate: parse lcov, enforce minimums.
 //
-// Tools:    none (parses existing coverage reports)
+// Tools:    none (runs the consumer's coverage command; parses lcov)
 // Config:   .defined.json "coverage.node" — command + minimums
-// Fix:      runs the consumer's coverage command, then validates the report
+// Fix:      runs the consumer's coverage command in the repo (rw mount), then
+//           validates the report
+// No-fix:   runs the consumer's coverage command in a /tmp scratch copy of the
+//           git scope (a read-only verify cannot write a report into the repo)
+//           and validates the scratch report
 // Skip:     no .defined.json entry for "node", or no coverage/lcov.info found
 //
 // Detection is config-driven: the step only activates when .defined.json
@@ -21,12 +25,16 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
+import { runCoverageCommand } from "../lib/coverage.mts";
+import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import { loadConfig, type CoverageMinimums } from "../lib/config.mts";
 
 export interface NodeCoverageRunContext {
     mode: "fix" | "no-fix";
     repoRoot: string;
+    /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
+    scratch?: Scratch;
 }
 
 type Runner = typeof run;
@@ -144,9 +152,10 @@ function effectiveMinimums(
 }
 
 /**
- * Run Node.js coverage gate. Skips when no config entry or no report found;
- * in fix mode, runs the consumer's command first; always validates the report
- * against configured minimums.
+ * Run Node.js coverage gate. Skips when no config entry; always runs the
+ * consumer's command — in the repo for fix mode, in a /tmp scratch copy of the
+ * git scope for no-fix (read-only verify cannot write a report into the repo)
+ * — then validates the report against configured minimums.
  */
 export async function runNodeCoverageStep({
     ctx,
@@ -168,20 +177,23 @@ export async function runNodeCoverageStep({
 
     const coverageConfig = config.coverage.node;
 
-    if (ctx.mode === "fix") {
-        const result = runner({
-            cmd: "sh",
-            args: ["-c", coverageConfig.command],
-            cwd: ctx.repoRoot,
-        });
-        if (result.status !== 0) {
-            return failed({
-                notice: `node-coverage: coverage command failed: ${result.stderr.trim() || result.stdout.trim()}`,
-            });
-        }
+    // Read-only verify cannot write a report into /repo, so no-fix runs the
+    // consumer's command against a scratch copy of the git scope (shared with
+    // the dotnet steps via ctx.scratch) and validates the scratch report.
+    const { workingRoot, failure } = runCoverageCommand({
+        mode: ctx.mode,
+        repoRoot: ctx.repoRoot,
+        scratch: ctx.scratch,
+        trackedFiles,
+        command: coverageConfig.command,
+        label: "node-coverage",
+        runner,
+    });
+    if (failure !== null) {
+        return failure;
     }
 
-    const lcovPath = join(ctx.repoRoot, LCOV_PATH);
+    const lcovPath = join(workingRoot, LCOV_PATH);
     if (!existsSync(lcovPath)) {
         return failed({
             notice: `node-coverage: no coverage report at ${LCOV_PATH} — run coverage in a prior step or check command`,

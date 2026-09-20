@@ -3,13 +3,18 @@
 // Run: node --test steps/node-coverage.test.mts
 
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 
+import type { CommandResult } from "../../lib/proc.mts";
 import {
     checkMinimums,
     parseLcov,
     runNodeCoverageStep,
 } from "./node-coverage.mts";
+import { cleanupScratch } from "../lib/scratch.mts";
 import {
     cleanupTempDirs,
     makeTempDir,
@@ -19,6 +24,29 @@ import {
 } from "../test-helpers.mts";
 
 afterEach(cleanupTempDirs);
+
+/**
+ * A runner that simulates the consumer's coverage command: on `sh` it writes
+ * the given lcov report into `cwd` (the repo in fix mode, the scratch in
+ * no-fix) and records every call.
+ */
+function reportWriterRunner({
+    calls,
+    lcov,
+}: {
+    calls: string[][];
+    lcov: string;
+}): typeof import("../../lib/proc.mts").run {
+    return (({ cmd, args, cwd }) => {
+        calls.push([cmd, ...args, cwd ?? ""]);
+        if (cmd === "sh") {
+            const target = join(cwd!, "coverage/lcov.info");
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(target, lcov);
+        }
+        return { status: 0, stdout: "", stderr: "" } satisfies CommandResult;
+    }) as typeof import("../../lib/proc.mts").run;
+}
 
 // --- parseLcov ---
 
@@ -291,6 +319,7 @@ test("gates line coverage against the effective minimum", async () => {
         const { result } = await runCoverageScenario({
             step: runNodeCoverageStep,
             repoRoot: dir,
+            mode: "fix",
             trackedFiles: ["package.json"],
         });
         assert.equal(result.status, status, label);
@@ -298,21 +327,70 @@ test("gates line coverage against the effective minimum", async () => {
     }
 });
 
-test("no-fix mode does not run the coverage command", async () => {
+test("no-fix runs the coverage command in a scratch workspace, isolated from the repo", async () => {
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
         config: { version: TEST_SHA, coverage: { node: { command: "npm t" } } },
+        // A report in the repo must NOT satisfy the pass: no-fix runs the
+        // command in the scratch (left empty by the fake) and reads the report
+        // from there too, so the repo's report is invisible.
         reportPath: "coverage/lcov.info",
         reportContent: ["LF:100", "LH:90"].join("\n"),
     });
-    const { result, calls } = await runCoverageScenario({
-        step: runNodeCoverageStep,
-        repoRoot: dir,
-        trackedFiles: ["package.json"],
+    await writeFile(join(dir, "package.json"), "{}");
+    const calls: string[][] = [];
+    const scratch = { dir: null as string | null };
+    try {
+        const runner = (({ cmd, args, cwd }) => {
+            calls.push([cmd, ...args, cwd ?? ""]);
+            return {
+                status: 0,
+                stdout: "",
+                stderr: "",
+            } satisfies CommandResult;
+        }) as typeof import("../../lib/proc.mts").run;
+        const result = await runNodeCoverageStep({
+            ctx: { mode: "no-fix", repoRoot: dir, scratch },
+            trackedFiles: ["package.json"],
+            runner,
+        });
+        assert.equal(result.status, "fail");
+        assert.match(result.notice ?? "", /no coverage report/u);
+        assert.equal(calls.length, 1);
+        assert.equal(calls[0]![0], "sh");
+        const runCwd = calls[0]!.at(-1)!;
+        assert.notEqual(runCwd, dir);
+        assert.equal(scratch.dir, runCwd);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("no-fix validates the report the command writes into the scratch", async () => {
+    const dir = await makeTempDir("quality-nc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: { version: TEST_SHA, coverage: { node: { command: "npm t" } } },
     });
-    assert.equal(result.status, "pass");
-    assert.equal(calls.filter((c) => c[0] === "sh").length, 0);
+    await writeFile(join(dir, "package.json"), "{}");
+    const calls: string[][] = [];
+    const scratch = { dir: null as string | null };
+    try {
+        const result = await runNodeCoverageStep({
+            ctx: { mode: "no-fix", repoRoot: dir, scratch },
+            trackedFiles: ["package.json"],
+            runner: reportWriterRunner({
+                calls,
+                lcov: ["LF:100", "LH:90"].join("\n"),
+            }),
+        });
+        assert.equal(result.status, "pass");
+        assert.match(result.notice ?? "", /90\.0%/u);
+        assert.equal(scratch.dir, calls[0]!.at(-1));
+    } finally {
+        cleanupScratch(scratch);
+    }
 });
 
 test("fix mode runs the consumer command", async () => {

@@ -25,7 +25,8 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
-import { ensureScratch, type Scratch } from "../lib/scratch.mts";
+import { runCoverageCommand } from "../lib/coverage.mts";
+import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import { loadConfig, type CoverageMinimums } from "../lib/config.mts";
 
@@ -182,32 +183,17 @@ export async function runDotNetCoverageStep({
     // Read-only verify cannot write a report into /repo, so no-fix runs the
     // consumer's command against a scratch copy of the git scope (shared with
     // the dotnet step via ctx.scratch) and validates the scratch report.
-    const workingRoot =
-        ctx.mode === "no-fix"
-            ? ensureScratch({
-                  scratch: ctx.scratch,
-                  repoRoot: ctx.repoRoot,
-                  files: trackedFiles,
-              })
-            : ctx.repoRoot;
-
-    const result = runner({
-        cmd: "sh",
-        args: ["-c", coverageConfig.command],
-        cwd: workingRoot,
+    const { workingRoot, failure } = runCoverageCommand({
+        mode: ctx.mode,
+        repoRoot: ctx.repoRoot,
+        scratch: ctx.scratch,
+        trackedFiles,
+        command: coverageConfig.command,
+        label: "dotnet-coverage",
+        runner,
     });
-    if (result.status !== 0) {
-        // Show stdout first: dotnet writes test/build failures there, while a
-        // stray first-run banner (now suppressed in the image) or noise lands
-        // on stderr — stderr-first used to mask the real failure.
-        const detail = [result.stdout, result.stderr]
-            .filter((s) => typeof s === "string")
-            .map((s) => s.trim())
-            .filter((s) => s !== "")
-            .join("\n");
-        return failed({
-            notice: `dotnet-coverage: coverage command failed: ${detail || "no output"}`,
-        });
+    if (failure !== null) {
+        return failure;
     }
 
     const coberturaPath = findCoberturaFile({ repoRoot: workingRoot });

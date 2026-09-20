@@ -42,7 +42,7 @@ interface StepInput {
     repoRoot: string;
     /** Git-tracked files relative to repoRoot (lib/git.mts). */
     files: string[];
-    /** Shared scratch box: the dotnet steps build in /tmp for no-fix (finding #10). */
+    /** Shared scratch box: node-coverage and the dotnet steps work in /tmp for no-fix (findings #10, #20). */
     scratch?: Scratch;
 }
 
@@ -83,8 +83,11 @@ const STEPS: Step[] = [
     },
     {
         id: "node-coverage",
-        run: ({ mode, repoRoot }) =>
-            runNodeCoverageStep({ ctx: { mode, repoRoot } }),
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runNodeCoverageStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
     },
     {
         id: "dotnet",
