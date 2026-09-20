@@ -109,5 +109,22 @@ COPY runtime /opt/defined/runtime
 COPY lib /opt/defined/lib
 COPY standards /opt/defined/standards
 
+# Run as the base image's unprivileged `node` user (uid 1000), never root
+# (SonarQube docker:S6471). The gate only ever writes to the mounted repo and
+# its dependency caches, so the run sites map the invoking host user onto this
+# uid — podman via `--userns=keep-id`, docker via `--user` (see comply.sh and
+# cli/defined). The home, the cache mount points and the node_modules mount
+# point are world-writable so whichever uid ends up mapped can use them: podman
+# chowns fresh named volumes to the mapped user, but docker (rootful) does not,
+# so the image's modes are what the volume inherits. The home holds no secrets.
+RUN install -d -m 0777 \
+        /home/node \
+        /home/node/.npm \
+        /home/node/.nuget/packages \
+        /repo/node_modules
+ENV HOME=/home/node \
+    NUGET_PACKAGES=/home/node/.nuget/packages
+USER node
+
 WORKDIR /repo
 ENTRYPOINT ["node", "/opt/defined/runtime/comply.mts"]

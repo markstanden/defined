@@ -127,13 +127,24 @@ main() {
         mount_arg="-v ${root}:/repo:ro"
     fi
 
+    # The image runs as non-root (uid 1000): map the invoking host user onto
+    # that uid so the mounted repo and the cache volumes stay writable —
+    # podman via --userns=keep-id, docker (rootful) via --user.
+    local -a user_args
+    if [[ "${engine}" == "podman" ]]; then
+        user_args=("--userns=keep-id:uid=1000,gid=1000")
+    else
+        user_args=(--user "$(id -u):$(id -g)")
+    fi
+
     # shellcheck disable=SC2086 # mount_arg is two words by design
     "${engine}" run --rm \
+        "${user_args[@]}" \
         ${mount_arg} \
         -v "defined-node-${pin}-${repo_hash}:/repo/node_modules" \
-        -v "defined-npm-${repo_hash}:/root/.npm" \
-        -v "defined-nuget-${repo_hash}:/root/.nuget/packages" \
-        -e "NUGET_PACKAGES=/root/.nuget/packages" \
+        -v "defined-npm-${repo_hash}:/home/node/.npm" \
+        -v "defined-nuget-${repo_hash}:/home/node/.nuget/packages" \
+        -e "NUGET_PACKAGES=/home/node/.nuget/packages" \
         --workdir /repo \
         "${image}" "${verb}"
 }
