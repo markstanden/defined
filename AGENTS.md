@@ -26,9 +26,12 @@ end-to-end gate.
   `cli/install.test.mts` with fake engines/git/curl injected on PATH (no real
   engine or network needed). The producer repo commits its own versionless
   config — a coverage-only `.defined.json`.
-- Root `.github/workflows/*.yml` hold one consumer-facing reusable workflow and
-  two repository CI workflows. The only reusable workflow is `defined--verify.yml`
-  (the gate). Naming convention: `<namespace>--<loose-verb>[--<target>].yml`
+- Root `.github/workflows/*.yml` hold one managed gate workflow and two
+  repository CI workflows. `defined--verify.yml` is the managed gate workflow:
+  it is installed into consumer repos by `comply` (see below), carries its own
+  name-agnostic triggers, and reads the gate version from the consumer's
+  `.defined.json` — it is **not** a reusable workflow, so no consumer pins a
+  gate ref. Naming convention: `<namespace>--<loose-verb>[--<target>].yml`
   (double hyphen separates the segments; the verb names the intent, not the tool
   — see `standards/naming.md`). The other two ARE CI for this repo:
   `defined--publish.yml` (builds + pushes the gate image to ghcr on **every**
@@ -37,15 +40,18 @@ end-to-end gate.
   SHA and `latest`) and `defined--test.yml`
   (runs the gate's own unit + broken-fixture suite, the self-host gate with
   coverage, and a guarded SonarQube scan on PRs and merges).
-- `standards/workflows/pipeline.example.yml` — the `.example` in the stem is
-  deliberate: it is a template for consumer pipelines, not a real workflow
-  here. The `.yml` extension means the gate's `yaml` step lints it, so the
-  template stays valid YAML.
-- `standards/.editorconfig`, `standards/Directory.Build.props` and
-  `standards/.gitattributes` are the single source of truth for shared root
-  configs — `comply`'s bootstrap installs them into consumer repo roots from
-  the baked image. The repo's own root `.editorconfig`,
-  `Directory.Build.props` and `.gitattributes` are copies of the `standards/`
+- `standards/workflows/defined--verify.yml` is the single source of truth for
+  the managed gate workflow; `.github/workflows/defined--verify.yml` here is the
+  installed copy. Its job skips this repo — the guard excludes
+  `markstanden/defined` — because the published image would compare its baked
+  standards against the working tree and false-fail on any managed-file change;
+  `defined--test.yml` covers this repo instead.
+- `standards/.editorconfig`, `standards/Directory.Build.props`,
+  `standards/.gitattributes` and `standards/workflows/defined--verify.yml` are
+  the single source of truth for managed files — `comply`'s bootstrap installs
+  them into consumer repos from the baked image. The repo's own root
+  `.editorconfig`, `Directory.Build.props`, `.gitattributes` and
+  `.github/workflows/defined--verify.yml` are copies of the `standards/`
   versions (self-hosted: `comply` on this repo bootstraps nothing beyond the
   AGENTS block but runs the coverage gate on its own tests). Managed files are
   compared byte-for-byte: any difference is drift and fails — there is no

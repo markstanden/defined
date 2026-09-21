@@ -1,4 +1,4 @@
-// Tests for setup.mts: bootstrap installs configs and seeds AGENTS.md.
+// Tests for setup.mts: bootstrap installs managed files and seeds AGENTS.md.
 // Run: node --test setup.test.mts
 
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ async function makeTempRepo(): Promise<string> {
     return root;
 }
 
-test("runSetup installs root configs and seeds the AGENTS.md managed block", async () => {
+test("runSetup installs managed files and seeds the AGENTS.md managed block", async () => {
     const repo = await makeTempRepo();
     try {
         await runSetup({ startDir: repo });
@@ -34,6 +34,14 @@ test("runSetup installs root configs and seeds the AGENTS.md managed block", asy
             (await readFile(join(repo, ".gitattributes"), "utf8")).includes(
                 "eol=lf",
             ),
+        );
+        assert.ok(
+            (
+                await readFile(
+                    join(repo, ".github/workflows/defined--verify.yml"),
+                    "utf8",
+                )
+            ).includes("defined-gate"),
         );
         const agents = await readFile(join(repo, "AGENTS.md"), "utf8");
         assert.ok(agents.includes(BLOCK_START));
@@ -105,7 +113,7 @@ test("runSetup is idempotent: re-run leaves AGENTS.md byte-identical", async () 
     }
 });
 
-test("runSetup leaves a drifted root config untouched (raises-only)", async () => {
+test("runSetup leaves a drifted managed file untouched (raises-only)", async () => {
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
@@ -117,7 +125,7 @@ test("runSetup leaves a drifted root config untouched (raises-only)", async () =
         );
         const check = await checkSetup({ startDir: repo });
         assert.equal(
-            check.configs.find((c) => c.name === ".editorconfig")?.status,
+            check.files.find((c) => c.name === ".editorconfig")?.status,
             "drift",
             "drift surfaces through checkSetup for the report contract",
         );
@@ -131,16 +139,16 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
     try {
         const before = await checkSetup({ startDir: repo });
         assert.deepEqual(
-            before.configs.map((c) => c.status),
-            ["absent", "absent", "absent"],
+            before.files.map((c) => c.status),
+            ["absent", "absent", "absent", "absent"],
         );
         assert.equal(before.agents, "absent");
 
         await runSetup({ startDir: repo });
         const after = await checkSetup({ startDir: repo });
         assert.deepEqual(
-            after.configs.map((c) => c.status),
-            ["present", "present", "present"],
+            after.files.map((c) => c.status),
+            ["present", "present", "present", "present"],
         );
         assert.equal(after.agents, "present");
     } finally {
@@ -148,13 +156,13 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
     }
 });
 
-test("checkSetup reports drift when a config differs", async () => {
+test("checkSetup reports drift when a managed file differs", async () => {
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
         const check = await checkSetup({ startDir: repo });
         assert.equal(
-            check.configs.find((c) => c.name === ".editorconfig")?.status,
+            check.files.find((c) => c.name === ".editorconfig")?.status,
             "drift",
         );
     } finally {

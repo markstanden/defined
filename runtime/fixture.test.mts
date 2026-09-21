@@ -106,7 +106,7 @@ test(
                     `${step} should be picked up by the check-only pass`,
                 );
             }
-            // Bootstrap drift is a check-only finding too (fixture has no configs).
+            // Bootstrap drift is a check-only finding too (fixture has no managed files).
             assert.match(checkOnly.stdout, /^fail bootstrap /m);
             assertTreeUntouched(root, before);
 
@@ -158,7 +158,7 @@ test(
         try {
             await createBrokenFixture({ root });
 
-            // comply (default) bootstraps configs + repairs safe findings;
+            // comply (default) bootstraps managed files + repairs safe findings;
             // workflow stays red until a human/agent fixes the check-only finding.
             const comply = run({
                 cmd: gateShim(),

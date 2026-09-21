@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-09-20 | scope=standards/naming.md -->
+<!-- update: agent=opencode | date=2026-09-21 | scope=standards/naming.md -->
 
 # Naming conventions
 
@@ -38,8 +38,10 @@ The gate's three workflow files:
 defined--verify.yml    defined--test.yml    defined--publish.yml
 ```
 
-Only `defined--verify.yml` is a reusable workflow a consumer invokes at a job
-level; the other two are ordinary CI for this repo.
+`defined--verify.yml` is the managed gate workflow `comply` installs into
+consumer repos; it carries its own triggers and reads the gate version from the
+consumer's `.defined.json`. It is **not** a reusable workflow, so no consumer
+pins a gate ref. The other two are ordinary CI for this repo.
 
 Consequences:
 

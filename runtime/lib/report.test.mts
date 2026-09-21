@@ -10,7 +10,7 @@ import type { SetupCheck } from "../setup.mts";
 
 function cleanSetup(): SetupCheck {
     return {
-        configs: [
+        files: [
             { name: ".editorconfig", status: "present" },
             { name: "Directory.Build.props", status: "present" },
         ],
@@ -61,7 +61,7 @@ test("bootstrap absence and drift are agent-actionable fail lines", () => {
     const lines = formatReport({
         verb: "verify",
         setup: {
-            configs: [
+            files: [
                 { name: ".editorconfig", status: "absent" },
                 { name: "Directory.Build.props", status: "drift" },
             ],

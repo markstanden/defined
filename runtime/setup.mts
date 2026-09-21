@@ -2,13 +2,13 @@
 // setup.mts — gate bootstrap (decisions #13–14).
 //
 // runSetup is the write path, invoked as the first phase of `comply`; it
-// installs shared root configs from standards/ into the repo root, seeds
-// the AGENTS.md managed block from config/agents-block.md, and creates a
-// pinned .defined.json when the repo has none. Idempotent: re-runs rewrite
-// the block only, leave unchanged configs alone, and never touch an existing
-// .defined.json (raises-only — a differing config is left in place and
-// surfaces as drift). checkSetup is the read-only path used by `verify`; it
-// reports bootstrap state without writing a byte.
+// installs shared managed files from standards/ into the repo, seeds the
+// AGENTS.md managed block from config/agents-block.md, and creates a pinned
+// .defined.json when the repo has none. Idempotent: re-runs rewrite the block
+// only, leave unchanged managed files alone, and never touch an existing
+// .defined.json (raises-only — a differing file is left in place and surfaces
+// as drift). checkSetup is the read-only path used by `verify`; it reports
+// bootstrap state without writing a byte.
 //
 // Pure module: no top-level main — comply.mts owns the entry point, so this
 // file is never double-executed when imported.
@@ -26,23 +26,32 @@ import {
     type MarkedBlockStatus,
 } from "./lib/agents-block.mts";
 import {
-    checkRootConfigs,
-    installRootConfigs,
-    type CheckedConfig,
-} from "./lib/config-install.mts";
+    checkManagedFiles,
+    installManagedFiles,
+    type CheckedFile,
+    type ManagedFile,
+} from "./lib/managed-files.mts";
 import { gateConfigPath, standardsDir } from "./lib/config-path.mts";
 import { deriveRepoRoot } from "../lib/paths.mts";
 
-// Root configs shared with every consumer repo. standards/ is the single
-// source of truth (decision #19): these files live there and are installed
-// from it — no copied config/root/ that can drift. `.gitattributes` carries
-// the same LF/whitespace contract as .editorconfig's end_of_line, so checkout
-// line endings and `git diff --check` agree locally and in CI.
-const ROOT_CONFIG_NAMES = [
-    ".editorconfig",
-    "Directory.Build.props",
-    ".gitattributes",
-] as const;
+// Managed files shared with every consumer repo. standards/ is the single
+// source of truth (decision #19): each file lives there and is installed from
+// it — no copied config/root/ that can drift. Sources are relative to
+// standards/, targets to the repo root; they differ where standards/ does not
+// mirror the repo layout (the gate workflow). `.gitattributes` carries the
+// same LF/whitespace contract as .editorconfig's end_of_line, so checkout line
+// endings and `git diff --check` agree locally and in CI. The gate workflow is
+// managed like any other file: it carries no gate version, so the pin lives
+// only in .defined.json (decision #36).
+const MANAGED_FILES: ManagedFile[] = [
+    { source: ".editorconfig", target: ".editorconfig" },
+    { source: "Directory.Build.props", target: "Directory.Build.props" },
+    { source: ".gitattributes", target: ".gitattributes" },
+    {
+        source: "workflows/defined--verify.yml",
+        target: ".github/workflows/defined--verify.yml",
+    },
+];
 
 const CONFIG_FILE = ".defined.json";
 
@@ -81,9 +90,9 @@ async function ensureConfigFile(repoRoot: string): Promise<void> {
 }
 
 /**
- * Bootstrap a target repo (startDir's git root): install root configs, upsert
+ * Bootstrap a target repo (startDir's git root): install managed files, upsert
  * the AGENTS.md managed block, and seed a pinned .defined.json when absent.
- * Order matters — the block references the installed configs, so it reflects
+ * Order matters — the block references the installed files, so it reflects
  * reality by the time it is written. Prints nothing: `comply` renders output
  * via the report contract.
  */
@@ -93,9 +102,9 @@ export async function runSetup({
     startDir: string;
 }): Promise<void> {
     const repoRoot = await deriveRepoRoot({ startDir });
-    await installRootConfigs({
+    await installManagedFiles({
         sourceDir: await standardsDir(),
-        names: [...ROOT_CONFIG_NAMES],
+        files: MANAGED_FILES,
         repoRoot,
     });
     await ensureConfigFile(repoRoot);
@@ -107,7 +116,7 @@ export async function runSetup({
 }
 
 export interface SetupCheck {
-    configs: CheckedConfig[];
+    files: CheckedFile[];
     agents: MarkedBlockStatus;
 }
 
@@ -123,9 +132,9 @@ export async function checkSetup({
     startDir: string;
 }): Promise<SetupCheck> {
     const repoRoot = await deriveRepoRoot({ startDir });
-    const configs = await checkRootConfigs({
+    const files = await checkManagedFiles({
         sourceDir: await standardsDir(),
-        names: [...ROOT_CONFIG_NAMES],
+        files: MANAGED_FILES,
         repoRoot,
     });
     const block = await readMarkedBlock({
@@ -135,5 +144,5 @@ export async function checkSetup({
         filePath: join(repoRoot, "AGENTS.md"),
         block,
     });
-    return { configs, agents };
+    return { files, agents };
 }

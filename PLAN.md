@@ -5,7 +5,7 @@
 `defined` is a portable engineering quality gate that works against **any**
 project. Standards are defined once, distilled into agent guidance, and enforced
 mechanically by one pinned container runtime, exposed through an agent-first
-local CLI and one reusable pipeline workflow: local green = pipeline green.
+local CLI and one managed pipeline workflow: local green = pipeline green.
 
 `defined` is deliberately **not** a general CI/CD runtime: no release artifacts,
 deployment, infrastructure operations, hosted service wrappers, or bespoke
@@ -118,7 +118,7 @@ defined verify   # pipeline-only: the read-only check
 
 - **`comply`** (the only verb a developer or agent reaches for): resolve git
   root → read/validate `.defined.json` pin → pull image → bootstrap managed
-  configs + AGENTS block → full internal `fix` pass → fresh internal `no-fix`
+  files + AGENTS block → full internal `fix` pass → fresh internal `no-fix`
   verify pass → exit 0 only when green. The second pass is mandatory. Always
   use `comply` for local work; `verify` is not it.
 - **`verify`**: resolve pin → check managed artifacts present/current (never
@@ -132,7 +132,7 @@ defined verify   # pipeline-only: the read-only check
 ### Commit hooks
 
 Defined does **not** install or manage git hooks — the managed bootstrap
-surface stays the byte-identical root configs plus the AGENTS block, and
+surface stays the byte-identical managed files plus the AGENTS block, and
 `comply`/`verify` remain the whole enforcement loop. Instead
 `standards/githooks/pre-commit` is an
 optional **reference** hook the consumer owns and opts into (commit it to
@@ -171,22 +171,27 @@ and `--no-verify` bypasses it, so it is convenience, not a guarantee.
 - `runtime/comply.sh` is an internal source-development shim, not a third
   public API; it defaults to the `comply` verb and `--check-only` runs the
   read-only no-fix pass.
-- Release identity is immutable (same commit SHA across all three surfaces):
+- Release identity is immutable and lives in exactly one place — the consumer's
+  committed `.defined.json` (decision #36). The managed gate workflow
+  (`standards/workflows/defined--verify.yml`, installed by `comply`) carries no
+  version: at run time it reads `.defined.json` for the image tag, the same pin
+  the local launcher reads.
 
 ```text
 Git SHA
-├── reusable workflow ref: markstanden/defined/...@<sha>
-├── image tag:             ghcr.io/markstanden/defined:<sha>
-└── consumer pin:          .defined.json "version" → <sha>
+├── image tag:    ghcr.io/markstanden/defined:<sha>
+└── consumer pin: .defined.json "version" → <sha>
 ```
 
-GitHub forbids an expression in a reusable workflow `uses:` ref, so the
-consumer writes the workflow SHA in YAML; `.defined.json` removes the
-separate `image-tag` input so local and CI share one source. Local green =
-merge green only while the workflow ref and `.defined.json` pin match — the
-consumer keeps those in step. An omitted `version` deliberately rides the
-current published default image (`latest`) — defaults are obvious, a written
-pin is the override that restores immutability.
+GitHub forbids an expression in a reusable workflow `uses:` ref, so a
+remotely-called workflow would force the consumer to write the gate SHA in YAML
+— a second copy that drifts. The managed workflow removes the `uses:` entirely
+(the only `uses:` is `actions/checkout`, pinned to a commit hash for zizmor):
+the workflow is installed byte-identically by `comply`, so no gate ref is ever
+written by hand. Local green = merge green by construction, because there is
+nothing to keep in step. An omitted `version` deliberately rides the current
+published default image (`latest`) — defaults are obvious, a written pin is the
+override that restores immutability.
 
 For the identity to hold, every `main` commit needs an image tag, so
 `defined--publish.yml` runs on **every** main push rather than being filtered to
@@ -259,13 +264,15 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
 
 ### Bootstrap contract
 
-`comply` installs managed root configs (`.editorconfig`,
-`Directory.Build.props`, `.gitattributes`) and a marker-delimited block in
-consumer `AGENTS.md` from the image-baked versions, and seeds that block
-idempotently without clobbering project content. Managed files are compared
-byte-for-byte: an identical file is left alone, any difference is drift and
-fails. There is no semantic merge — the managed files are the floor and must be
-an exact copy.
+`comply` installs managed files (`.editorconfig`, `Directory.Build.props`,
+`.gitattributes`, and the gate workflow at `.github/workflows/defined--verify.yml`)
+and a marker-delimited block in consumer `AGENTS.md` from the image-baked
+versions, and seeds that block idempotently without clobbering project content.
+Managed files are compared byte-for-byte: an identical file is left alone, any
+difference is drift and fails. There is no semantic merge — the managed files
+are the floor and must be an exact copy. Sources live under `standards/` and
+targets under the repo root; the two differ only for the workflow, which lives
+at `standards/workflows/` but installs into `.github/workflows/`.
 
 The managed `.gitattributes` pins the checkout line-ending contract
 (`* text=auto eol=lf whitespace=trailing-space,space-before-tab,cr-at-eol` plus
@@ -297,9 +304,10 @@ defined/
 │   └── config/                       # travelling tool/agent configuration
 ├── lib/                              # shared gate helpers: git, paths, proc
 ├── standards/                        # authoritative house standards/config
+│   └── workflows/defined--verify.yml # managed gate workflow (installed by setup)
 ├── practices/                        # explanatory guidance
 └── .github/workflows/
-    ├── defined--verify.yml           # sole consumer-facing workflow
+    ├── defined--verify.yml           # installed copy of the managed workflow
     ├── defined--test.yml             # this repo's CI
     └── defined--publish.yml          # image publication
 ```
