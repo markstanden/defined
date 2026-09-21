@@ -430,7 +430,9 @@ install_launcher_at() {
 
 # `defined update [<sha>|latest]`: move the pin, the installed launcher and the
 # local image together. `latest` resolves to a concrete 12-char SHA (never a
-# mutable tag). Needs the network; `comply`/`verify` stay offline-capable.
+# mutable tag). Needs the network; `comply`/`verify` stay offline-capable. The
+# image is confirmed fetchable *before* the pin is written, so a failed update
+# cannot leave the repo pinned to an image that does not exist.
 run_update() {
     local arg="${1:-latest}"
     if [[ -n "${DEFINED_OFFLINE:-}" ]]; then
@@ -461,6 +463,20 @@ run_update() {
 
     local engine
     engine="$(pick_engine)" || return 1
+
+    # Pre-flight: confirm the image can be fetched before mutating anything, so
+    # a failed update can never leave the repo pinned to an image that does not
+    # exist. Local presence needs no network; otherwise the registry must
+    # confirm the tag.
+    if [[ -z "$(image_digest "${engine}" "${image}")" ]]; then
+        local remote_state=0
+        remote_image_state "${engine}" "${image}" || remote_state=$?
+        case "${remote_state}" in
+            0) ;;
+            1) die "no published image for ${image} — refusing to pin a revision whose gate image is missing" ;;
+            *) die "cannot confirm ${image} is published — check your network" ;;
+        esac
+    fi
 
     # Order: pin, launcher, image. Re-running is a no-op at each step.
     write_pin "${root}" "${pin}"

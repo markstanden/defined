@@ -1,12 +1,12 @@
 name: "Publish Defined Image"
 
 on:
+    # Every main push, deliberately unfiltered: `defined update latest` resolves
+    # to the merge commit, so each main SHA must carry an image tag or the pin
+    # it writes would be unusable. Unchanged layers dedupe, so re-pushing an
+    # identical gate is cheap.
     push:
         branches: [main]
-        paths:
-            - "runtime/**"
-            - "lib/**"
-            - "standards/**"
     workflow_dispatch:
 
 concurrency:
