@@ -120,11 +120,22 @@ COPY standards /opt/defined/standards
 RUN install -d -m 0777 \
         /home/node \
         /home/node/.npm \
+        /home/node/.nuget \
         /home/node/.nuget/packages \
         /repo/node_modules
 ENV HOME=/home/node \
     NUGET_PACKAGES=/home/node/.nuget/packages
 USER node
+
+# Prove the cache mount points are writable by the run user. `install -d` only
+# applies its mode to the named leaf directories: an intermediate such as
+# /home/node/.nuget is created root-owned, and dotnet then cannot write its
+# user config (NuGet/NuGet.Config) under $HOME/.nuget. Fail the *build* here
+# rather than the first dotnet consumer at run time.
+RUN test -w /home/node/.npm && \
+    test -w /home/node/.nuget && \
+    test -w /home/node/.nuget/packages && \
+    test -w /repo/node_modules
 
 WORKDIR /repo
 ENTRYPOINT ["node", "/opt/defined/runtime/comply.mts"]
