@@ -62,7 +62,7 @@ it run the scan in their own pipeline against the gate-generated report.
 Steps run in fixed order, strictly sequentially:
 
 ```text
-naming → node → node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow → tofu
+naming → node-deps → node → node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow → tofu
 ```
 
 **Scope — the gate's universe is git's.** Every step judges the repo's git
@@ -84,27 +84,31 @@ something gets it excluded everywhere; committed content is always gated.
 - Each ecosystem step activates on detection (a `package.json`/`*.md` for
   `node`, a `.csproj`/`.sln`/`.slnx` for `dotnet`, lowercase `*.sh` for `shell`,
   `.yml`/`.yaml` for `yaml`, workflow files for `workflow`, root tofu files for
-  `tofu`); missing ecosystems skip cleanly. `node-checks` activates on a
-  `.defined.json` `node` entry and runs the consumer's declared lint/typecheck/
-  test commands against the consumer's own installed toolchain (nested and
-  monorepo `package.json` locations supported; the sole tracked manifest needs
-  no `dir`). Absent entry = skip; a declared package without a manifest fails
-  loudly.
+  `tofu`); missing ecosystems skip cleanly. `node-deps` restores the consumer's
+  dependencies before `node` and `node-checks` run: every declared
+  `node.packages` entry, plus the root package whenever a consumer Prettier
+  config is tracked, so a config-declared plugin resolves on a fresh checkout
+  (issue #40). `node-checks` activates on a `.defined.json` `node` entry and runs
+  the consumer's declared lint/typecheck/test commands against the consumer's
+  own installed toolchain (nested and monorepo `package.json` locations
+  supported; the sole tracked manifest needs no `dir`). Absent entry = skip; a
+  declared package without a manifest fails loudly.
 - Coverage steps (`node-coverage`, `dotnet-coverage`) activate on a `.defined.json`
   `coverage` entry for their ecosystem; absent entry = skip. They run the
   consumer's coverage command — in the repo for `fix`, in the no-fix scratch for
   `verify` — then enforce the configured line/branch/function minimums (default
   80% line) from the resulting lcov / Cobertura report. No committed or staged
   report is ever required: `verify` generates and checks one deterministically.
-- Coverage, node-checks and build steps must write into the repo
-  (`coverage/lcov.info` for node, `node_modules/` for node-checks,
-  `obj/`/`bin/`/`TestResults/` for dotnet), which a read-only `verify`
-  (local `defined verify`, CI) cannot do in place. No-fix therefore runs
-  `node-checks`, `node-coverage`, `dotnet` and `dotnet-coverage` against a
-  **scratch copy of the repo's git scope under `/tmp`**
-  (`runtime/lib/scratch.mts`) — one copy shared across those steps, created on
-  first use, cleaned after the pass. Fix mode works in the repo as before. The
-  repo mount is never written by either mode.
+- Dependency restore, formatting, node-checks and coverage must write into the
+  repo (`node_modules/` for node-deps, prettier's rewrites for node,
+  `coverage/lcov.info` for node-coverage, `obj/`/`bin/`/`TestResults/` for
+  dotnet), which a read-only `verify` (local `defined verify`, CI) cannot do in
+  place. No-fix therefore runs `node-deps`, `node`, `node-checks`,
+  `node-coverage`, `dotnet` and `dotnet-coverage` against a **scratch copy of
+  the repo's git scope under `/tmp`** (`runtime/lib/scratch.mts`) — one copy
+  shared across those steps, created on first use, cleaned after the pass. Fix
+  mode works in the repo as before. The repo mount is never written by either
+  mode.
 - `smoke` always probes the container's git.
 - Missing applicable tools fail loudly pointing at the Containerfile — there is
   no optional tier.
@@ -247,9 +251,9 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
   `TestResults/coverage.cobertura.xml`).
 
 - Absent `node` section (or an entry with no `checks`) = the `node-checks` step
-  skips. Checks run against the consumer's own toolchain: the gate restores the
-  package's dependencies first (`npm ci` / `yarn` / `pnpm` by lockfile, or an
-  explicit `install` command; `false` skips restore) and prepends the package's
+  skips. The `node-deps` step restores the package's dependencies first
+  (`npm ci` / `yarn` / `pnpm` by lockfile, or an explicit `install` command;
+  `false` skips restore), and the checks then prepend the package's
   `node_modules/.bin` to `PATH`, so `eslint`/`tsc`/`vitest` resolve to the
   consumer's versions, never the gate's.
 - The flat form above targets the sole tracked `package.json` (any depth); set
@@ -344,7 +348,9 @@ consumer's `.gitleaksignore` baseline), #25 (the `naming` step enforces the
 workflow-filename grammar and runs consumer-declared rules), #26 (general naming
 doctrine lives in `standards/naming.md` + `standards/naming/`), #27
 (consumer-owned prettier config wins), #28 (`.gitattributes` is managed), #35
-(the launcher gains `version`/`update` and a verified `cli/install.sh`).
+(the launcher gains `version`/`update` and a verified `cli/install.sh`), #40
+(`node-deps` restores consumer dependencies before formatting, so a
+config-declared Prettier plugin resolves on a fresh checkout).
 
 Both previously unfiled items are now delivered:
 

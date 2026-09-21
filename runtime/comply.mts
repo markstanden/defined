@@ -8,11 +8,11 @@
 //                    pass → non-zero for any drift, finding or failure.
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
-// `verify` shares the orchestrator. Steps run in fixed order (naming → node →
-// node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke →
-// yaml → workflow → tofu), strictly sequentially. Output follows the report
-// contract (decision #24): green runs print exactly one `compliant` line;
-// anything else prints a stable, agent-actionable breakdown.
+// `verify` shares the orchestrator. Steps run in fixed order (naming →
+// node-deps → node → node-checks → node-coverage → dotnet → dotnet-coverage →
+// shell → smoke → yaml → workflow → tofu), strictly sequentially. Output
+// follows the report contract (decision #24): green runs print exactly one
+// `compliant` line; anything else prints a stable, agent-actionable breakdown.
 
 import { spawnSync } from "node:child_process";
 
@@ -29,6 +29,7 @@ import { runDotNetStep } from "./steps/dotnet.mts";
 import { runDotNetCoverageStep } from "./steps/dotnet-coverage.mts";
 import { runNamingStep } from "./steps/naming.mts";
 import { runNodeChecksStep } from "./steps/node-checks.mts";
+import { runNodeDepsStep } from "./steps/node-deps.mts";
 import { runNodeStep } from "./steps/node.mts";
 import { runNodeCoverageStep } from "./steps/node-coverage.mts";
 import { runShellStep } from "./steps/shell.mts";
@@ -43,7 +44,7 @@ interface StepInput {
     repoRoot: string;
     /** Git-tracked files relative to repoRoot (lib/git.mts). */
     files: string[];
-    /** Shared scratch box: node-coverage and the dotnet steps work in /tmp for no-fix (findings #10, #20). */
+    /** Shared scratch box: node-deps, node-coverage and the dotnet steps work in /tmp for no-fix (findings #10, #20). */
     scratch?: Scratch;
 }
 
@@ -77,9 +78,20 @@ const STEPS: Step[] = [
             }),
     },
     {
+        id: "node-deps",
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runNodeDepsStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
+    },
+    {
         id: "node",
-        run: ({ mode, repoRoot, files }) =>
-            runNodeStep({ ctx: { mode, repoRoot }, trackedFiles: files }),
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runNodeStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
     },
     {
         id: "node-checks",

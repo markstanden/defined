@@ -73,11 +73,14 @@ record — read it before touching anything gate-related):
 - TypeScript core, Node ≥26 strip-types: **no enums/namespaces** (bare string
   literal unions), extensioned imports, zero dependencies, tested with
   `node --test` colocated as `*.test.mts`.
-- Steps run in fixed order `naming → node → node-checks → node-coverage → dotnet
-→ dotnet-coverage → shell → smoke → yaml → workflow → tofu`; missing applicable
-  tools fail loudly pointing at the Containerfile (no optional tier). Coverage
-  steps activate on a `.defined.json` `coverage` entry; `node-checks` activates
-  on a `node` entry (see `runtime/lib/config.mts`).
+- Steps run in fixed order `naming → node-deps → node → node-checks →
+node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow →
+tofu`; missing applicable tools fail loudly pointing at the Containerfile (no
+  optional tier). Coverage steps activate on a `.defined.json` `coverage` entry;
+  `node-checks` activates on a `node` entry (see `runtime/lib/config.mts`);
+  `node-deps` restores the consumer's dependencies (declared packages, plus the
+  root package when a consumer Prettier config is tracked) before the node
+  family runs.
 - **Use the gate, not ad-hoc formatting**: after a change lands, run
   `./runtime/comply.sh` with no flags — **one command, one output**. It bootstraps,
   repairs (formats, fixes safe findings) and then runs a fresh verify, printing a

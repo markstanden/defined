@@ -46,6 +46,29 @@ export function ensureScratch({
     return dir;
 }
 
+/**
+ * The directory a write-capable step should work in: the repo itself for fix
+ * mode, the shared /tmp scratch copy for no-fix. Every step that touches the
+ * working tree (formatting, checks, coverage, dotnet builds) calls this, so a
+ * pass has exactly one working root and dependency restore lands where the
+ * commands that need it will look (issue #40).
+ */
+export function resolveWorkingRoot({
+    mode,
+    repoRoot,
+    scratch,
+    files,
+}: {
+    mode: "fix" | "no-fix";
+    repoRoot: string;
+    scratch?: Scratch;
+    files: string[];
+}): string {
+    return mode === "no-fix"
+        ? ensureScratch({ scratch, repoRoot, files })
+        : repoRoot;
+}
+
 /** Remove a scratch dir created by ensureScratch. No-op when none exists. */
 export function cleanupScratch(scratch: Scratch | null | undefined): void {
     if (scratch?.dir) {

@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-08-31 | scope=standards/testing/node-testing.md -->
+<!-- update: agent=opencode | date=2026-09-21 | scope=standards/testing/node-testing.md -->
 
 # Node testing and quality standards
 
@@ -15,12 +15,15 @@ indentation):
 | ---------- | -------- | ---------------------- |
 | Formatting | prettier | `comply` (repair pass) |
 
+The `node-deps` step restores the consumer's dependencies first — every
+declared `node.packages` entry, plus the root package when a consumer Prettier
+config is tracked, so a config-declared plugin resolves on a fresh checkout.
 The `node-checks` step then runs the consumer's own project checks — ESLint,
 `tsc --noEmit`, tests — when the repo declares them under `.defined.json`'s
-`node` key (see the README). The gate restores the package's dependencies and
-prepends the package's `node_modules/.bin` to `PATH`, so the consumer's pinned
-toolchain is used, never the gate's global tools; nested and monorepo
-`package.json` locations are supported. An absent declaration skips cleanly.
+`node` key (see the README), prepending the package's `node_modules/.bin` to
+`PATH`, so the consumer's pinned toolchain is used, never the gate's global
+tools; nested and monorepo `package.json` locations are supported. An absent
+declaration skips cleanly.
 
 ```jsonc
 "node": {

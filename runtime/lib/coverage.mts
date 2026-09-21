@@ -7,7 +7,7 @@
 // owns that shared command step so callers differ only in config key and what
 // they do with the result.
 
-import { ensureScratch, type Scratch } from "./scratch.mts";
+import { resolveWorkingRoot, type Scratch } from "./scratch.mts";
 import { run } from "../../lib/proc.mts";
 
 type Runner = typeof run;
@@ -40,10 +40,12 @@ export function runScopedCommand({
     command: string;
     runner: Runner;
 }): ScopedCommandOutcome {
-    const workingRoot =
-        mode === "no-fix"
-            ? ensureScratch({ scratch, repoRoot, files: trackedFiles })
-            : repoRoot;
+    const workingRoot = resolveWorkingRoot({
+        mode,
+        repoRoot,
+        scratch,
+        files: trackedFiles,
+    });
 
     const result = runner({
         cmd: "sh",

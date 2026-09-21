@@ -33,9 +33,14 @@
 // (markdown, JSON/JSONC, YAML, CSS) regardless of Node, so a docs-only repo
 // still gets markdown formatting — the house prettier config claims repo-wide
 // scope and the step must honour it. ESLint/tsc/vitest are not here: they run
-// in the dedicated `node-checks` step, which restores the consumer's own
-// dependencies and resolves the consumer's local binaries (issue #19/#21).
-// The runner is injected so tests need no host binaries.
+// in the dedicated `node-checks` step, against the dependencies `node-deps`
+// restored (issue #19/#21/#40).
+//
+// Working root: prettier runs in the same directory the node family restores
+// and checks in — the repo for fix, the shared /tmp scratch copy for no-fix —
+// so a consumer config that declares plugins resolves them from the restored
+// dependencies on a fresh checkout (issue #40). The runner is injected so tests
+// need no host binaries.
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -46,19 +51,20 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
+import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import { gateConfigPath } from "../lib/config-path.mts";
+import { filterPackageJsons } from "../lib/node-packages.mts";
+import { CONSUMER_PRETTIER_CONFIGS } from "../lib/prettier-config.mts";
 
 export interface NodeRunContext {
     mode: "fix" | "no-fix";
     repoRoot: string;
+    /** Shared scratch box (no-fix): the same copy node-deps restored into. */
+    scratch?: Scratch;
 }
 
 type Runner = typeof run;
-
-export function filterPackageJsons({ files }: { files: string[] }): string[] {
-    return files.filter((file) => file.split("/").pop() === "package.json");
-}
 
 export function filterMarkdownFiles({ files }: { files: string[] }): string[] {
     return files.filter((file) => file.endsWith(".md"));
@@ -140,36 +146,16 @@ export async function prettierIgnoreArgs({
 }
 
 /**
- * Prettier config file names a consumer may own at the repo root, in prettier's
- * own resolution order. The gate's travelling config is pure defaults
- * (`export default {}`), so a consumer config replaces rather than layers —
- * which is equivalent to layering over an empty base.
- */
-export const CONSUMER_PRETTIER_CONFIGS = [
-    "prettier.config.mjs",
-    "prettier.config.js",
-    "prettier.config.cjs",
-    "prettier.config.mts",
-    "prettier.config.cts",
-    "prettier.config.ts",
-    ".prettierrc",
-    ".prettierrc.json",
-    ".prettierrc.json5",
-    ".prettierrc.yml",
-    ".prettierrc.yaml",
-    ".prettierrc.js",
-    ".prettierrc.mjs",
-    ".prettierrc.cjs",
-    ".prettierrc.ts",
-] as const;
-
-/**
  * Effective prettier config args. The gate's own config travels with the image
  * so a repo with no preferences still formats to house defaults; a
  * consumer-owned config at the repo root wins when present, so a project can
  * express its own Prettier preferences without forking the gate. Indentation
  * stays owned by `.editorconfig` (installed by bootstrap): prettier gives
  * `.editorconfig` higher priority than `--config`, so the two cannot disagree.
+ *
+ * `repoRoot` here is the pass's working root: for no-fix it is the scratch
+ * copy, which is where node-deps restored the consumer's plugins, so a
+ * config-declared plugin resolves (issue #40).
  */
 export async function prettierConfigArgs({
     repoRoot,
@@ -217,16 +203,26 @@ export async function runNodeStep({
         });
     }
 
+    // The same working root node-deps restored into: repo for fix, shared
+    // scratch copy for no-fix. Prettier's own file paths stay repo-relative
+    // (the scratch mirrors the repo layout), but config, ignore file and CWD
+    // must point at the working root so consumer plugins resolve.
+    const workingRoot = resolveWorkingRoot({
+        mode: ctx.mode,
+        repoRoot: ctx.repoRoot,
+        scratch: ctx.scratch,
+        files: trackedFiles,
+    });
     const sharedArgs = [
-        ...(await prettierConfigArgs({ repoRoot: ctx.repoRoot })),
-        ...(await prettierIgnoreArgs({ repoRoot: ctx.repoRoot })),
+        ...(await prettierConfigArgs({ repoRoot: workingRoot })),
+        ...(await prettierIgnoreArgs({ repoRoot: workingRoot })),
     ];
 
     if (ctx.mode === "fix") {
         const write = runner({
             cmd: "prettier",
             args: ["--write", ...sharedArgs, ...prettierFiles],
-            cwd: ctx.repoRoot,
+            cwd: workingRoot,
         });
         if (write.status !== 0) {
             return failed({
@@ -239,7 +235,7 @@ export async function runNodeStep({
     const check = runner({
         cmd: "prettier",
         args: ["--check", ...sharedArgs, ...prettierFiles],
-        cwd: ctx.repoRoot,
+        cwd: workingRoot,
     });
     if (check.status !== 0) {
         const unformatted = check.stdout

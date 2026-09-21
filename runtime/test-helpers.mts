@@ -14,6 +14,41 @@ import { cleanupScratch } from "./lib/scratch.mts";
 
 type RunResult = { status: number; stdout?: string; stderr?: string };
 
+/** One recorded runner invocation, including the cwd/env a step supplied. */
+export interface RunnerCall {
+    cmd: string;
+    args: string[];
+    cwd?: string;
+    env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * Recording fake runner: keeps every full invocation (cmd, args, cwd, env) and
+ * maps a command to a canned result. For `sh -c` invocations the key is the
+ * shell command (`args[1]`); for a direct binary it is the binary name — so
+ * one outcome map drives both install commands and direct tool calls. Shared by
+ * the node-family step tests, which all need to assert working directories and
+ * PATH.
+ */
+export function recordingRunner(outcomes: Record<string, RunResult> = {}): {
+    runner: typeof import("../lib/proc.mts").run;
+    calls: RunnerCall[];
+} {
+    const calls: RunnerCall[] = [];
+    const runner = ((input: RunnerCall) => {
+        calls.push(input);
+        const command =
+            input.cmd === "sh" ? (input.args[1] ?? "sh") : input.cmd;
+        const o = outcomes[command] ?? { status: 0 };
+        return {
+            status: o.status,
+            stdout: o.stdout ?? "",
+            stderr: o.stderr ?? "",
+        } satisfies CommandResult;
+    }) as typeof import("../lib/proc.mts").run;
+    return { runner, calls };
+}
+
 type StepArgs = {
     ctx: {
         mode: "fix" | "no-fix";

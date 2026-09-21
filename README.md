@@ -58,14 +58,15 @@ and offline mode avoids podman's pasta backend, which fails on hosts without the
 `tun` kernel module; dependency restore then uses the named volumes' cache, so
 the image must already be present locally.
 
-The gate detects the stack (steps run in order `naming → node → node-checks →
-node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml → workflow →
-tofu`), skips cleanly when an ecosystem is absent, and fails loudly when a
-pinned tool is missing. Because `verify` never writes to the repo, the steps
-that must write — `node-checks`, `node-coverage` and the `dotnet` family — work
-in a scratch copy of the git scope under the container's `/tmp` (a read-only
-mount cannot host `node_modules/`, `coverage/lcov.info` or `obj/`/`bin/`); the
-repo checkout itself is never touched. Tool versions are pinned in
+The gate detects the stack (steps run in order `naming → node-deps → node →
+node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml →
+workflow → tofu`), skips cleanly when an ecosystem is absent, and fails loudly
+when a pinned tool is missing. Because `verify` never writes to the repo, the
+steps that must write — `node-deps`, `node`, `node-checks`, `node-coverage` and
+the `dotnet` family — work in a scratch copy of the git scope under the
+container's `/tmp` (a read-only mount cannot host `node_modules/`,
+`coverage/lcov.info` or `obj/`/`bin/`); the repo checkout itself is never
+touched. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 
