@@ -15,7 +15,7 @@ Install the `defined` launcher, then run it from a project root:
 ```bash
 bash cli/install.sh        # one-time install into ~/.local/bin
 
-defined comply             # bootstrap (managed files + AGENTS block) → repair → verify
+defined comply             # bootstrap (seeded defaults + managed workflow + AGENTS block) → repair → verify
 ```
 
 `cli/install.sh` resolves the revision to install (the current checkout when run
@@ -173,10 +173,13 @@ the image.
 3. **Gate locally** — run `defined comply`. It bootstraps `.editorconfig`,
    `Directory.Build.props`, `.gitattributes` and the gate workflow
    (`.github/workflows/defined--verify.yml`) into the repo and seeds the
-   AGENTS.md managed block, repairs safe findings, then re-verifies. Managed
-   files are installed from the image and must stay byte-identical — any
-   difference is drift and fails. Use `comply` every time — it is the whole
-   local loop; `verify` is reserved for CI.
+   AGENTS.md managed block, repairs safe findings, then re-verifies. The three
+   config files are **seeded defaults**: installed only when absent, so a repo
+   with its own rules keeps them and the gate never gated on theirs. The gate
+   workflow and the AGENTS block are **managed**: `comply` keeps the workflow
+   byte-identical to the image's copy (updating it when the gate changes).
+   Use `comply` every time — it is the whole local loop; `verify` is reserved
+   for CI.
 
     Prettier runs to house defaults; a consumer-owned `prettier.config.mjs` (or
     any `.prettierrc*` / `prettier.config.*` file) at the repo root is honoured

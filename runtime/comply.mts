@@ -227,10 +227,10 @@ export async function runGate({
             repoRoot,
             files: filesAfterSetup,
         });
-        // Setup is raises-only: a managed config that differs from the gate
-        // copy is left in place (repair cannot fix it), so report it as
-        // bootstrap drift through the same contract as the step findings —
-        // never a raw stack.
+        // Report any gate-owned bootstrap artifact still out of line after
+        // setup (the managed workflow and AGENTS block are brought to the gate
+        // copy; a seeded default the repo owns is never gated) through the same
+        // contract as the step findings — never a raw stack.
         const setup = await checkSetupFn({ startDir: repoRoot });
         const lines = reportFn({
             verb: "comply",

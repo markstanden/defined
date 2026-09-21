@@ -48,16 +48,18 @@ end-to-end gate.
   `defined--test.yml` covers this repo instead.
 - `standards/.editorconfig`, `standards/Directory.Build.props`,
   `standards/.gitattributes` and `standards/workflows/defined--verify.yml` are
-  the single source of truth for managed files — `comply`'s bootstrap installs
+  the single source of truth for shared files — `comply`'s bootstrap installs
   them into consumer repos from the baked image. The repo's own root
   `.editorconfig`, `Directory.Build.props`, `.gitattributes` and
   `.github/workflows/defined--verify.yml` are copies of the `standards/`
   versions (self-hosted: `comply` on this repo bootstraps nothing beyond the
-  AGENTS block but runs the coverage gate on its own tests). Managed files are
-  compared byte-for-byte: any difference is drift and fails — there is no
-  semantic merge. `.editorconfig` drives prettier (pure-defaults config reads it
-  natively), shfmt and IDEs from one source; `.gitattributes` pins the matching
-  LF/whitespace checkout contract.
+  AGENTS block but runs the coverage gate on its own tests). The three config
+  files are **seeded defaults** — installed only when absent, so a repo with
+  its own rules keeps them; the gate workflow is **managed** — `comply` brings a
+  differing copy back to the image's and `verify` fails on drift (there is no
+  semantic merge). `.editorconfig` drives prettier (pure-defaults config reads
+  it natively), shfmt and IDEs from one source; `.gitattributes` pins the
+  matching LF/whitespace checkout contract.
 
 ## The gate: how it works
 

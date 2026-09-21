@@ -131,9 +131,9 @@ defined verify   # pipeline-only: the read-only check
 
 ### Commit hooks
 
-Defined does **not** install or manage git hooks — the managed bootstrap
-surface stays the byte-identical managed files plus the AGENTS block, and
-`comply`/`verify` remain the whole enforcement loop. Instead
+Defined does **not** install or manage git hooks — the bootstrap surface stays
+the seeded defaults, the byte-identical managed workflow and the AGENTS block,
+and `comply`/`verify` remain the whole enforcement loop. Instead
 `standards/githooks/pre-commit` is an
 optional **reference** hook the consumer owns and opts into (commit it to
 their repo, point `core.hooksPath` at it): it runs `defined verify` verbatim.
@@ -264,22 +264,29 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
 
 ### Bootstrap contract
 
-`comply` installs managed files (`.editorconfig`, `Directory.Build.props`,
-`.gitattributes`, and the gate workflow at `.github/workflows/defined--verify.yml`)
-and a marker-delimited block in consumer `AGENTS.md` from the image-baked
-versions, and seeds that block idempotently without clobbering project content.
-Managed files are compared byte-for-byte: an identical file is left alone, any
-difference is drift and fails. There is no semantic merge — the managed files
-are the floor and must be an exact copy. Sources live under `standards/` and
-targets under the repo root; the two differ only for the workflow, which lives
-at `standards/workflows/` but installs into `.github/workflows/`.
+`comply` bootstraps a consumer repo from the image-baked versions under
+`standards/` and seeds a marker-delimited block in `AGENTS.md` idempotently
+without clobbering project content. Shared files come in two tiers:
 
-The managed `.gitattributes` pins the checkout line-ending contract
+- **Seeded defaults** — `.editorconfig`, `Directory.Build.props`,
+  `.gitattributes`. Installed only when absent: a repo with its own rules keeps
+  them, so the gate never overwrites and `verify` never gates on them. House
+  style is a default, not a mandate.
+- **Managed** — the gate workflow at `.github/workflows/defined--verify.yml`.
+  Byte-identical to the image: `comply` overwrites a differing copy so a gate
+  update propagates, and `verify` fails on drift (it is read-only). There is no
+  semantic merge.
+
+Sources live under `standards/` and targets under the repo root; the two differ
+only for the workflow, which lives at `standards/workflows/` but installs into
+`.github/workflows/`.
+
+The seeded `.gitattributes` pins the checkout line-ending contract
 (`* text=auto eol=lf whitespace=trailing-space,space-before-tab,cr-at-eol` plus
-binary rules), so it agrees with the managed `.editorconfig`'s
+binary rules), so it agrees with the seeded `.editorconfig`'s
 `end_of_line = lf` and with `git diff --check`, locally and in CI.
 
-The managed `.editorconfig` carries a test-code policy under the convention
+The seeded `.editorconfig` carries a test-code policy under the convention
 glob `[tests/**/*.cs]` (test projects live under `tests/`): xUnit idioms trip
 CA1707 (underscored `Method_State_Expected` names) and CA1515 (xUnit discovers
 only public test classes), both false positives for test code only, so they are

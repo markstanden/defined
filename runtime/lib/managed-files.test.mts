@@ -1,4 +1,4 @@
-// Tests for lib/managed-files.mts: byte-identical managed-file install + check.
+// Tests for lib/managed-files.mts: mode-aware install + check of shared files.
 // Run: node --test lib/managed-files.test.mts
 
 import assert from "node:assert/strict";
@@ -68,10 +68,15 @@ test("installs the named absent files into the repo root", async () => {
         const result = await installManagedFiles({
             sourceDir: src,
             files: [
-                { source: ".editorconfig", target: ".editorconfig" },
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "seeded",
+                },
                 {
                     source: "Directory.Build.props",
                     target: "Directory.Build.props",
+                    mode: "seeded",
                 },
             ],
             repoRoot: repo,
@@ -103,6 +108,7 @@ test("installs a file whose source and target paths differ, creating parents", a
                 {
                     source: "workflows/defined--verify.yml",
                     target: ".github/workflows/defined--verify.yml",
+                    mode: "managed",
                 },
             ],
             repoRoot: repo,
@@ -131,7 +137,13 @@ test("leaves an identical existing file untouched and reports unchanged", async 
 
         const result = await installManagedFiles({
             sourceDir: src,
-            files: [{ source: ".editorconfig", target: ".editorconfig" }],
+            files: [
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "seeded",
+                },
+            ],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -144,25 +156,66 @@ test("leaves an identical existing file untouched and reports unchanged", async 
     });
 });
 
-test("reports drift on a differing existing file and never overwrites it", async () => {
+test("keeps a differing seeded file: never overwritten, reported kept", async () => {
     await withFixture(async ({ src, repo }) => {
         await seedSource(src, { ".editorconfig": "indent_size = 4\n" });
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
 
         const result = await installManagedFiles({
             sourceDir: src,
-            files: [{ source: ".editorconfig", target: ".editorconfig" }],
+            files: [
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "seeded",
+                },
+            ],
             repoRoot: repo,
         });
-        assert.deepEqual(result, [{ name: ".editorconfig", status: "drift" }]);
+        assert.deepEqual(result, [{ name: ".editorconfig", status: "kept" }]);
         assert.equal(
             await readFile(join(repo, ".editorconfig"), "utf8"),
             "indent_size = 2\n",
+            "a seeded default never overwrites the repo's own rules",
         );
     });
 });
 
-test("drift does not stop the pass: later files are still installed", async () => {
+test("overwrites a differing managed file and reports updated", async () => {
+    await withFixture(async ({ src, repo }) => {
+        await seedSource(src, {
+            "workflows/defined--verify.yml": "name: Gate\n",
+        });
+        const target = join(repo, ".github/workflows/defined--verify.yml");
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, "name: Stale\n");
+
+        const result = await installManagedFiles({
+            sourceDir: src,
+            files: [
+                {
+                    source: "workflows/defined--verify.yml",
+                    target: ".github/workflows/defined--verify.yml",
+                    mode: "managed",
+                },
+            ],
+            repoRoot: repo,
+        });
+        assert.deepEqual(result, [
+            {
+                name: ".github/workflows/defined--verify.yml",
+                status: "updated",
+            },
+        ]);
+        assert.equal(
+            await readFile(target, "utf8"),
+            "name: Gate\n",
+            "a managed file is brought back to the gate copy",
+        );
+    });
+});
+
+test("a kept seeded file does not stop the pass: later files still install", async () => {
     await withFixture(async ({ src, repo }) => {
         await seedSource(src, {
             ".editorconfig": "indent_size = 4\n",
@@ -173,13 +226,21 @@ test("drift does not stop the pass: later files are still installed", async () =
         const result = await installManagedFiles({
             sourceDir: src,
             files: [
-                { source: ".editorconfig", target: ".editorconfig" },
-                { source: ".gitattributes", target: ".gitattributes" },
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "seeded",
+                },
+                {
+                    source: ".gitattributes",
+                    target: ".gitattributes",
+                    mode: "seeded",
+                },
             ],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
-            { name: ".editorconfig", status: "drift" },
+            { name: ".editorconfig", status: "kept" },
             { name: ".gitattributes", status: "installed" },
         ]);
     });
@@ -194,7 +255,13 @@ test("installs only the named files, ignoring others in the source dir", async (
 
         const result = await installManagedFiles({
             sourceDir: src,
-            files: [{ source: ".editorconfig", target: ".editorconfig" }],
+            files: [
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "seeded",
+                },
+            ],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -218,7 +285,13 @@ test("re-running after a clean install is a no-op (unchanged)", async () => {
 
         const opts = {
             sourceDir: src,
-            files: [{ source: ".editorconfig", target: ".editorconfig" }],
+            files: [
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "seeded",
+                },
+            ],
             repoRoot: repo,
         };
         await installManagedFiles(opts);
@@ -240,10 +313,15 @@ test("check reports present, absent and drift without writing", async () => {
         const result = await checkManagedFiles({
             sourceDir: src,
             files: [
-                { source: ".editorconfig", target: ".editorconfig" },
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "managed",
+                },
                 {
                     source: "Directory.Build.props",
                     target: "Directory.Build.props",
+                    mode: "managed",
                 },
             ],
             repoRoot: repo,
@@ -266,7 +344,13 @@ test("check reports present for an identical existing file", async () => {
 
         const result = await checkManagedFiles({
             sourceDir: src,
-            files: [{ source: ".editorconfig", target: ".editorconfig" }],
+            files: [
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "managed",
+                },
+            ],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -293,6 +377,7 @@ test("check reports a mapped target absent when only the source path exists", as
                 {
                     source: "workflows/defined--verify.yml",
                     target: ".github/workflows/defined--verify.yml",
+                    mode: "managed",
                 },
             ],
             repoRoot: repo,
@@ -300,5 +385,33 @@ test("check reports a mapped target absent when only the source path exists", as
         assert.deepEqual(result, [
             { name: ".github/workflows/defined--verify.yml", status: "absent" },
         ]);
+    });
+});
+
+test("check skips seeded files: a repo's own default is never gated", async () => {
+    await withFixture(async ({ src, repo }) => {
+        await seedSource(src, {
+            ".editorconfig": "root = true\n",
+            "Directory.Build.props": "<Project />\n",
+        });
+        await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
+
+        const result = await checkManagedFiles({
+            sourceDir: src,
+            files: [
+                {
+                    source: ".editorconfig",
+                    target: ".editorconfig",
+                    mode: "seeded",
+                },
+                {
+                    source: "Directory.Build.props",
+                    target: "Directory.Build.props",
+                    mode: "seeded",
+                },
+            ],
+            repoRoot: repo,
+        });
+        assert.deepEqual(result, []);
     });
 });

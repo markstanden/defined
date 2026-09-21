@@ -113,7 +113,7 @@ test("runSetup is idempotent: re-run leaves AGENTS.md byte-identical", async () 
     }
 });
 
-test("runSetup leaves a drifted managed file untouched (raises-only)", async () => {
+test("runSetup keeps a repo's own seeded default (never overwrites it)", async () => {
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
@@ -121,13 +121,42 @@ test("runSetup leaves a drifted managed file untouched (raises-only)", async () 
         assert.equal(
             await readFile(join(repo, ".editorconfig"), "utf8"),
             "indent_size = 2\n",
-            "the gate never overwrites or merges a drifted managed file",
+            "a seeded default never overwrites the repo's own rules",
         );
         const check = await checkSetup({ startDir: repo });
         assert.equal(
-            check.files.find((c) => c.name === ".editorconfig")?.status,
-            "drift",
-            "drift surfaces through checkSetup for the report contract",
+            check.files.find((c) => c.name === ".editorconfig"),
+            undefined,
+            "a seeded default is never gated by checkSetup",
+        );
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("runSetup brings a drifted managed workflow back to the gate copy", async () => {
+    const repo = await makeTempRepo();
+    try {
+        const target = join(
+            repo,
+            ".github",
+            "workflows",
+            "defined--verify.yml",
+        );
+        await mkdir(join(repo, ".github", "workflows"), { recursive: true });
+        await writeFile(target, "name: Stale\n");
+        await runSetup({ startDir: repo });
+        assert.doesNotMatch(
+            await readFile(target, "utf8"),
+            /name: Stale/u,
+            "a managed workflow is updated so the gate pin propagates",
+        );
+        const check = await checkSetup({ startDir: repo });
+        assert.equal(
+            check.files.find(
+                (c) => c.name === ".github/workflows/defined--verify.yml",
+            )?.status,
+            "present",
         );
     } finally {
         await rm(repo, { recursive: true, force: true });
@@ -140,7 +169,7 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
         const before = await checkSetup({ startDir: repo });
         assert.deepEqual(
             before.files.map((c) => c.status),
-            ["absent", "absent", "absent", "absent"],
+            ["absent"],
         );
         assert.equal(before.agents, "absent");
 
@@ -148,7 +177,7 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
         const after = await checkSetup({ startDir: repo });
         assert.deepEqual(
             after.files.map((c) => c.status),
-            ["present", "present", "present", "present"],
+            ["present"],
         );
         assert.equal(after.agents, "present");
     } finally {
@@ -156,13 +185,22 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
     }
 });
 
-test("checkSetup reports drift when a managed file differs", async () => {
+test("checkSetup reports drift when the managed workflow differs", async () => {
     const repo = await makeTempRepo();
     try {
-        await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
+        const target = join(
+            repo,
+            ".github",
+            "workflows",
+            "defined--verify.yml",
+        );
+        await mkdir(join(repo, ".github", "workflows"), { recursive: true });
+        await writeFile(target, "name: Mine\n");
         const check = await checkSetup({ startDir: repo });
         assert.equal(
-            check.files.find((c) => c.name === ".editorconfig")?.status,
+            check.files.find(
+                (c) => c.name === ".github/workflows/defined--verify.yml",
+            )?.status,
             "drift",
         );
     } finally {

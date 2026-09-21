@@ -15,7 +15,7 @@ hard rules (gate steps, module conventions, naming) live in
 - **Local green = merge green.** CI runs the same image as the developer,
   because the installed workflow reads the `.defined.json` pin; nothing is
   environment-specific and no gate ref is duplicated in YAML.
-- **Two distribution channels only**: the pinned image and the managed files it
+- **Two distribution channels only**: the pinned image and the shared files it
   installs (the gate workflow included). No submodules, no symlinks, no consumer
   application artifacts (the gate image itself is, of course, a release
   artifact).
@@ -36,11 +36,14 @@ hard rules (gate steps, module conventions, naming) live in
   source shim stays thin too.
 - **Testability by injection**: anything that shells out accepts a runner
   parameter; pure logic is extracted and table-tested.
-- **Floors are exact**: managed files must stay byte-identical to the
-  image-baked versions (drift fails); extension happens through project-level
-  files, not by editing the managed floor. `comply` may apply repairs that
-  modify the working tree — those changes are reviewable, and each tool must
-  pass its own subsequent check in the mandatory second verify pass.
+- **Floors are exact**: the managed gate workflow must stay byte-identical to
+  the image-baked version (drift fails `verify`; `comply` updates it). Shared
+  configs that express house style (`.editorconfig`, `Directory.Build.props`,
+  `.gitattributes`) are seeded defaults: installed only when absent, so a repo's
+  own rules win. Extension happens through project-level files, not by editing
+  the managed floor. `comply` may apply repairs that modify the working tree —
+  those changes are reviewable, and each tool must pass its own subsequent
+  check in the mandatory second verify pass.
 
 ## Tools
 

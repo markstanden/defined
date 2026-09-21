@@ -2,13 +2,15 @@
 // setup.mts — gate bootstrap (decisions #13–14).
 //
 // runSetup is the write path, invoked as the first phase of `comply`; it
-// installs shared managed files from standards/ into the repo, seeds the
-// AGENTS.md managed block from config/agents-block.md, and creates a pinned
+// installs shared files from standards/ into the repo, seeds the AGENTS.md
+// managed block from config/agents-block.md, and creates a pinned
 // .defined.json when the repo has none. Idempotent: re-runs rewrite the block
-// only, leave unchanged managed files alone, and never touch an existing
-// .defined.json (raises-only — a differing file is left in place and surfaces
-// as drift). checkSetup is the read-only path used by `verify`; it reports
-// bootstrap state without writing a byte.
+// only, leave unchanged files alone, and never touch an existing
+// .defined.json. Seeded defaults are installed only when absent (the repo's
+// own copy always wins); managed files are brought back to the gate copy so a
+// gate update propagates. checkSetup is the read-only path used by `verify`;
+// it reports gate-owned bootstrap state (seeded defaults are not gated)
+// without writing a byte.
 //
 // Pure module: no top-level main — comply.mts owns the entry point, so this
 // file is never double-executed when imported.
@@ -34,22 +36,32 @@ import {
 import { gateConfigPath, standardsDir } from "./lib/config-path.mts";
 import { deriveRepoRoot } from "../lib/paths.mts";
 
-// Managed files shared with every consumer repo. standards/ is the single
+// Shared files for every consumer repo, in two tiers. standards/ is the single
 // source of truth (decision #19): each file lives there and is installed from
 // it — no copied config/root/ that can drift. Sources are relative to
 // standards/, targets to the repo root; they differ where standards/ does not
-// mirror the repo layout (the gate workflow). `.gitattributes` carries the
-// same LF/whitespace contract as .editorconfig's end_of_line, so checkout line
-// endings and `git diff --check` agree locally and in CI. The gate workflow is
-// managed like any other file: it carries no gate version, so the pin lives
-// only in .defined.json (decision #36).
-const MANAGED_FILES: ManagedFile[] = [
-    { source: ".editorconfig", target: ".editorconfig" },
-    { source: "Directory.Build.props", target: "Directory.Build.props" },
-    { source: ".gitattributes", target: ".gitattributes" },
+// mirror the repo layout (the gate workflow).
+//
+// - seeded: house defaults (.editorconfig, Directory.Build.props,
+//   .gitattributes). Installed only when absent — a repo with its own rules
+//   keeps them, and `verify` never gates on them. `.gitattributes` carries the
+//   same LF/whitespace contract as .editorconfig's end_of_line.
+// - managed: gate-owned plumbing (.github/workflows/defined--verify.yml).
+//   Byte-identical to the image: `comply` overwrites a differing copy so a
+//   gate update propagates, and `verify` fails on drift. It carries no gate
+//   version, so the pin lives only in .defined.json (decision #36).
+const BOOTSTRAP_FILES: ManagedFile[] = [
+    { source: ".editorconfig", target: ".editorconfig", mode: "seeded" },
+    {
+        source: "Directory.Build.props",
+        target: "Directory.Build.props",
+        mode: "seeded",
+    },
+    { source: ".gitattributes", target: ".gitattributes", mode: "seeded" },
     {
         source: "workflows/defined--verify.yml",
         target: ".github/workflows/defined--verify.yml",
+        mode: "managed",
     },
 ];
 
@@ -90,11 +102,11 @@ async function ensureConfigFile(repoRoot: string): Promise<void> {
 }
 
 /**
- * Bootstrap a target repo (startDir's git root): install managed files, upsert
- * the AGENTS.md managed block, and seed a pinned .defined.json when absent.
- * Order matters — the block references the installed files, so it reflects
- * reality by the time it is written. Prints nothing: `comply` renders output
- * via the report contract.
+ * Bootstrap a target repo (startDir's git root): install seeded defaults and
+ * managed files, upsert the AGENTS.md managed block, and seed a pinned
+ * .defined.json when absent. Order matters — the block references the installed
+ * files, so it reflects reality by the time it is written. Prints nothing:
+ * `comply` renders output via the report contract.
  */
 export async function runSetup({
     startDir,
@@ -104,7 +116,7 @@ export async function runSetup({
     const repoRoot = await deriveRepoRoot({ startDir });
     await installManagedFiles({
         sourceDir: await standardsDir(),
-        files: MANAGED_FILES,
+        files: BOOTSTRAP_FILES,
         repoRoot,
     });
     await ensureConfigFile(repoRoot);
@@ -121,10 +133,12 @@ export interface SetupCheck {
 }
 
 /**
- * Read-only bootstrap state for `verify`: report every managed artifact
- * (root configs + AGENTS.md block) without writing a byte. `comply` installs
- * and repairs these; `verify` must detect absence/drift/corruption and fail
- * loudly so local green always implies a fully bootstrapped checkout.
+ * Read-only bootstrap state for `verify`: report every gate-owned artifact
+ * (the managed workflow + AGENTS.md block) without writing a byte. Seeded
+ * defaults are deliberately absent from the verdict — the repo's own copy is
+ * its business. `comply` installs and repairs these; `verify` must detect
+ * absence/drift/corruption and fail loudly so local green always implies a
+ * fully bootstrapped checkout.
  */
 export async function checkSetup({
     startDir,
@@ -134,7 +148,7 @@ export async function checkSetup({
     const repoRoot = await deriveRepoRoot({ startDir });
     const files = await checkManagedFiles({
         sourceDir: await standardsDir(),
-        files: MANAGED_FILES,
+        files: BOOTSTRAP_FILES,
         repoRoot,
     });
     const block = await readMarkedBlock({
