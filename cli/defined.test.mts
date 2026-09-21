@@ -22,6 +22,7 @@ import { join, resolve } from "node:path";
 import { test } from "node:test";
 
 const LAUNCHER = resolve(import.meta.dirname, "defined");
+const INSTALL_SH = resolve(import.meta.dirname, "install.sh");
 const IMAGE_REPO = "ghcr.io/markstanden/defined";
 
 /** Full remote revision whose 12-char prefix is the pin used in tests. */
@@ -43,12 +44,17 @@ interface LauncherRun {
     stdout: string;
     stderr: string;
     log: string[];
+    curlLog: string[];
 }
 
 interface Fixture {
     root: string;
     bin: string;
     repo: string;
+    /** Where `update` installs the launcher (DEFINED_BIN_DIR). */
+    install: string;
+    /** A fake raw.githubusercontent.com checkout served by fake curl. */
+    remote: string;
 }
 
 /**
@@ -62,8 +68,19 @@ async function makeFixture(
     const root = await mkdtemp(join(tmpdir(), "quality-launcher-"));
     const bin = join(root, "bin");
     const repo = join(root, "repo");
+    const install = join(root, "install");
+    const remote = join(root, "remote");
     await mkdir(bin);
     await mkdir(repo);
+    await mkdir(install);
+    await mkdir(join(remote, "cli"), { recursive: true });
+    // The fake downloader serves the real launcher + installer, so the
+    // installer's embedded checksum and the launcher bytes stay a matched pair.
+    await writeFile(join(remote, "cli", "defined"), await readFile(LAUNCHER));
+    await writeFile(
+        join(remote, "cli", "install.sh"),
+        await readFile(INSTALL_SH),
+    );
     if (typeof pin === "string") {
         await writeFile(
             join(repo, ".defined.json"),
@@ -75,7 +92,7 @@ async function makeFixture(
             `${JSON.stringify(pin)}\n`,
         );
     }
-    return { root, bin, repo };
+    return { root, bin, repo, install, remote };
 }
 
 /** Run a test body against a fresh fixture, always cleaning up. */
@@ -183,9 +200,50 @@ if [[ "$*" == *"ls-remote"* ]]; then
     fi
     exit 1
 fi
+if [[ "$*" == *"remote get-url origin"* ]]; then
+    if [[ -n "\${FAKE_GIT_ORIGIN:-}" ]]; then
+        echo "\${FAKE_GIT_ORIGIN}"
+        exit 0
+    fi
+    exit 1
+fi
 exit 1
 `;
     const path = join(bin, "git");
+    await writeFile(path, script);
+    await chmod(path, 0o755);
+}
+
+/**
+ * Write a fake curl that serves `<remote>/cli/<basename-of-url>` to the `-o`
+ * destination, recording each requested URL in <bin>/curl.log. This mirrors the
+ * raw.githubusercontent.com layout that `update` fetches from.
+ */
+async function fakeCurl(bin: string, remote: string): Promise<void> {
+    const script = `#!/usr/bin/env bash
+dest=""
+url=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -o)
+            dest="$2"
+            shift 2
+            ;;
+        *)
+            url="$1"
+            shift
+            ;;
+    esac
+done
+printf '%s\\n' "\${url}" >> "${join(bin, "curl.log")}"
+name="\${url##*/}"
+src="${remote}/cli/\${name}"
+if [[ ! -f "\${src}" ]]; then
+    exit 1
+fi
+cp "\${src}" "\${dest}"
+`;
+    const path = join(bin, "curl");
     await writeFile(path, script);
     await chmod(path, 0o755);
 }
@@ -233,7 +291,14 @@ async function runLauncher({
         await fakeEngine(fixture.bin, engine, env);
     }
     await fakeGit(fixture.bin, fixture.repo);
+    await fakeCurl(fixture.bin, fixture.remote);
     await symlinkTools(fixture.bin);
+    // Logs are appended by the fakes; truncate so each run is self-contained
+    // (a fixture may be reused by a second runLauncher call).
+    for (const engine of engines) {
+        await rm(join(fixture.bin, `${engine}.log`), { force: true });
+    }
+    await rm(join(fixture.bin, "curl.log"), { force: true });
 
     const path = barePath
         ? fixture.bin
@@ -259,11 +324,19 @@ async function runLauncher({
             // engine not invoked
         }
     }
+    const curlLog: string[] = [];
+    try {
+        const content = await readFile(join(fixture.bin, "curl.log"), "utf8");
+        curlLog.push(...content.trim().split("\n").filter(Boolean));
+    } catch {
+        // downloader not invoked
+    }
     return {
         status: result.status ?? 1,
         stdout: result.stdout ?? "",
         stderr: result.stderr ?? "",
         log,
+        curlLog,
     };
 }
 
@@ -615,5 +688,156 @@ test("version reports no engine without failing", async () => {
         assert.ok(hasLine(r.stdout, "engine", "none"));
         assert.ok(hasLine(r.stdout, "local", "unknown"));
         assert.ok(hasLine(r.stdout, "remote", "unknown"));
+    });
+});
+
+test("update resolves latest and moves pin, launcher and image together", async () => {
+    await withFixture({ coverage: { node: {} } }, async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["update"],
+            env: {
+                FAKE_REMOTE_REV: REMOTE_REV,
+                FAKE_GIT_ORIGIN: "https://github.com/me/app.git",
+                FAKE_INSPECT_FAIL: "1",
+                DEFINED_BIN_DIR: fixture.install,
+            },
+        });
+        assert.equal(r.status, 0);
+
+        const config = JSON.parse(
+            await readFile(join(fixture.repo, ".defined.json"), "utf8"),
+        );
+        assert.equal(config.version, PIN);
+        assert.deepEqual(config.coverage, { node: {} });
+
+        const installed = join(fixture.install, "defined");
+        const version = spawnSync(installed, ["--version"], {
+            encoding: "utf8",
+        });
+        assert.equal(version.status, 0);
+        assert.equal(version.stdout.trim(), `defined ${LAUNCHER_SHORT}`);
+
+        assert.ok(r.log.some((line) => line === `pull ${IMAGE_REPO}:${PIN}`));
+        assert.ok(
+            r.curlLog.some((url) =>
+                url.endsWith(`/${REMOTE_REV}/cli/install.sh`),
+            ),
+            "install.sh is fetched at the resolved revision",
+        );
+        assert.ok(
+            r.curlLog.some((url) => url.endsWith(`/${REMOTE_REV}/cli/defined`)),
+            "the installer fetches the launcher at the same revision",
+        );
+        assert.ok(hasLine(r.stdout, "update:", "working-tree change"));
+    });
+});
+
+test("update accepts an explicit short SHA and replaces the pin", async () => {
+    await withFixture("olddeadbeef0", async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["update", PIN],
+            env: {
+                FAKE_GIT_ORIGIN: "https://github.com/me/app.git",
+                DEFINED_BIN_DIR: fixture.install,
+            },
+        });
+        assert.equal(r.status, 0);
+        const config = JSON.parse(
+            await readFile(join(fixture.repo, ".defined.json"), "utf8"),
+        );
+        assert.equal(config.version, PIN);
+        assert.ok(
+            r.curlLog.some((url) => url.endsWith(`/${PIN}/cli/install.sh`)),
+        );
+    });
+});
+
+test("update is a no-op when everything is already current", async () => {
+    await withFixture({ coverage: {} }, async (fixture) => {
+        const baseEnv = {
+            FAKE_REMOTE_REV: REMOTE_REV,
+            FAKE_GIT_ORIGIN: "https://github.com/me/app.git",
+            DEFINED_BIN_DIR: fixture.install,
+        };
+        const first = await runLauncher({
+            fixture,
+            args: ["update"],
+            env: { ...baseEnv, FAKE_INSPECT_FAIL: "1" },
+        });
+        assert.equal(first.status, 0);
+        assert.ok(
+            first.log.some((line) => line === `pull ${IMAGE_REPO}:${PIN}`),
+        );
+
+        const before = await readFile(
+            join(fixture.repo, ".defined.json"),
+            "utf8",
+        );
+        const second = await runLauncher({
+            fixture,
+            args: ["update"],
+            env: baseEnv,
+        });
+        assert.equal(second.status, 0);
+        assert.ok(hasLine(second.stdout, "launcher already current"));
+        assert.ok(
+            !second.log.some((line) => line.startsWith("pull")),
+            "the image is already present on the second run",
+        );
+        assert.equal(
+            await readFile(join(fixture.repo, ".defined.json"), "utf8"),
+            before,
+        );
+    });
+});
+
+test("update refuses the defined source repository", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["update"],
+            env: {
+                FAKE_REMOTE_REV: REMOTE_REV,
+                FAKE_GIT_ORIGIN: "git@github.com:markstanden/defined.git",
+            },
+        });
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /source repo/u);
+        assert.ok(!r.log.some((line) => line.startsWith("pull")));
+    });
+});
+
+test("update fails loudly offline", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["update"],
+            env: { DEFINED_OFFLINE: "1", FAKE_REMOTE_REV: REMOTE_REV },
+        });
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /needs the network/u);
+    });
+});
+
+test("update rejects a malformed or too-short revision", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const env = { FAKE_GIT_ORIGIN: "https://github.com/me/app.git" };
+        const malformed = await runLauncher({
+            fixture,
+            args: ["update", "not-a-sha"],
+            env,
+        });
+        assert.equal(malformed.status, 1);
+        assert.match(malformed.stderr, /invalid revision/u);
+
+        const tooShort = await runLauncher({
+            fixture,
+            args: ["update", "abc1234"],
+            env,
+        });
+        assert.equal(tooShort.status, 1);
+        assert.match(tooShort.stderr, /too short/u);
     });
 });

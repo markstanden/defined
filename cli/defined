@@ -12,7 +12,8 @@
 #
 # The lifecycle surface: `defined version` (a read-only report of launcher,
 # pin, image, engine and drift) and its terse one-line alias
-# `defined --version`. `defined update` lands separately.
+# `defined --version`; and `defined update [<sha>|latest]`, which moves the
+# pin, the installed launcher and the local image together.
 #
 # Needs only git + podman/docker on the host. Install with cli/install.sh
 # (normally ~/.local/bin/defined). Source development uses runtime/comply.sh.
@@ -35,7 +36,11 @@ IMAGE_OWNER="markstanden"
 IMAGE_NAME="defined"
 IMAGE_REPO="ghcr.io/${IMAGE_OWNER}/${IMAGE_NAME}"
 SOURCE_URL="https://github.com/${IMAGE_OWNER}/${IMAGE_NAME}.git"
+RAW_BASE="https://raw.githubusercontent.com/${IMAGE_OWNER}/${IMAGE_NAME}"
 PROGRAM="$(basename "${BASH_SOURCE[0]}")"
+
+# Scratch space used by `update`; removed on exit.
+UPDATE_WORK=""
 
 # The source revision this launcher was installed from. cli/install.sh
 # substitutes the value into this slot at install time (its LAUNCHER_SHA256
@@ -44,7 +49,7 @@ PROGRAM="$(basename "${BASH_SOURCE[0]}")"
 LAUNCHER_REV=""
 
 usage() {
-    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} version | ${PROGRAM} --version" >&2
+    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -351,6 +356,116 @@ print_version_report() {
     return 0
 }
 
+# Download a URL to a file, preferring curl and falling back to wget.
+download() {
+    local url="$1" dest="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "${dest}" "${url}"
+        return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O "${dest}" "${url}"
+        return 0
+    fi
+    die "neither curl nor wget is available to download ${url}"
+}
+
+# A revision is only ever a hex SHA: it is written into .defined.json and
+# appended to a URL, so anything else is rejected before it is used.
+validate_rev() {
+    local rev="$1"
+    if [[ ! "${rev}" =~ ^[0-9a-f]{7,40}$ ]]; then
+        die "invalid revision '${rev}' — expected a 7–40 character hex SHA"
+    fi
+    return 0
+}
+
+# True when the repo's origin is the defined source itself. That repo commits a
+# versionless config by construction, so `update` must not pin it.
+is_source_repo() {
+    local root="$1" url
+    url="$(git -C "${root}" remote get-url origin 2>/dev/null)" || true
+    case "${url}" in
+        *"${IMAGE_OWNER}/${IMAGE_NAME}"*) return 0 ;;
+    esac
+    return 1
+}
+
+# Write the pin into .defined.json: replace an existing "version" value, insert
+# one when the key is absent, or create a minimal file when there is none. The
+# change is left in the working tree — the consumer commits it.
+write_pin() {
+    local root="$1"
+    local pin="$2"
+    local file="${root}/${CONFIG_FILE}"
+    if [[ ! -f "${file}" ]]; then
+        printf '{\n    "version": "%s"\n}\n' "${pin}" >"${file}"
+        return 0
+    fi
+    if grep -q '"version"' "${file}"; then
+        sed -i "s|\\(\"version\"[[:space:]]*:[[:space:]]*\"\\)[^\"]*\\(\"\\)|\\1${pin}\\2|" "${file}"
+        return 0
+    fi
+    sed -i "0,/^[[:space:]]*{/s|^[[:space:]]*{|&\n    \"version\": \"${pin}\",|" "${file}"
+    return 0
+}
+
+# Install the launcher at a revision by fetching cli/install.sh at that same
+# revision and running it — the installer owns the download, checksum and
+# placement logic; `update` owns resolution and the pin.
+install_launcher_at() {
+    local rev="$1"
+    UPDATE_WORK="$(mktemp -d)"
+    trap 'rm -rf "${UPDATE_WORK}"' EXIT
+    download "${RAW_BASE}/${rev}/cli/install.sh" "${UPDATE_WORK}/install.sh"
+    bash "${UPDATE_WORK}/install.sh" --rev "${rev}"
+    return 0
+}
+
+# `defined update [<sha>|latest]`: move the pin, the installed launcher and the
+# local image together. `latest` resolves to a concrete 12-char SHA (never a
+# mutable tag). Needs the network; `comply`/`verify` stay offline-capable.
+run_update() {
+    local arg="${1:-latest}"
+    if [[ -n "${DEFINED_OFFLINE:-}" ]]; then
+        die "update needs the network — unset DEFINED_OFFLINE to update"
+    fi
+    local root
+    root="$(repo_root)" || return 1
+    if is_source_repo "${root}"; then
+        die "this is the defined source repo — it commits a versionless config by construction; update does not apply"
+    fi
+
+    local rev
+    if [[ "${arg}" == "latest" ]]; then
+        rev="$(remote_rev)"
+        if [[ -z "${rev}" ]]; then
+            die "cannot resolve the latest revision — check your network"
+        fi
+    else
+        rev="${arg}"
+    fi
+    validate_rev "${rev}"
+    if [[ ${#rev} -lt 12 ]]; then
+        die "revision '${rev}' is too short — pass at least a 12-character short SHA"
+    fi
+    # Image tags are 12-char short SHAs; the pin must be exactly that tag.
+    local pin="${rev:0:12}"
+    local image="${IMAGE_REPO}:${pin}"
+
+    local engine
+    engine="$(pick_engine)" || return 1
+
+    # Order: pin, launcher, image. Re-running is a no-op at each step.
+    write_pin "${root}" "${pin}"
+    install_launcher_at "${rev}"
+    ensure_image "${engine}" "${image}" "" || return 1
+
+    echo "update: ${CONFIG_FILE} -> ${pin} (working-tree change — commit it)"
+    echo "update: launcher and image ${image} up to date"
+    return 0
+}
+
 # Terse one-line identity for scripts and shell prompts: `defined 3f9c1a2`.
 # Prints `defined unknown` when the launcher carries no baked revision.
 print_version() {
@@ -374,6 +489,14 @@ main() {
     fi
     if [[ "${verb}" == "version" ]]; then
         print_version_report
+        return 0
+    fi
+    if [[ "${verb}" == "update" ]]; then
+        if [[ $# -gt 2 ]]; then
+            usage
+            return 2
+        fi
+        run_update "${2:-latest}"
         return 0
     fi
     if [[ "${verb}" != "comply" && "${verb}" != "verify" ]]; then
