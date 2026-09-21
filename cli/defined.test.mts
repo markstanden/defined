@@ -337,6 +337,19 @@ test("defaults to the latest image when config is missing, empty or versionless"
     });
 });
 
+test("reports an unknown revision for a hand-installed launcher", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["--version"],
+            engines: [],
+        });
+        assert.equal(r.status, 0);
+        assert.equal(r.stdout, "defined unknown\n");
+        assert.deepEqual(r.log, [], "no engine is needed to report a version");
+    });
+});
+
 test("forwards unknown verbs to usage and exits non-zero", async () => {
     await withFixture("abc12345", async (fixture) => {
         const r = await runLauncher({ fixture, args: ["setup"] });

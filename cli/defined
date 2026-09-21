@@ -30,8 +30,14 @@ CONFIG_FILE=".defined.json"
 IMAGE_REPO="ghcr.io/markstanden/defined"
 PROGRAM="$(basename "${BASH_SOURCE[0]}")"
 
+# The source revision this launcher was installed from. cli/install.sh
+# substitutes the value into this slot at install time (its LAUNCHER_SHA256
+# constant pins the launcher and installer to one commit); an empty value
+# means the copy was hand-installed and has no known revision.
+LAUNCHER_REV=""
+
 usage() {
-    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify" >&2
+    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -111,10 +117,25 @@ ensure_image() {
     return 0
 }
 
+# Terse one-line identity for scripts and shell prompts: `defined 3f9c1a2`.
+# Prints `defined unknown` when the launcher carries no baked revision.
+print_version() {
+    local rev="unknown"
+    if [[ -n "${LAUNCHER_REV}" ]]; then
+        rev="${LAUNCHER_REV:0:7}"
+    fi
+    echo "defined ${rev}"
+    return 0
+}
+
 main() {
     local verb="${1:-}"
     if [[ "${verb}" == "-h" || "${verb}" == "--help" ]]; then
         usage
+        return 0
+    fi
+    if [[ "${verb}" == "--version" ]]; then
+        print_version
         return 0
     fi
     if [[ "${verb}" != "comply" && "${verb}" != "verify" ]]; then
