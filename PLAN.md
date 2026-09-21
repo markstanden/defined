@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-09-20 | scope=PLAN.md -->
+<!-- update: agent=opencode | date=2026-09-21 | scope=PLAN.md -->
 
 # PLAN — defined: portable quality gate
 
@@ -148,6 +148,19 @@ and `--no-verify` bypasses it, so it is convenience, not a guarantee.
   installed on PATH (normally `~/.local/bin/defined`); no gate behaviour; needs
   git + podman/docker; prefers podman; mounts repo read-write for `comply`,
   read-only for `verify`.
+- `cli/install.sh` installs it: resolve the revision (the current checkout,
+  `--rev <sha>`, or the latest published `main`), download the launcher, verify
+  it against a checksum embedded in the installer, install atomically and
+  idempotently. The installer and the launcher it ships are a matched pair; a
+  test enforces the embedded checksum stays in sync.
+- Lifecycle surface: `defined version` — a read-only report of the launcher
+  revision, the pin, the image (local/remote), the engine and a drift verdict,
+  degrading to "unknown" offline (`--version` is the terse one-liner) — and
+  `defined update [<sha>|latest]`, which resolves `latest` to a concrete SHA,
+  writes the pin as a working-tree change (never commits), reinstalls the
+  launcher at that revision and pulls the exact image. `update` refuses the
+  defined source repo and needs the network; `comply`/`verify` stay
+  offline-capable.
 - `.defined.json` holds the optional immutable image tag under its `version`
   field, plus optional per-ecosystem coverage configuration. An omitted
   `version` (or a missing file) means the current published default image
@@ -265,7 +278,8 @@ reaching internal members from tests.
 ```text
 defined/
 ├── cli/
-│   └── defined                       # installed host launcher; no gate logic
+│   ├── defined                       # installed host launcher; no gate logic
+│   └── install.sh                    # verified, idempotent installer
 ├── runtime/
 │   ├── Containerfile                 # pinned, self-contained gate image
 │   ├── tool-versions.env             # tool pins used to build the image
@@ -307,7 +321,8 @@ toolchain and nested package locations), #22 (`yamllint -s` — warnings fail),
 consumer's `.gitleaksignore` baseline), #25 (the `naming` step enforces the
 workflow-filename grammar and runs consumer-declared rules), #26 (general naming
 doctrine lives in `standards/naming.md` + `standards/naming/`), #27
-(consumer-owned prettier config wins), #28 (`.gitattributes` is managed).
+(consumer-owned prettier config wins), #28 (`.gitattributes` is managed), #35
+(the launcher gains `version`/`update` and a verified `cli/install.sh`).
 
 Both previously unfiled items are now delivered:
 
