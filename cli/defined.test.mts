@@ -24,6 +24,20 @@ import { test } from "node:test";
 const LAUNCHER = resolve(import.meta.dirname, "defined");
 const IMAGE_REPO = "ghcr.io/markstanden/defined";
 
+/** Full remote revision whose 12-char prefix is the pin used in tests. */
+const REMOTE_REV = "87fe682a2339fa854560a286276e831df71a8ab5";
+const PIN = REMOTE_REV.slice(0, 12);
+const LAUNCHER_SHORT = REMOTE_REV.slice(0, 7);
+/** A stale revision, used to prove the drift verdicts. */
+const STALE_REV = "3f9c1a2" + "0".repeat(33);
+
+/** True when some output line contains every given fragment. */
+function hasLine(stdout: string, ...fragments: string[]): boolean {
+    return stdout
+        .split("\n")
+        .some((line) => fragments.every((fragment) => line.includes(fragment)));
+}
+
 interface LauncherRun {
     status: number;
     stdout: string;
@@ -80,8 +94,12 @@ async function withFixture<T>(
 /**
  * Write a fake engine (podman/docker). Behaviour is controlled by env vars
  * read from its own environment at invocation time:
- *   FAKE_INSPECT_FAIL=1 → `image inspect` exits 1 (image absent)
- *   FAKE_PULL_FAIL=1    → `pull` exits 1 (offline)
+ *   FAKE_INSPECT_FAIL=1   → `image inspect` exits 1 (image absent)
+ *   FAKE_DIGEST=<digest>  → printed by `image inspect --format ...`
+ *   FAKE_MANIFEST_FAIL=1  → `manifest inspect` exits 1 (tag unknown/offline)
+ *   FAKE_MANIFEST_ERROR=… → the failure message (default "manifest unknown")
+ *   FAKE_PULL_FAIL=1      → `pull` exits 1 (offline)
+ *   FAKE_NO_ENGINE=1      → `--version`/inspect succeed but do nothing
  * Every invocation is appended to <bin>/<name>.log as a single line.
  */
 async function fakeEngine(
@@ -91,13 +109,28 @@ async function fakeEngine(
 ): Promise<void> {
     const logPath = join(bin, `${name}.log`);
     const envAssign = Object.entries(env)
-        .map(([k, v]) => `export ${k}=${v}`)
+        .map(([k, v]) => `export ${k}="${v}"`)
         .join("\n");
     const script = `#!/usr/bin/env bash
 ${envAssign}
 printf '%s\\n' "$*" >> "${logPath}"
+if [[ "$1" == "--version" ]]; then
+    echo "${name} version 9.9.9"
+    exit 0
+fi
 if [[ "$1" == "image" && "$2" == "inspect" ]]; then
-    [[ "\${FAKE_INSPECT_FAIL:-0}" == "1" ]] && exit 1 || exit 0
+    if [[ "\${FAKE_INSPECT_FAIL:-0}" == "1" ]]; then
+        exit 1
+    fi
+    echo "\${FAKE_DIGEST:-}"
+    exit 0
+fi
+if [[ "$1" == "manifest" && "$2" == "inspect" ]]; then
+    if [[ "\${FAKE_MANIFEST_FAIL:-0}" == "1" ]]; then
+        echo "\${FAKE_MANIFEST_ERROR:-manifest unknown}" >&2
+        exit 1
+    fi
+    exit 0
 fi
 if [[ "$1" == "pull" ]]; then
     [[ "\${FAKE_PULL_FAIL:-0}" == "1" ]] && exit 1 || exit 0
@@ -115,8 +148,21 @@ exit 0
  * without exposing a real container engine.
  */
 async function symlinkTools(bin: string): Promise<void> {
-    for (const tool of ["bash", "basename", "tr", "cut", "sha256sum"]) {
-        await symlink(`/usr/bin/${tool}`, join(bin, tool));
+    for (const tool of [
+        "bash",
+        "basename",
+        "cut",
+        "readlink",
+        "sed",
+        "sha256sum",
+        "tr",
+    ]) {
+        const link = join(bin, tool);
+        try {
+            await symlink(`/usr/bin/${tool}`, link);
+        } catch {
+            // Already linked (a fixture reused by a second run) — fine.
+        }
     }
 }
 
@@ -124,14 +170,41 @@ async function symlinkTools(bin: string): Promise<void> {
 async function fakeGit(bin: string, repo: string): Promise<void> {
     const script = `#!/usr/bin/env bash
 if [[ "$*" == *"rev-parse --show-toplevel"* ]]; then
+    if [[ "\${FAKE_GIT_NO_REPO:-0}" == "1" ]]; then
+        exit 1
+    fi
     echo "${repo}"
     exit 0
+fi
+if [[ "$*" == *"ls-remote"* ]]; then
+    if [[ -n "\${FAKE_REMOTE_REV:-}" ]]; then
+        printf '%s\\trefs/heads/main\\n' "\${FAKE_REMOTE_REV}"
+        exit 0
+    fi
+    exit 1
 fi
 exit 1
 `;
     const path = join(bin, "git");
     await writeFile(path, script);
     await chmod(path, 0o755);
+}
+
+/**
+ * Install a launcher copy with a baked revision, exactly as cli/install.sh
+ * writes it, so the revision-dependent `version` verdicts are testable.
+ */
+async function bakeLauncher(fixture: Fixture, rev: string): Promise<string> {
+    const source = await readFile(LAUNCHER, "utf8");
+    const baked = source.replace(
+        /^LAUNCHER_REV=""$/mu,
+        `LAUNCHER_REV="${rev}"`,
+    );
+    assert.notEqual(baked, source, "the LAUNCHER_REV slot must exist");
+    const path = join(fixture.bin, "defined");
+    await writeFile(path, baked);
+    await chmod(path, 0o755);
+    return path;
 }
 
 /**
@@ -145,12 +218,16 @@ async function runLauncher({
     engines = ["podman"],
     env = {},
     barePath = false,
+    launcher = LAUNCHER,
+    cwd,
 }: {
     fixture: Fixture;
     args: string[];
     engines?: string[];
     env?: Record<string, string>;
     barePath?: boolean;
+    launcher?: string;
+    cwd?: string;
 }): Promise<LauncherRun> {
     for (const engine of engines) {
         await fakeEngine(fixture.bin, engine, env);
@@ -161,8 +238,8 @@ async function runLauncher({
     const path = barePath
         ? fixture.bin
         : [fixture.bin, process.env.PATH ?? ""].join(":");
-    const result = spawnSync(LAUNCHER, args, {
-        cwd: fixture.repo,
+    const result = spawnSync(launcher, args, {
+        cwd: cwd ?? fixture.repo,
         encoding: "utf8",
         env: {
             ...(barePath ? {} : process.env),
@@ -410,5 +487,133 @@ test("offline mode never pulls: a missing image fails loudly", async () => {
             !r.log.some((line) => line.startsWith("run --rm")),
             "no run when the image is missing offline",
         );
+    });
+});
+
+test("version reports launcher, pin, image, engine and drift", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const launcher = await bakeLauncher(fixture, REMOTE_REV);
+        const r = await runLauncher({
+            fixture,
+            args: ["version"],
+            launcher,
+            env: {
+                FAKE_REMOTE_REV: REMOTE_REV,
+                FAKE_DIGEST: "sha256:aa11bb22cc33dd44ee55",
+            },
+        });
+        assert.equal(r.status, 0);
+        assert.ok(
+            hasLine(r.stdout, "launcher", launcher, `rev ${LAUNCHER_SHORT}`),
+        );
+        assert.ok(hasLine(r.stdout, "pin", `.defined.json -> ${PIN}`));
+        assert.ok(hasLine(r.stdout, "image", `${IMAGE_REPO}:${PIN}`));
+        assert.ok(hasLine(r.stdout, "local", "present sha256:aa11bb22cc33…"));
+        assert.ok(hasLine(r.stdout, "remote", "present"));
+        assert.ok(hasLine(r.stdout, "engine", "podman version 9.9.9"));
+        assert.ok(hasLine(r.stdout, "status", "launcher current; pin current"));
+    });
+});
+
+test("version marks a stale launcher and pin as behind", async () => {
+    await withFixture(STALE_REV.slice(0, 12), async (fixture) => {
+        const launcher = await bakeLauncher(fixture, STALE_REV);
+        const r = await runLauncher({
+            fixture,
+            args: ["version"],
+            launcher,
+            env: { FAKE_REMOTE_REV: REMOTE_REV },
+        });
+        assert.equal(r.status, 0);
+        assert.ok(hasLine(r.stdout, "status", "launcher behind; pin behind"));
+    });
+});
+
+test("version degrades the remote state to unknown offline", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const launcher = await bakeLauncher(fixture, REMOTE_REV);
+        const r = await runLauncher({
+            fixture,
+            args: ["version"],
+            launcher,
+            env: { FAKE_REMOTE_REV: REMOTE_REV, DEFINED_OFFLINE: "1" },
+        });
+        assert.equal(r.status, 0);
+        assert.ok(hasLine(r.stdout, "remote", "unknown"));
+        assert.ok(hasLine(r.stdout, "status", "launcher unknown; pin unknown"));
+    });
+});
+
+test("version distinguishes an absent tag from an unreachable registry", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const launcher = await bakeLauncher(fixture, REMOTE_REV);
+        const absent = await runLauncher({
+            fixture,
+            args: ["version"],
+            launcher,
+            env: {
+                FAKE_REMOTE_REV: REMOTE_REV,
+                FAKE_MANIFEST_FAIL: "1",
+                FAKE_MANIFEST_ERROR: "manifest unknown",
+            },
+        });
+        assert.ok(hasLine(absent.stdout, "remote", "absent"));
+
+        const unreachable = await runLauncher({
+            fixture,
+            args: ["version"],
+            launcher,
+            env: {
+                FAKE_REMOTE_REV: REMOTE_REV,
+                FAKE_MANIFEST_FAIL: "1",
+                FAKE_MANIFEST_ERROR: "dial tcp: connection refused",
+            },
+        });
+        assert.ok(hasLine(unreachable.stdout, "remote", "unknown"));
+    });
+});
+
+test("version reports an invalid pin without failing", async () => {
+    await withFixture("main", async (fixture) => {
+        const r = await runLauncher({ fixture, args: ["version"] });
+        assert.equal(r.status, 0);
+        assert.ok(hasLine(r.stdout, "pin", "(invalid pin 'main')"));
+        assert.ok(hasLine(r.stdout, "image", "n/a"));
+        assert.ok(hasLine(r.stdout, "status", "launcher unknown; pin invalid"));
+    });
+});
+
+test("version works outside a repository", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const launcher = await bakeLauncher(fixture, REMOTE_REV);
+        const r = await runLauncher({
+            fixture,
+            args: ["version"],
+            launcher,
+            cwd: fixture.root,
+            env: { FAKE_REMOTE_REV: REMOTE_REV, FAKE_GIT_NO_REPO: "1" },
+        });
+        assert.equal(r.status, 0);
+        assert.ok(hasLine(r.stdout, "pin", "(no repository)"));
+        assert.ok(hasLine(r.stdout, "image", "n/a"));
+        assert.ok(hasLine(r.stdout, "status", "launcher current; pin n/a"));
+    });
+});
+
+test("version reports no engine without failing", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const launcher = await bakeLauncher(fixture, REMOTE_REV);
+        const r = await runLauncher({
+            fixture,
+            args: ["version"],
+            launcher,
+            engines: [],
+            barePath: true,
+            env: { FAKE_REMOTE_REV: REMOTE_REV },
+        });
+        assert.equal(r.status, 0);
+        assert.ok(hasLine(r.stdout, "engine", "none"));
+        assert.ok(hasLine(r.stdout, "local", "unknown"));
+        assert.ok(hasLine(r.stdout, "remote", "unknown"));
     });
 });

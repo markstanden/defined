@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # cli/defined — installed host launcher for the defined gate (decision #25).
 #
-# The only public surface: `defined comply` and `defined verify`. `comply` is
-# the command to use locally and for agent work (bootstrap + repair + verify);
+# The run surface: `defined comply` and `defined verify`. `comply` is the
+# command to use locally and for agent work (bootstrap + repair + verify);
 # `verify` is the read-only check the pipeline runs and nothing else. Reads
 # the consumer's committed .defined.json `version` (omitted → current default
 # image), picks a container engine (podman preferred), ensures the exact image
@@ -10,7 +10,11 @@
 # read-only for verify. No gate behaviour lives here; everything else is in
 # the image.
 #
-# Needs only git + podman/docker on the host. Install: put this file on PATH
+# The lifecycle surface: `defined version` (a read-only report of launcher,
+# pin, image, engine and drift) and its terse one-line alias
+# `defined --version`. `defined update` lands separately.
+#
+# Needs only git + podman/docker on the host. Install with cli/install.sh
 # (normally ~/.local/bin/defined). Source development uses runtime/comply.sh.
 # The runtime's .defined.json parser is exercised here end-to-end; the
 # producer repo commits its own versionless config (a coverage pin, see the
@@ -27,7 +31,10 @@
 set -euo pipefail
 
 CONFIG_FILE=".defined.json"
-IMAGE_REPO="ghcr.io/markstanden/defined"
+IMAGE_OWNER="markstanden"
+IMAGE_NAME="defined"
+IMAGE_REPO="ghcr.io/${IMAGE_OWNER}/${IMAGE_NAME}"
+SOURCE_URL="https://github.com/${IMAGE_OWNER}/${IMAGE_NAME}.git"
 PROGRAM="$(basename "${BASH_SOURCE[0]}")"
 
 # The source revision this launcher was installed from. cli/install.sh
@@ -37,7 +44,7 @@ PROGRAM="$(basename "${BASH_SOURCE[0]}")"
 LAUNCHER_REV=""
 
 usage() {
-    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} --version" >&2
+    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} version | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -59,8 +66,13 @@ repo_root() {
 # defaults are obvious; explicit values are overrides). Explicit mutable
 # aliases (latest, non-SHA tokens) are rejected so a *written* pin is always
 # the exact image local and CI run (release identity, PLAN.md).
+#
+# `mode` is "strict" for the run paths (a bad pin is fatal) or "soft" for
+# `version` (a bad pin prints "invalid:<value>" and returns non-zero, so the
+# report can show it without dying).
 read_pin() {
     local root="$1"
+    local mode="${2:-strict}"
     local file="${root}/${CONFIG_FILE}"
     if [[ ! -f "${file}" ]]; then
         echo "latest"
@@ -75,9 +87,17 @@ read_pin() {
         return 0
     fi
     if [[ "${pin}" == "latest" ]]; then
+        if [[ "${mode}" == "soft" ]]; then
+            echo "invalid:${pin}"
+            return 1
+        fi
         die "${file} must pin an immutable tag, not 'latest' — omit 'version' to use the default"
     fi
     if [[ ! "${pin}" =~ ^[0-9a-f]{7,40}$ ]]; then
+        if [[ "${mode}" == "soft" ]]; then
+            echo "invalid:${pin}"
+            return 1
+        fi
         die "${file} has an invalid pin '${pin}' — expected a git SHA"
     fi
     echo "${pin}"
@@ -117,6 +137,220 @@ ensure_image() {
     return 0
 }
 
+# Resolve the enclosing git root, or print nothing when the CWD is not in a
+# repository — `version` reports, it does not require a repo.
+repo_root_soft() {
+    git -C "${PWD}" rev-parse --show-toplevel 2>/dev/null || true
+    return 0
+}
+
+# Engine for the report: the chosen engine name, or empty when none is
+# available (never fatal — `version` must still work without an engine).
+pick_engine_soft() {
+    local engine="${DEFINED_ENGINE:-}"
+    if [[ -n "${engine}" ]]; then
+        if command -v "${engine}" >/dev/null 2>&1; then
+            echo "${engine}"
+        fi
+        return 0
+    fi
+    if command -v podman >/dev/null 2>&1; then
+        echo "podman"
+        return 0
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        echo "docker"
+        return 0
+    fi
+    return 0
+}
+
+# The latest revision on the public main branch, or empty when offline or
+# unreachable. `version` degrades to "unknown" rather than failing.
+remote_rev() {
+    if [[ -n "${DEFINED_OFFLINE:-}" ]]; then
+        return 0
+    fi
+    local out
+    out="$(git ls-remote --refs "${SOURCE_URL}" refs/heads/main 2>/dev/null)" ||
+        true
+    out="${out%%[[:space:]]*}"
+    echo "${out}"
+    return 0
+}
+
+# True when a short revision names the same commit as a full remote revision.
+same_rev() {
+    local short="$1"
+    local full="$2"
+    if [[ -n "${short}" && -n "${full}" && "${full:0:${#short}}" == "${short}" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# The local image's digest (or id) as the engine reports it; empty when the
+# image is not present locally.
+image_digest() {
+    local engine="$1" image="$2" digest
+    digest="$("${engine}" image inspect --format '{{.Digest}}' "${image}" 2>/dev/null)" ||
+        true
+    if [[ -z "${digest}" ]]; then
+        digest="$("${engine}" image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" ||
+            true
+    fi
+    echo "${digest}"
+    return 0
+}
+
+# Shorten a digest for display: `sha256:aa11…` (first twelve hex characters).
+short_digest() {
+    local digest="$1"
+    if [[ "${digest}" == sha256:* && ${#digest} -gt 19 ]]; then
+        echo "${digest:0:19}…"
+        return 0
+    fi
+    echo "${digest}"
+    return 0
+}
+
+# Remote image state: 0 present, 1 absent (the registry reports an unknown
+# tag), 2 unknown (offline, unreachable, or any other error).
+remote_image_state() {
+    local engine="$1" image="$2" err
+    if [[ -n "${DEFINED_OFFLINE:-}" ]]; then
+        return 2
+    fi
+    if err="$("${engine}" manifest inspect "${image}" 2>&1 >/dev/null)"; then
+        return 0
+    fi
+    case "${err,,}" in
+        *"manifest unknown"* | *"no such manifest"* | *"not found"*)
+            return 1
+            ;;
+    esac
+    return 2
+}
+
+report_line() {
+    printf '%-10s %s\n' "$1" "$2"
+    return 0
+}
+
+# Read-only lifecycle report: launcher, pin, image (local/remote), engine and
+# a drift verdict. Always exits 0 — drift is information, not a failure — and
+# degrades to "unknown" for anything it cannot resolve offline.
+print_version_report() {
+    local launcher rev
+    launcher="$(readlink -f "${BASH_SOURCE[0]}")"
+    rev="unknown"
+    if [[ -n "${LAUNCHER_REV}" ]]; then
+        rev="${LAUNCHER_REV:0:7}"
+    fi
+    report_line "launcher" "${launcher}   rev ${rev}"
+
+    local engine
+    engine="$(pick_engine_soft)"
+
+    local root pin_token image_ref
+    root="$(repo_root_soft)"
+    image_ref=""
+    if [[ -z "${root}" ]]; then
+        report_line "pin" "(no repository)"
+        report_line "image" "n/a"
+    else
+        pin_token="$(read_pin "${root}" soft)" || true
+        case "${pin_token}" in
+            invalid:*)
+                report_line "pin" "${CONFIG_FILE} (invalid pin '${pin_token#invalid:}')"
+                report_line "image" "n/a"
+                ;;
+            latest)
+                report_line "pin" "${CONFIG_FILE} (omitted -> latest)"
+                image_ref="${IMAGE_REPO}:latest"
+                report_line "image" "${image_ref}"
+                ;;
+            *)
+                report_line "pin" "${CONFIG_FILE} -> ${pin_token}"
+                image_ref="${IMAGE_REPO}:${pin_token}"
+                report_line "image" "${image_ref}"
+                ;;
+        esac
+    fi
+
+    local digest
+    digest=""
+    if [[ -z "${image_ref}" ]]; then
+        report_line "  local" "n/a"
+    elif [[ -z "${engine}" ]]; then
+        report_line "  local" "unknown"
+    else
+        digest="$(image_digest "${engine}" "${image_ref}")"
+        if [[ -n "${digest}" ]]; then
+            report_line "  local" "present $(short_digest "${digest}")"
+        else
+            report_line "  local" "absent"
+        fi
+    fi
+
+    if [[ -z "${image_ref}" ]]; then
+        report_line "  remote" "n/a"
+    elif [[ -z "${engine}" ]]; then
+        report_line "  remote" "unknown"
+    else
+        local remote_state="unknown" remote_code=0
+        remote_image_state "${engine}" "${image_ref}" || remote_code=$?
+        case "${remote_code}" in
+            0) remote_state="present" ;;
+            1) remote_state="absent" ;;
+            *) remote_state="unknown" ;;
+        esac
+        report_line "  remote" "${remote_state}"
+    fi
+
+    if [[ -z "${engine}" ]]; then
+        report_line "engine" "none"
+    else
+        report_line "engine" "$("${engine}" --version 2>/dev/null || echo "${engine}")"
+    fi
+
+    local remote
+    remote="$(remote_rev)"
+
+    local -a verdicts=()
+    if [[ "${rev}" == "unknown" || -z "${remote}" ]]; then
+        verdicts+=("launcher unknown")
+    elif same_rev "${rev}" "${remote}"; then
+        verdicts+=("launcher current")
+    else
+        verdicts+=("launcher behind")
+    fi
+    if [[ -z "${root}" ]]; then
+        verdicts+=("pin n/a")
+    elif [[ "${pin_token}" == invalid:* ]]; then
+        verdicts+=("pin invalid")
+    elif [[ "${pin_token}" == "latest" ]]; then
+        verdicts+=("pin current")
+    elif [[ -z "${remote}" ]]; then
+        verdicts+=("pin unknown")
+    elif same_rev "${pin_token}" "${remote}"; then
+        verdicts+=("pin current")
+    else
+        verdicts+=("pin behind")
+    fi
+
+    local status="" verdict
+    for verdict in "${verdicts[@]}"; do
+        if [[ -z "${status}" ]]; then
+            status="${verdict}"
+        else
+            status="${status}; ${verdict}"
+        fi
+    done
+    report_line "status" "${status}"
+    return 0
+}
+
 # Terse one-line identity for scripts and shell prompts: `defined 3f9c1a2`.
 # Prints `defined unknown` when the launcher carries no baked revision.
 print_version() {
@@ -136,6 +370,10 @@ main() {
     fi
     if [[ "${verb}" == "--version" ]]; then
         print_version
+        return 0
+    fi
+    if [[ "${verb}" == "version" ]]; then
+        print_version_report
         return 0
     fi
     if [[ "${verb}" != "comply" && "${verb}" != "verify" ]]; then
