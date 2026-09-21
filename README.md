@@ -13,10 +13,31 @@ backed by shared building blocks (`lib/`) and house standards (`standards/`).
 Install the `defined` launcher, then run it from a project root:
 
 ```bash
-install -m 755 cli/defined ~/.local/bin/defined   # one-time install
+bash cli/install.sh        # one-time install into ~/.local/bin
 
-defined comply    # bootstrap (configs + AGENTS block) → repair → verify
+defined comply             # bootstrap (configs + AGENTS block) → repair → verify
 ```
+
+`cli/install.sh` resolves the revision to install (the current checkout when run
+from a clone, otherwise the latest published `main`), downloads the launcher,
+verifies it against a checksum embedded in the installer, and installs it
+atomically. It is idempotent — re-running with the same revision is a no-op —
+and `--rev <sha>` installs a specific revision.
+
+The launcher also has a lifecycle surface:
+
+```bash
+defined version                  # launcher, pin, image, engine and drift
+defined update [<sha>|latest]    # move the pin, launcher and image together
+defined --version                # terse one-liner: defined <rev>
+```
+
+`defined version` is read-only and never fails on drift — it reports it — and
+degrades to "unknown" for anything it cannot resolve offline (`DEFINED_OFFLINE=1`).
+`defined update` resolves `latest` to a concrete SHA (never a mutable tag),
+writes the pin into `.defined.json` as a working-tree change for you to commit,
+reinstalls the launcher at that revision, then pulls the exact image. It refuses
+to run in the defined source repo itself.
 
 **Always use `comply` for local and agent work.** It bootstraps the managed
 configs, repairs safe findings, then re-verifies — one command, exit 0 only
@@ -50,8 +71,16 @@ the image.
 
 ## Adopt the gate in a consumer repo
 
-1. **Install the launcher** — copy `cli/defined` onto PATH (normally
-   `~/.local/bin/defined`); a bash script needing git + podman/docker.
+1. **Install the launcher** — fetch and run the installer, which verifies and
+   installs `defined` onto PATH (normally `~/.local/bin/defined`):
+
+    ```bash
+    curl -fsSL -o install.sh https://raw.githubusercontent.com/markstanden/defined/main/cli/install.sh
+    bash install.sh
+    ```
+
+    A bash script needing git + podman/docker.
+
 2. **Commit the config** — add a `.defined.json` file. `version` is optional:
    omit it to ride the current published default image, or pin an immutable
    tag (e.g. the git SHA of the gate commit you're adopting) for
@@ -219,7 +248,8 @@ A full example pipeline is in [`standards/workflows/pipeline.example.yml`](stand
 ```bash
 defined/
 ├── cli/                             # installed host launcher (no gate logic)
-│   └── defined                      # bash; needs git + podman/docker
+│   ├── defined                      # bash; needs git + podman/docker
+│   └── install.sh                   # verified, idempotent installer
 ├── runtime/                         # the container image (the gate)
 │   ├── Containerfile                # node 26 slim base, pinned tools
 │   ├── tool-versions.env            # single source of tool version pins

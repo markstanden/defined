@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-09-20 | scope=AGENTS.md -->
+<!-- update: agent=opencode | date=2026-09-21 | scope=AGENTS.md -->
 
 # AGENTS.md
 
@@ -16,8 +16,15 @@ end-to-end gate.
   behaviour, needs only git + podman/docker. It reads the consumer's committed
   `.defined.json` `version` (omitted → current published default image; a
   written pin is immutable), prefers podman, mounts the repo rw for `comply` / ro
-  for `verify`. Tested via `cli/defined.test.mts` with fake engines injected on
-  PATH (no real engine needed). The producer repo commits its own versionless
+  for `verify`. Its lifecycle surface is `defined version` (read-only report:
+  launcher, pin, image, engine, drift; `--version` is the terse one-liner) and
+  `defined update [<sha>|latest]` (resolve `latest` to a concrete SHA, write the
+  pin as a working-tree change, reinstall the launcher at that revision, pull the
+  exact image; refuses the source repo). `cli/install.sh` is the verified,
+  idempotent installer `update` reuses — its embedded `LAUNCHER_SHA256` must track
+  `cli/defined` (a test enforces it). Tested via `cli/defined.test.mts` and
+  `cli/install.test.mts` with fake engines/git/curl injected on PATH (no real
+  engine or network needed). The producer repo commits its own versionless
   config — a coverage-only `.defined.json`.
 - Root `.github/workflows/*.yml` hold one consumer-facing reusable workflow and
   two repository CI workflows. The only reusable workflow is `defined--verify.yml`

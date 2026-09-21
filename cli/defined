@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # cli/defined — installed host launcher for the defined gate (decision #25).
 #
-# The only public surface: `defined comply` and `defined verify`. `comply` is
-# the command to use locally and for agent work (bootstrap + repair + verify);
+# The run surface: `defined comply` and `defined verify`. `comply` is the
+# command to use locally and for agent work (bootstrap + repair + verify);
 # `verify` is the read-only check the pipeline runs and nothing else. Reads
 # the consumer's committed .defined.json `version` (omitted → current default
 # image), picks a container engine (podman preferred), ensures the exact image
@@ -10,7 +10,12 @@
 # read-only for verify. No gate behaviour lives here; everything else is in
 # the image.
 #
-# Needs only git + podman/docker on the host. Install: put this file on PATH
+# The lifecycle surface: `defined version` (a read-only report of launcher,
+# pin, image, engine and drift) and its terse one-line alias
+# `defined --version`; and `defined update [<sha>|latest]`, which moves the
+# pin, the installed launcher and the local image together.
+#
+# Needs only git + podman/docker on the host. Install with cli/install.sh
 # (normally ~/.local/bin/defined). Source development uses runtime/comply.sh.
 # The runtime's .defined.json parser is exercised here end-to-end; the
 # producer repo commits its own versionless config (a coverage pin, see the
@@ -27,11 +32,24 @@
 set -euo pipefail
 
 CONFIG_FILE=".defined.json"
-IMAGE_REPO="ghcr.io/markstanden/defined"
+IMAGE_OWNER="markstanden"
+IMAGE_NAME="defined"
+IMAGE_REPO="ghcr.io/${IMAGE_OWNER}/${IMAGE_NAME}"
+SOURCE_URL="https://github.com/${IMAGE_OWNER}/${IMAGE_NAME}.git"
+RAW_BASE="https://raw.githubusercontent.com/${IMAGE_OWNER}/${IMAGE_NAME}"
 PROGRAM="$(basename "${BASH_SOURCE[0]}")"
 
+# Scratch space used by `update`; removed on exit.
+UPDATE_WORK=""
+
+# The source revision this launcher was installed from. cli/install.sh
+# substitutes the value into this slot at install time (its LAUNCHER_SHA256
+# constant pins the launcher and installer to one commit); an empty value
+# means the copy was hand-installed and has no known revision.
+LAUNCHER_REV=""
+
 usage() {
-    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify" >&2
+    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -53,8 +71,13 @@ repo_root() {
 # defaults are obvious; explicit values are overrides). Explicit mutable
 # aliases (latest, non-SHA tokens) are rejected so a *written* pin is always
 # the exact image local and CI run (release identity, PLAN.md).
+#
+# `mode` is "strict" for the run paths (a bad pin is fatal) or "soft" for
+# `version` (a bad pin prints "invalid:<value>" and returns non-zero, so the
+# report can show it without dying).
 read_pin() {
     local root="$1"
+    local mode="${2:-strict}"
     local file="${root}/${CONFIG_FILE}"
     if [[ ! -f "${file}" ]]; then
         echo "latest"
@@ -69,9 +92,17 @@ read_pin() {
         return 0
     fi
     if [[ "${pin}" == "latest" ]]; then
+        if [[ "${mode}" == "soft" ]]; then
+            echo "invalid:${pin}"
+            return 1
+        fi
         die "${file} must pin an immutable tag, not 'latest' — omit 'version' to use the default"
     fi
     if [[ ! "${pin}" =~ ^[0-9a-f]{7,40}$ ]]; then
+        if [[ "${mode}" == "soft" ]]; then
+            echo "invalid:${pin}"
+            return 1
+        fi
         die "${file} has an invalid pin '${pin}' — expected a git SHA"
     fi
     echo "${pin}"
@@ -111,10 +142,367 @@ ensure_image() {
     return 0
 }
 
+# Resolve the enclosing git root, or print nothing when the CWD is not in a
+# repository — `version` reports, it does not require a repo.
+repo_root_soft() {
+    git -C "${PWD}" rev-parse --show-toplevel 2>/dev/null || true
+    return 0
+}
+
+# Engine for the report: the chosen engine name, or empty when none is
+# available (never fatal — `version` must still work without an engine).
+pick_engine_soft() {
+    local engine="${DEFINED_ENGINE:-}"
+    if [[ -n "${engine}" ]]; then
+        if command -v "${engine}" >/dev/null 2>&1; then
+            echo "${engine}"
+        fi
+        return 0
+    fi
+    if command -v podman >/dev/null 2>&1; then
+        echo "podman"
+        return 0
+    fi
+    if command -v docker >/dev/null 2>&1; then
+        echo "docker"
+        return 0
+    fi
+    return 0
+}
+
+# The latest revision on the public main branch, or empty when offline or
+# unreachable. `version` degrades to "unknown" rather than failing.
+remote_rev() {
+    if [[ -n "${DEFINED_OFFLINE:-}" ]]; then
+        return 0
+    fi
+    local out
+    out="$(git ls-remote --refs "${SOURCE_URL}" refs/heads/main 2>/dev/null)" ||
+        true
+    out="${out%%[[:space:]]*}"
+    echo "${out}"
+    return 0
+}
+
+# True when a short revision names the same commit as a full remote revision.
+same_rev() {
+    local short="$1"
+    local full="$2"
+    if [[ -n "${short}" && -n "${full}" && "${full:0:${#short}}" == "${short}" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# The local image's digest (or id) as the engine reports it; empty when the
+# image is not present locally.
+image_digest() {
+    local engine="$1" image="$2" digest
+    digest="$("${engine}" image inspect --format '{{.Digest}}' "${image}" 2>/dev/null)" ||
+        true
+    if [[ -z "${digest}" ]]; then
+        digest="$("${engine}" image inspect --format '{{.Id}}' "${image}" 2>/dev/null)" ||
+            true
+    fi
+    echo "${digest}"
+    return 0
+}
+
+# Shorten a digest for display: `sha256:aa11…` (first twelve hex characters).
+short_digest() {
+    local digest="$1"
+    if [[ "${digest}" == sha256:* && ${#digest} -gt 19 ]]; then
+        echo "${digest:0:19}…"
+        return 0
+    fi
+    echo "${digest}"
+    return 0
+}
+
+# Remote image state: 0 present, 1 absent (the registry reports an unknown
+# tag), 2 unknown (offline, unreachable, or any other error).
+remote_image_state() {
+    local engine="$1" image="$2" err
+    if [[ -n "${DEFINED_OFFLINE:-}" ]]; then
+        return 2
+    fi
+    if err="$("${engine}" manifest inspect "${image}" 2>&1 >/dev/null)"; then
+        return 0
+    fi
+    case "${err,,}" in
+        *"manifest unknown"* | *"no such manifest"* | *"not found"*)
+            return 1
+            ;;
+    esac
+    return 2
+}
+
+report_line() {
+    printf '%-10s %s\n' "$1" "$2"
+    return 0
+}
+
+# Read-only lifecycle report: launcher, pin, image (local/remote), engine and
+# a drift verdict. Always exits 0 — drift is information, not a failure — and
+# degrades to "unknown" for anything it cannot resolve offline.
+print_version_report() {
+    local launcher rev
+    launcher="$(readlink -f "${BASH_SOURCE[0]}")"
+    rev="unknown"
+    if [[ -n "${LAUNCHER_REV}" ]]; then
+        rev="${LAUNCHER_REV:0:7}"
+    fi
+    report_line "launcher" "${launcher}   rev ${rev}"
+
+    local engine
+    engine="$(pick_engine_soft)"
+
+    local root pin_token image_ref
+    root="$(repo_root_soft)"
+    image_ref=""
+    if [[ -z "${root}" ]]; then
+        report_line "pin" "(no repository)"
+        report_line "image" "n/a"
+    else
+        pin_token="$(read_pin "${root}" soft)" || true
+        case "${pin_token}" in
+            invalid:*)
+                report_line "pin" "${CONFIG_FILE} (invalid pin '${pin_token#invalid:}')"
+                report_line "image" "n/a"
+                ;;
+            latest)
+                report_line "pin" "${CONFIG_FILE} (omitted -> latest)"
+                image_ref="${IMAGE_REPO}:latest"
+                report_line "image" "${image_ref}"
+                ;;
+            *)
+                report_line "pin" "${CONFIG_FILE} -> ${pin_token}"
+                image_ref="${IMAGE_REPO}:${pin_token}"
+                report_line "image" "${image_ref}"
+                ;;
+        esac
+    fi
+
+    local digest
+    digest=""
+    if [[ -z "${image_ref}" ]]; then
+        report_line "  local" "n/a"
+    elif [[ -z "${engine}" ]]; then
+        report_line "  local" "unknown"
+    else
+        digest="$(image_digest "${engine}" "${image_ref}")"
+        if [[ -n "${digest}" ]]; then
+            report_line "  local" "present $(short_digest "${digest}")"
+        else
+            report_line "  local" "absent"
+        fi
+    fi
+
+    if [[ -z "${image_ref}" ]]; then
+        report_line "  remote" "n/a"
+    elif [[ -z "${engine}" ]]; then
+        report_line "  remote" "unknown"
+    else
+        local remote_state="unknown" remote_code=0
+        remote_image_state "${engine}" "${image_ref}" || remote_code=$?
+        case "${remote_code}" in
+            0) remote_state="present" ;;
+            1) remote_state="absent" ;;
+            *) remote_state="unknown" ;;
+        esac
+        report_line "  remote" "${remote_state}"
+    fi
+
+    if [[ -z "${engine}" ]]; then
+        report_line "engine" "none"
+    else
+        report_line "engine" "$("${engine}" --version 2>/dev/null || echo "${engine}")"
+    fi
+
+    local remote
+    remote="$(remote_rev)"
+
+    local -a verdicts=()
+    if [[ "${rev}" == "unknown" || -z "${remote}" ]]; then
+        verdicts+=("launcher unknown")
+    elif same_rev "${rev}" "${remote}"; then
+        verdicts+=("launcher current")
+    else
+        verdicts+=("launcher behind")
+    fi
+    if [[ -z "${root}" ]]; then
+        verdicts+=("pin n/a")
+    elif [[ "${pin_token}" == invalid:* ]]; then
+        verdicts+=("pin invalid")
+    elif [[ "${pin_token}" == "latest" ]]; then
+        verdicts+=("pin current")
+    elif [[ -z "${remote}" ]]; then
+        verdicts+=("pin unknown")
+    elif same_rev "${pin_token}" "${remote}"; then
+        verdicts+=("pin current")
+    else
+        verdicts+=("pin behind")
+    fi
+
+    local status="" verdict
+    for verdict in "${verdicts[@]}"; do
+        if [[ -z "${status}" ]]; then
+            status="${verdict}"
+        else
+            status="${status}; ${verdict}"
+        fi
+    done
+    report_line "status" "${status}"
+    return 0
+}
+
+# Download a URL to a file, preferring curl and falling back to wget.
+download() {
+    local url="$1" dest="$2"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL -o "${dest}" "${url}"
+        return 0
+    fi
+    if command -v wget >/dev/null 2>&1; then
+        wget -q -O "${dest}" "${url}"
+        return 0
+    fi
+    die "neither curl nor wget is available to download ${url}"
+}
+
+# A revision is only ever a hex SHA: it is written into .defined.json and
+# appended to a URL, so anything else is rejected before it is used.
+validate_rev() {
+    local rev="$1"
+    if [[ ! "${rev}" =~ ^[0-9a-f]{7,40}$ ]]; then
+        die "invalid revision '${rev}' — expected a 7–40 character hex SHA"
+    fi
+    return 0
+}
+
+# True when any of the repo's remotes is the defined source itself. That repo
+# commits a versionless config by construction, so `update` must not pin it.
+# Every remote is checked, not just `origin`: the source repo itself names its
+# remote `defined`, so an `origin`-only check would miss the very repo it guards.
+is_source_repo() {
+    local root="$1" name url
+    while IFS= read -r name; do
+        url="$(git -C "${root}" remote get-url "${name}" 2>/dev/null)" || true
+        case "${url}" in
+            *"${IMAGE_OWNER}/${IMAGE_NAME}" | *"${IMAGE_OWNER}/${IMAGE_NAME}.git")
+                return 0
+                ;;
+        esac
+    done < <(git -C "${root}" remote 2>/dev/null || true)
+    return 1
+}
+
+# Write the pin into .defined.json: replace an existing "version" value, insert
+# one when the key is absent, or create a minimal file when there is none. The
+# change is left in the working tree — the consumer commits it.
+write_pin() {
+    local root="$1"
+    local pin="$2"
+    local file="${root}/${CONFIG_FILE}"
+    if [[ ! -f "${file}" ]]; then
+        printf '{\n    "version": "%s"\n}\n' "${pin}" >"${file}"
+        return 0
+    fi
+    if grep -q '"version"' "${file}"; then
+        sed -i "s|\\(\"version\"[[:space:]]*:[[:space:]]*\"\\)[^\"]*\\(\"\\)|\\1${pin}\\2|" "${file}"
+        return 0
+    fi
+    sed -i "0,/^[[:space:]]*{/s|^[[:space:]]*{|&\n    \"version\": \"${pin}\",|" "${file}"
+    return 0
+}
+
+# Install the launcher at a revision by fetching cli/install.sh at that same
+# revision and running it — the installer owns the download, checksum and
+# placement logic; `update` owns resolution and the pin.
+install_launcher_at() {
+    local rev="$1"
+    UPDATE_WORK="$(mktemp -d)"
+    trap 'rm -rf "${UPDATE_WORK}"' EXIT
+    download "${RAW_BASE}/${rev}/cli/install.sh" "${UPDATE_WORK}/install.sh"
+    bash "${UPDATE_WORK}/install.sh" --rev "${rev}"
+    return 0
+}
+
+# `defined update [<sha>|latest]`: move the pin, the installed launcher and the
+# local image together. `latest` resolves to a concrete 12-char SHA (never a
+# mutable tag). Needs the network; `comply`/`verify` stay offline-capable.
+run_update() {
+    local arg="${1:-latest}"
+    if [[ -n "${DEFINED_OFFLINE:-}" ]]; then
+        die "update needs the network — unset DEFINED_OFFLINE to update"
+    fi
+    local root
+    root="$(repo_root)" || return 1
+    if is_source_repo "${root}"; then
+        die "this is the defined source repo — it commits a versionless config by construction; update does not apply"
+    fi
+
+    local rev
+    if [[ "${arg}" == "latest" ]]; then
+        rev="$(remote_rev)"
+        if [[ -z "${rev}" ]]; then
+            die "cannot resolve the latest revision — check your network"
+        fi
+    else
+        rev="${arg}"
+    fi
+    validate_rev "${rev}"
+    if [[ ${#rev} -lt 12 ]]; then
+        die "revision '${rev}' is too short — pass at least a 12-character short SHA"
+    fi
+    # Image tags are 12-char short SHAs; the pin must be exactly that tag.
+    local pin="${rev:0:12}"
+    local image="${IMAGE_REPO}:${pin}"
+
+    local engine
+    engine="$(pick_engine)" || return 1
+
+    # Order: pin, launcher, image. Re-running is a no-op at each step.
+    write_pin "${root}" "${pin}"
+    install_launcher_at "${rev}"
+    ensure_image "${engine}" "${image}" "" || return 1
+
+    echo "update: ${CONFIG_FILE} -> ${pin} (working-tree change — commit it)"
+    echo "update: launcher and image ${image} up to date"
+    return 0
+}
+
+# Terse one-line identity for scripts and shell prompts: `defined 3f9c1a2`.
+# Prints `defined unknown` when the launcher carries no baked revision.
+print_version() {
+    local rev="unknown"
+    if [[ -n "${LAUNCHER_REV}" ]]; then
+        rev="${LAUNCHER_REV:0:7}"
+    fi
+    echo "defined ${rev}"
+    return 0
+}
+
 main() {
     local verb="${1:-}"
     if [[ "${verb}" == "-h" || "${verb}" == "--help" ]]; then
         usage
+        return 0
+    fi
+    if [[ "${verb}" == "--version" ]]; then
+        print_version
+        return 0
+    fi
+    if [[ "${verb}" == "version" ]]; then
+        print_version_report
+        return 0
+    fi
+    if [[ "${verb}" == "update" ]]; then
+        if [[ $# -gt 2 ]]; then
+            usage
+            return 2
+        fi
+        run_update "${2:-latest}"
         return 0
     fi
     if [[ "${verb}" != "comply" && "${verb}" != "verify" ]]; then
