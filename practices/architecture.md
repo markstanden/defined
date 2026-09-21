@@ -12,14 +12,16 @@ hard rules (gate steps, module conventions, naming) live in
 - **One container image is the toolchain.** Pin versions in one place
   (`tool-versions.env`); the image tag IS the release. No per-distro installer
   scripts, no drift between environments.
-- **Local green = merge green.** CI runs the same image as the developer as
-  long as the workflow ref and the `.defined.json` pin match; nothing is
-  environment-specific.
-- **Two distribution channels only**: the pinned image and gitsha-pinned
-  reusable-workflow refs. No submodules, no symlinks, no consumer application
-  artifacts (the gate image itself is, of course, a release artifact).
-- **One gate workflow**: `defined--verify.yml` is the sole consumer-facing
-  reusable workflow. Delivery actions live in the consumer's own pipelines.
+- **Local green = merge green.** CI runs the same image as the developer,
+  because the installed workflow reads the `.defined.json` pin; nothing is
+  environment-specific and no gate ref is duplicated in YAML.
+- **Two distribution channels only**: the pinned image and the managed files it
+  installs (the gate workflow included). No submodules, no symlinks, no consumer
+  application artifacts (the gate image itself is, of course, a release
+  artifact).
+- **One gate workflow**: `defined--verify.yml` is the sole consumer-facing gate
+  workflow, installed as a managed file. Delivery actions live in the consumer's
+  own pipelines.
 
 ## Structure
 
@@ -34,7 +36,7 @@ hard rules (gate steps, module conventions, naming) live in
   source shim stays thin too.
 - **Testability by injection**: anything that shells out accepts a runner
   parameter; pure logic is extracted and table-tested.
-- **Floors are exact**: managed root configs must stay byte-identical to the
+- **Floors are exact**: managed files must stay byte-identical to the
   image-baked versions (drift fails); extension happens through project-level
   files, not by editing the managed floor. `comply` may apply repairs that
   modify the working tree — those changes are reviewable, and each tool must

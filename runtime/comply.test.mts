@@ -21,7 +21,7 @@ function fakeStep(
 
 function cleanSetup(): SetupCheck {
     return {
-        configs: [
+        files: [
             { name: ".editorconfig", status: "present" },
             { name: "Directory.Build.props", status: "present" },
         ],
@@ -129,7 +129,7 @@ test("runGate comply reports bootstrap drift through the contract", async () => 
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => ({
-                configs: [
+                files: [
                     { name: ".editorconfig", status: "drift" },
                     { name: "Directory.Build.props", status: "present" },
                 ],

@@ -23,7 +23,7 @@ export interface ReportInput {
 /** Failing setup artifacts as stable `fail` lines, or [] when clean. */
 function setupFailures(setup: SetupCheck): string[] {
     const lines: string[] = [];
-    for (const c of setup.configs) {
+    for (const c of setup.files) {
         if (c.status === "absent") {
             lines.push(`fail bootstrap — ${c.name}: absent (run comply)`);
         } else if (c.status === "drift") {

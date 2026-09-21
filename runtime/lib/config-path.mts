@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
  * derived from this module's location — never the CWD. Works identically
  * when runtime/ is bind-mounted at /opt/defined/runtime in the container or
  * run from a host checkout, and keeps configs travelling with the gate code.
+ * (`standardsDir` below resolves the managed-file sources the same way.)
  */
 export async function gateConfigPath({
     name,
@@ -26,7 +27,7 @@ export async function gateConfigPath({
 
 /**
  * Resolve the standards directory (sibling of runtime/) — the single source
- * of truth for shared root configs installed by setup. Derived from this
+ * of truth for shared managed files installed by setup. Derived from this
  * module's location like gateConfigPath: works baked at /opt/defined/standards
  * in the container or from a host checkout.
  */

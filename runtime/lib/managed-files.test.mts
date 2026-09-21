@@ -1,13 +1,13 @@
-// Tests for lib/config-install.mts: byte-identical root config install + check.
-// Run: node --test lib/config-install.test.mts
+// Tests for lib/managed-files.mts: byte-identical managed-file install + check.
+// Run: node --test lib/managed-files.test.mts
 
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { checkRootConfigs, installRootConfigs } from "./config-install.mts";
+import { checkManagedFiles, installManagedFiles } from "./managed-files.mts";
 
 interface Fixture {
     src: string;
@@ -17,7 +17,7 @@ interface Fixture {
 
 /** Create a temp source dir + repo root pair for an install run. */
 async function makeFixture(): Promise<Fixture> {
-    const root = await mkdtemp(join(tmpdir(), "quality-config-install-"));
+    const root = await mkdtemp(join(tmpdir(), "quality-managed-files-"));
     const src = join(root, "config");
     const repo = join(root, "repo");
     await mkdir(src);
@@ -25,12 +25,13 @@ async function makeFixture(): Promise<Fixture> {
     return { src, repo, root };
 }
 
-/** Write a file inside the fixture's source dir. */
+/** Write files inside the fixture's source dir, creating parents. */
 async function seedSource(
     src: string,
     files: Record<string, string>,
 ): Promise<void> {
     for (const [name, contents] of Object.entries(files)) {
+        await mkdir(dirname(join(src, name)), { recursive: true });
         await writeFile(join(src, name), contents);
     }
 }
@@ -47,6 +48,16 @@ async function withFixture<T>(
     }
 }
 
+/** True when a path exists and is readable. */
+async function exists(filePath: string): Promise<boolean> {
+    try {
+        await readFile(filePath);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 test("installs the named absent files into the repo root", async () => {
     await withFixture(async ({ src, repo }) => {
         await seedSource(src, {
@@ -54,9 +65,15 @@ test("installs the named absent files into the repo root", async () => {
             "Directory.Build.props": "<Project />\n",
         });
 
-        const result = await installRootConfigs({
+        const result = await installManagedFiles({
             sourceDir: src,
-            names: [".editorconfig", "Directory.Build.props"],
+            files: [
+                { source: ".editorconfig", target: ".editorconfig" },
+                {
+                    source: "Directory.Build.props",
+                    target: "Directory.Build.props",
+                },
+            ],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -74,14 +91,47 @@ test("installs the named absent files into the repo root", async () => {
     });
 });
 
+test("installs a file whose source and target paths differ, creating parents", async () => {
+    await withFixture(async ({ src, repo }) => {
+        await seedSource(src, {
+            "workflows/defined--verify.yml": "name: Gate\n",
+        });
+
+        const result = await installManagedFiles({
+            sourceDir: src,
+            files: [
+                {
+                    source: "workflows/defined--verify.yml",
+                    target: ".github/workflows/defined--verify.yml",
+                },
+            ],
+            repoRoot: repo,
+        });
+        assert.deepEqual(result, [
+            {
+                name: ".github/workflows/defined--verify.yml",
+                status: "installed",
+            },
+        ]);
+        assert.equal(
+            await readFile(
+                join(repo, ".github/workflows/defined--verify.yml"),
+                "utf8",
+            ),
+            "name: Gate\n",
+            "the source path is not where the file lands",
+        );
+    });
+});
+
 test("leaves an identical existing file untouched and reports unchanged", async () => {
     await withFixture(async ({ src, repo }) => {
         await seedSource(src, { ".editorconfig": "root = true\n" });
         await writeFile(join(repo, ".editorconfig"), "root = true\n");
 
-        const result = await installRootConfigs({
+        const result = await installManagedFiles({
             sourceDir: src,
-            names: [".editorconfig"],
+            files: [{ source: ".editorconfig", target: ".editorconfig" }],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -99,9 +149,9 @@ test("reports drift on a differing existing file and never overwrites it", async
         await seedSource(src, { ".editorconfig": "indent_size = 4\n" });
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
 
-        const result = await installRootConfigs({
+        const result = await installManagedFiles({
             sourceDir: src,
-            names: [".editorconfig"],
+            files: [{ source: ".editorconfig", target: ".editorconfig" }],
             repoRoot: repo,
         });
         assert.deepEqual(result, [{ name: ".editorconfig", status: "drift" }]);
@@ -112,7 +162,7 @@ test("reports drift on a differing existing file and never overwrites it", async
     });
 });
 
-test("drift does not stop the pass: later configs are still installed", async () => {
+test("drift does not stop the pass: later files are still installed", async () => {
     await withFixture(async ({ src, repo }) => {
         await seedSource(src, {
             ".editorconfig": "indent_size = 4\n",
@@ -120,9 +170,12 @@ test("drift does not stop the pass: later configs are still installed", async ()
         });
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
 
-        const result = await installRootConfigs({
+        const result = await installManagedFiles({
             sourceDir: src,
-            names: [".editorconfig", ".gitattributes"],
+            files: [
+                { source: ".editorconfig", target: ".editorconfig" },
+                { source: ".gitattributes", target: ".gitattributes" },
+            ],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -139,9 +192,9 @@ test("installs only the named files, ignoring others in the source dir", async (
             "unrelated.sh": "echo hi\n",
         });
 
-        const result = await installRootConfigs({
+        const result = await installManagedFiles({
             sourceDir: src,
-            names: [".editorconfig"],
+            files: [{ source: ".editorconfig", target: ".editorconfig" }],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -152,10 +205,9 @@ test("installs only the named files, ignoring others in the source dir", async (
             "root = true\n",
         );
         assert.equal(
-            await readFile(join(repo, "unrelated.sh"), "utf8")
-                .then(() => "exists")
-                .catch(() => "missing"),
-            "missing",
+            await exists(join(repo, "unrelated.sh")),
+            false,
+            "only the named files are copied into the repo",
         );
     });
 });
@@ -166,11 +218,11 @@ test("re-running after a clean install is a no-op (unchanged)", async () => {
 
         const opts = {
             sourceDir: src,
-            names: [".editorconfig"],
+            files: [{ source: ".editorconfig", target: ".editorconfig" }],
             repoRoot: repo,
         };
-        await installRootConfigs(opts);
-        const second = await installRootConfigs(opts);
+        await installManagedFiles(opts);
+        const second = await installManagedFiles(opts);
         assert.deepEqual(second, [
             { name: ".editorconfig", status: "unchanged" },
         ]);
@@ -185,9 +237,15 @@ test("check reports present, absent and drift without writing", async () => {
         });
         await writeFile(join(repo, "Directory.Build.props"), "changed\n");
 
-        const result = await checkRootConfigs({
+        const result = await checkManagedFiles({
             sourceDir: src,
-            names: [".editorconfig", "Directory.Build.props"],
+            files: [
+                { source: ".editorconfig", target: ".editorconfig" },
+                {
+                    source: "Directory.Build.props",
+                    target: "Directory.Build.props",
+                },
+            ],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
@@ -206,13 +264,41 @@ test("check reports present for an identical existing file", async () => {
         await seedSource(src, { ".editorconfig": "root = true\n" });
         await writeFile(join(repo, ".editorconfig"), "root = true\n");
 
-        const result = await checkRootConfigs({
+        const result = await checkManagedFiles({
             sourceDir: src,
-            names: [".editorconfig"],
+            files: [{ source: ".editorconfig", target: ".editorconfig" }],
             repoRoot: repo,
         });
         assert.deepEqual(result, [
             { name: ".editorconfig", status: "present" },
+        ]);
+    });
+});
+
+test("check reports a mapped target absent when only the source path exists", async () => {
+    await withFixture(async ({ src, repo }) => {
+        await seedSource(src, {
+            "workflows/defined--verify.yml": "name: Gate\n",
+        });
+        // The consumer has the source-shaped path, not the installed target.
+        await mkdir(join(repo, "workflows"), { recursive: true });
+        await writeFile(
+            join(repo, "workflows/defined--verify.yml"),
+            "name: Gate\n",
+        );
+
+        const result = await checkManagedFiles({
+            sourceDir: src,
+            files: [
+                {
+                    source: "workflows/defined--verify.yml",
+                    target: ".github/workflows/defined--verify.yml",
+                },
+            ],
+            repoRoot: repo,
+        });
+        assert.deepEqual(result, [
+            { name: ".github/workflows/defined--verify.yml", status: "absent" },
         ]);
     });
 });

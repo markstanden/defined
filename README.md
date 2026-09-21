@@ -15,7 +15,7 @@ Install the `defined` launcher, then run it from a project root:
 ```bash
 bash cli/install.sh        # one-time install into ~/.local/bin
 
-defined comply             # bootstrap (configs + AGENTS block) → repair → verify
+defined comply             # bootstrap (managed files + AGENTS block) → repair → verify
 ```
 
 `cli/install.sh` resolves the revision to install (the current checkout when run
@@ -40,17 +40,17 @@ reinstalls the launcher at that revision, then pulls the exact image. It refuses
 to run in the defined source repo itself.
 
 **Always use `comply` for local and agent work.** It bootstraps the managed
-configs, repairs safe findings, then re-verifies — one command, exit 0 only
-when the checkout is green. `verify` exists solely for the pipeline: it is the
-read-only check `defined--verify.yml` runs in CI (never writes), and is not the
-command for a developer to reach for.
+files, repairs safe findings, then re-verifies — one command, exit 0 only when
+the checkout is green. `verify` exists solely for the pipeline: it is the
+read-only check the installed `defined--verify.yml` runs in CI (never writes),
+and is not the command for a developer to reach for.
 
 The launcher is a bash script needing git + podman/docker (plus the standard
 coreutils any bash environment has); it prefers podman, mounts the repo
 read-write for `comply` and read-only for `verify`, and runs the exact image
-pinned in the repo's `.defined.json` — so local green = merge green: CI runs
-that same image as long as the workflow ref and the `.defined.json` pin
-match (keep them in step).
+pinned in the repo's `.defined.json` — so local green = merge green: the
+installed CI workflow reads that same pin and no gate version is duplicated
+anywhere (decision #36).
 
 Set `DEFINED_ENGINE` to force an engine, and `DEFINED_OFFLINE=1` to run the
 container with no network (`--network=none`). The gate's checks need no network,
@@ -171,10 +171,11 @@ the image.
       the single authority.
 
 3. **Gate locally** — run `defined comply`. It bootstraps `.editorconfig`,
-   `Directory.Build.props` and `.gitattributes` into the repo root and seeds
-   the AGENTS.md managed block, repairs safe findings, then re-verifies.
-   Managed files are installed from the image and must stay byte-identical —
-   any difference is drift and fails. Use `comply` every time — it is the whole
+   `Directory.Build.props`, `.gitattributes` and the gate workflow
+   (`.github/workflows/defined--verify.yml`) into the repo and seeds the
+   AGENTS.md managed block, repairs safe findings, then re-verifies. Managed
+   files are installed from the image and must stay byte-identical — any
+   difference is drift and fails. Use `comply` every time — it is the whole
    local loop; `verify` is reserved for CI.
 
     Prettier runs to house defaults; a consumer-owned `prettier.config.mjs` (or
@@ -182,20 +183,18 @@ the image.
     instead, so project preferences need no fork. Indentation stays owned by
     `.editorconfig`, which prettier gives higher priority than any config.
 
-4. **Gate in CI** — call the reusable `defined--verify.yml` workflow, pinned
-   to the same git sha as the pin:
-
-    ```yaml
-    jobs:
-        quality:
-            uses: markstanden/defined/.github/workflows/defined--verify.yml@<shortsha>
-    ```
+4. **Gate in CI** — nothing to add: `comply` installed
+   `.github/workflows/defined--verify.yml`, and it gates every pull request and
+   push on its own (no reusable-workflow ref, so there is no gate SHA in your
+   workflow to keep in step).
 
     The workflow reads `.defined.json` for the image tag — the same pin the
-    local launcher reads — so local and CI run the same image. Omitted
-    `version` defaults to the current published image; a written pin restores
-    immutability. Keep the workflow ref SHA and the `.defined.json` pin in
-    step: only when they match is local green = merge green.
+    local launcher reads — so local and CI run the same image. Omitted `version`
+    rides the current published image; a written pin restores immutability.
+    Because the tag lives in exactly one place, local green = merge green by
+    construction. The workflow is a managed file: change its triggers or steps
+    by editing `.defined.json`/standards upstream, not by hand — a local edit is
+    drift and fails `verify`.
 
 ## Quality pipeline
 
@@ -211,23 +210,19 @@ neither contains secrets.
 
 ## Workflow templates
 
-The gate exposes exactly one consumer-facing reusable workflow:
-`defined--verify.yml` — quality scan for any repo. Call it from a consumer
-pipeline via a gitsha-pinned ref. Filename grammar:
-`<namespace>--<loose-verb>[--<target>]` (see [`standards/naming.md`](standards/naming.md)).
+There is exactly one consumer-facing gate workflow:
+[`standards/workflows/defined--verify.yml`](standards/workflows/defined--verify.yml).
+`comply` installs it into a consumer repo at `.github/workflows/defined--verify.yml`
+as a **managed file** — byte-identical to the standards copy, checked by
+`verify` — so consumers never hand-edit it and never pin a gate ref.
 
-```yaml
-jobs:
-    quality:
-        uses: markstanden/defined/.github/workflows/defined--verify.yml@<shortsha>
-```
+It owns its own triggers (`pull_request` and `push`, name-agnostic) and reads
+the repo's committed `.defined.json` for the image tag — no inputs — so it runs
+the same pinned image as the local launcher. It contains no gate version: the
+only gate SHA anywhere is the one in `.defined.json` (decision #36).
 
-The workflow reads the repo's committed `.defined.json` for the image tag —
-no inputs — so it runs the same pinned image as the local launcher.
-`defined--test.yml` and `defined--publish.yml` are this repo's own CI (tests
-and image publication); they are not consumer templates.
-
-A full example pipeline is in [`standards/workflows/pipeline.example.yml`](standards/workflows/pipeline.example.yml).
+`defined--test.yml` and `defined--publish.yml` are this repo's own CI (tests and
+image publication); they are not consumer templates.
 
 ## Standards
 
@@ -241,6 +236,7 @@ A full example pipeline is in [`standards/workflows/pipeline.example.yml`](stand
 - [`standards/.editorconfig`](standards/.editorconfig) — editor + dotnet code style (installed by gate setup)
 - [`standards/Directory.Build.props`](standards/Directory.Build.props) — common MSBuild properties (installed by gate setup)
 - [`standards/.gitattributes`](standards/.gitattributes) — LF/whitespace checkout contract (installed by gate setup)
+- [`standards/workflows/defined--verify.yml`](standards/workflows/defined--verify.yml) — the managed gate workflow, installed by gate setup
 - [`standards/githooks/pre-commit`](standards/githooks/pre-commit) — optional reference commit hook that runs `defined verify` (opt-in, repo-owned)
 
 ## Project structure
@@ -261,6 +257,7 @@ defined/
 │   └── config/                      # tool configs travelling in the image
 ├── lib/                             # shared building blocks (proc, paths, git)
 ├── standards/                       # house standards and tools
+│   └── workflows/defined--verify.yml # managed gate workflow (installed by setup)
 ├── practices/                       # docs / how-to
 └── .github/workflows/                # defined--verify/test/publish
 ```
