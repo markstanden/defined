@@ -158,9 +158,10 @@ and `--no-verify` bypasses it, so it is convenience, not a guarantee.
   degrading to "unknown" offline (`--version` is the terse one-liner) — and
   `defined update [<sha>|latest]`, which resolves `latest` to a concrete SHA,
   writes the pin as a working-tree change (never commits), reinstalls the
-  launcher at that revision and pulls the exact image. `update` refuses the
-  defined source repo and needs the network; `comply`/`verify` stay
-  offline-capable.
+  launcher at that revision and pulls the exact image. It confirms the image is
+  fetchable _before_ writing the pin, so a failed update cannot leave the repo
+  pinned to an image that does not exist. `update` refuses the defined source
+  repo and needs the network; `comply`/`verify` stay offline-capable.
 - `.defined.json` holds the optional immutable image tag under its `version`
   field, plus optional per-ecosystem coverage configuration. An omitted
   `version` (or a missing file) means the current published default image
@@ -186,6 +187,12 @@ merge green only while the workflow ref and `.defined.json` pin match — the
 consumer keeps those in step. An omitted `version` deliberately rides the
 current published default image (`latest`) — defaults are obvious, a written
 pin is the override that restores immutability.
+
+For the identity to hold, every `main` commit needs an image tag, so
+`defined--publish.yml` runs on **every** main push rather than being filtered to
+gate-content paths. `defined update latest` resolves `latest` to the merge
+commit; an unfiltered publish keeps that SHA pullable. Unchanged layers dedupe,
+so re-pushing an identical gate is cheap.
 
 ### Consumer configuration
 

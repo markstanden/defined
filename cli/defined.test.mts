@@ -802,6 +802,75 @@ test("update is a no-op when everything is already current", async () => {
     });
 });
 
+test("update refuses to pin a revision whose image is not published", async () => {
+    await withFixture("olddeadbeef0", async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["update", PIN],
+            env: {
+                FAKE_GIT_REMOTE: "origin",
+                FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
+                FAKE_INSPECT_FAIL: "1",
+                FAKE_MANIFEST_FAIL: "1",
+                FAKE_MANIFEST_ERROR: "manifest unknown",
+                DEFINED_BIN_DIR: fixture.install,
+            },
+        });
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /no published image/u);
+        const config = JSON.parse(
+            await readFile(join(fixture.repo, ".defined.json"), "utf8"),
+        );
+        assert.equal(
+            config.version,
+            "olddeadbeef0",
+            "the pin must not be written when the image is missing",
+        );
+        assert.ok(!r.log.some((line) => line.startsWith("pull")));
+    });
+});
+
+test("update fails when the registry cannot confirm the image", async () => {
+    await withFixture("olddeadbeef0", async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["update", PIN],
+            env: {
+                FAKE_GIT_REMOTE: "origin",
+                FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
+                FAKE_INSPECT_FAIL: "1",
+                FAKE_MANIFEST_FAIL: "1",
+                FAKE_MANIFEST_ERROR: "dial tcp: connection refused",
+                DEFINED_BIN_DIR: fixture.install,
+            },
+        });
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /cannot confirm/u);
+    });
+});
+
+test("update skips the registry when the image is already present locally", async () => {
+    await withFixture("olddeadbeef0", async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["update", PIN],
+            env: {
+                FAKE_GIT_REMOTE: "origin",
+                FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
+                FAKE_DIGEST: "sha256:aa11bb22cc33dd44",
+                FAKE_MANIFEST_FAIL: "1",
+                FAKE_MANIFEST_ERROR: "manifest unknown",
+                DEFINED_BIN_DIR: fixture.install,
+            },
+        });
+        assert.equal(r.status, 0);
+        assert.ok(
+            !r.log.some((line) => line.startsWith("manifest")),
+            "a locally present image needs no registry lookup",
+        );
+    });
+});
+
 test("update refuses the defined source repository", async () => {
     await withFixture(PIN, async (fixture) => {
         const r = await runLauncher({

@@ -31,8 +31,10 @@ end-to-end gate.
   (the gate). Naming convention: `<namespace>--<loose-verb>[--<target>].yml`
   (double hyphen separates the segments; the verb names the intent, not the tool
   — see `standards/naming.md`). The other two ARE CI for this repo:
-  `defined--publish.yml` (builds + pushes the gate image to ghcr on main,
-  tagged with the tool-pin hash, short SHA and `latest`) and `defined--test.yml`
+  `defined--publish.yml` (builds + pushes the gate image to ghcr on **every**
+  main push — deliberately unfiltered, so every main SHA carries an image tag
+  and `defined update latest` can pin it — tagged with the tool-pin hash, short
+  SHA and `latest`) and `defined--test.yml`
   (runs the gate's own unit + broken-fixture suite, the self-host gate with
   coverage, and a guarded SonarQube scan on PRs and merges).
 - `standards/workflows/pipeline.example.yml` — the `.example` in the stem is
