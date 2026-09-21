@@ -200,12 +200,18 @@ if [[ "$*" == *"ls-remote"* ]]; then
     fi
     exit 1
 fi
-if [[ "$*" == *"remote get-url origin"* ]]; then
-    if [[ -n "\${FAKE_GIT_ORIGIN:-}" ]]; then
-        echo "\${FAKE_GIT_ORIGIN}"
+if [[ "$*" == *"remote get-url"* ]]; then
+    if [[ -n "\${FAKE_GIT_REMOTE:-}" && "\${!#}" == "\${FAKE_GIT_REMOTE}" ]]; then
+        echo "\${FAKE_GIT_REMOTE_URL:-}"
         exit 0
     fi
     exit 1
+fi
+if [[ "$*" == *" remote" ]]; then
+    if [[ -n "\${FAKE_GIT_REMOTE:-}" ]]; then
+        echo "\${FAKE_GIT_REMOTE}"
+    fi
+    exit 0
 fi
 exit 1
 `;
@@ -698,7 +704,8 @@ test("update resolves latest and moves pin, launcher and image together", async 
             args: ["update"],
             env: {
                 FAKE_REMOTE_REV: REMOTE_REV,
-                FAKE_GIT_ORIGIN: "https://github.com/me/app.git",
+                FAKE_GIT_REMOTE: "origin",
+                FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
                 FAKE_INSPECT_FAIL: "1",
                 DEFINED_BIN_DIR: fixture.install,
             },
@@ -739,7 +746,8 @@ test("update accepts an explicit short SHA and replaces the pin", async () => {
             fixture,
             args: ["update", PIN],
             env: {
-                FAKE_GIT_ORIGIN: "https://github.com/me/app.git",
+                FAKE_GIT_REMOTE: "origin",
+                FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
@@ -758,7 +766,8 @@ test("update is a no-op when everything is already current", async () => {
     await withFixture({ coverage: {} }, async (fixture) => {
         const baseEnv = {
             FAKE_REMOTE_REV: REMOTE_REV,
-            FAKE_GIT_ORIGIN: "https://github.com/me/app.git",
+            FAKE_GIT_REMOTE: "origin",
+            FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
             DEFINED_BIN_DIR: fixture.install,
         };
         const first = await runLauncher({
@@ -800,7 +809,10 @@ test("update refuses the defined source repository", async () => {
             args: ["update"],
             env: {
                 FAKE_REMOTE_REV: REMOTE_REV,
-                FAKE_GIT_ORIGIN: "git@github.com:markstanden/defined.git",
+                // The source repo names its remote `defined`, not `origin` —
+                // the guard must scan every remote to catch this.
+                FAKE_GIT_REMOTE: "defined",
+                FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
             },
         });
         assert.equal(r.status, 1);
@@ -823,7 +835,10 @@ test("update fails loudly offline", async () => {
 
 test("update rejects a malformed or too-short revision", async () => {
     await withFixture(PIN, async (fixture) => {
-        const env = { FAKE_GIT_ORIGIN: "https://github.com/me/app.git" };
+        const env = {
+            FAKE_GIT_REMOTE: "origin",
+            FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
+        };
         const malformed = await runLauncher({
             fixture,
             args: ["update", "not-a-sha"],

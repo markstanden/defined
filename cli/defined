@@ -380,14 +380,20 @@ validate_rev() {
     return 0
 }
 
-# True when the repo's origin is the defined source itself. That repo commits a
-# versionless config by construction, so `update` must not pin it.
+# True when any of the repo's remotes is the defined source itself. That repo
+# commits a versionless config by construction, so `update` must not pin it.
+# Every remote is checked, not just `origin`: the source repo itself names its
+# remote `defined`, so an `origin`-only check would miss the very repo it guards.
 is_source_repo() {
-    local root="$1" url
-    url="$(git -C "${root}" remote get-url origin 2>/dev/null)" || true
-    case "${url}" in
-        *"${IMAGE_OWNER}/${IMAGE_NAME}"*) return 0 ;;
-    esac
+    local root="$1" name url
+    while IFS= read -r name; do
+        url="$(git -C "${root}" remote get-url "${name}" 2>/dev/null)" || true
+        case "${url}" in
+            *"${IMAGE_OWNER}/${IMAGE_NAME}" | *"${IMAGE_OWNER}/${IMAGE_NAME}.git")
+                return 0
+                ;;
+        esac
+    done < <(git -C "${root}" remote 2>/dev/null || true)
     return 1
 }
 
