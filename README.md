@@ -155,6 +155,19 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
     `command` must exit non-zero on violations; `fix` runs first in `comply`
     only. Absent `naming` runs the workflow grammar alone.
 
+    The `eslint` key only carries a switch; the gate lints with its house config
+    by default (see the batteries/override table above). Turn it off when a repo
+    deliberately owns its own lint entirely:
+
+    ```jsonc
+    "eslint": { "disable": true }
+    ```
+
+    An `eslint` entry in `node.checks` is only needed to run your _own_
+    config/toolchain at a version or with plugins the gate does not carry; a
+    repo-owned `eslint.config.*` at the root is already run by the ESLint step
+    itself.
+
     The `tofu` step runs `fmt`, `tflint`, `init` and `validate` — `fmt` over the
     tracked `.tf` files, and the rest once per module directory (the top-most
     directories holding tracked `.tf`), so a module under `infrastructure/` is
@@ -218,6 +231,29 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
     instead, so project preferences need no fork. Indentation stays owned by
     `.editorconfig`, which prettier gives higher priority than any config.
 
+    ESLint is the correctness half of the loop. With no `eslint.config.*` at the
+    repo root the gate lints the git-scoped JS/TS with its **baked house config**
+    (flat config, selected with `--config`, plugins resolved in-image — nothing
+    is installed into or written to the repo). A repo-owned `eslint.config.*` is
+    honoured instead: the gate runs _that_ config through the repo's own restored
+    ESLint, and writes `eslint.config.defined.mjs` beside it as an example of the
+    current house default. v1 of the house config is deliberately narrow — the
+    super-linear-regex floor (`regexp/no-super-linear-move` +
+    `regexp/no-super-linear-backtracking`, the local reproduction of Sonar
+    `typescript:S8786`) with `eslint-config-prettier` last so ESLint never votes
+    on formatting. Switch the step off with `"eslint": { "disable": true }`.
+
+    | tool            | the gate brings                                       | a repo's own copy                  |
+    | --------------- | ----------------------------------------------------- | ---------------------------------- |
+    | `.editorconfig` | seeded default, installed only when absent            | kept; `verify` never gates on it   |
+    | prettier        | baked `prettier.config.mjs`, selected with `--config` | wins by selection; nothing written |
+    | ESLint          | baked `eslint.config.mjs`, selected with `--config`   | runs theirs; house example written |
+
+    Run the loop through the gate rather than against host tooling: `defined
+ comply` applies what ESLint can auto-fix (`--fix`) and the re-check reports
+    the remainder. Neither the house config nor its plugins live in your
+    `package.json`, by design.
+
 4. **Gate in CI** — nothing to add: `comply` installed
    `.github/workflows/defined--verify.yml`, and it gates every pull request and
    push on its own (no reusable-workflow ref, so there is no gate SHA in your
@@ -265,6 +301,7 @@ image tag and `defined update latest` always resolves to a pullable SHA.
 - [`standards/shell.md`](standards/shell.md) — shell script rules (bash shebang, `[[ ]]`, explicit `return`)
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)
+- [`standards/node-eslint.md`](standards/node-eslint.md) — the house ESLint step: what it owns, how to override, the v1→v2 growth plan
 - [`practices/architecture.md`](practices/architecture.md) — delivery, structure, code and working-style preferences
 - [`standards/.editorconfig`](standards/.editorconfig) — editor + dotnet code style (installed by gate setup)
 - [`standards/Directory.Build.props`](standards/Directory.Build.props) — common MSBuild properties (installed by gate setup)
