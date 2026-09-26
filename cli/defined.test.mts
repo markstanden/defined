@@ -902,9 +902,9 @@ test("update refuses the defined source repository", async () => {
             args: ["update"],
             env: {
                 FAKE_REMOTE_REV: REMOTE_REV,
-                // The source repo names its remote `defined`, not `origin` —
-                // the guard must scan every remote to catch this.
-                FAKE_GIT_REMOTE: "defined",
+                // A non-`origin` remote name proves the guard scans every
+                // remote, not just `origin`.
+                FAKE_GIT_REMOTE: "upstream",
                 FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
             },
         });
@@ -925,9 +925,9 @@ test("runs the local runtime for comply and verify in the source repo", async ()
         );
         await chmod(shim, 0o755);
 
-        // The source repo names its remote `defined`, not `origin`.
+        // A non-`origin` remote name proves every remote is scanned.
         const source = {
-            FAKE_GIT_REMOTE: "defined",
+            FAKE_GIT_REMOTE: "upstream",
             FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
         };
 
@@ -958,7 +958,7 @@ test("fails loudly in the source repo when the local runtime is absent", async (
             fixture,
             args: ["comply"],
             env: {
-                FAKE_GIT_REMOTE: "defined",
+                FAKE_GIT_REMOTE: "upstream",
                 FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
             },
         });

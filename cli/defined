@@ -408,8 +408,8 @@ validate_rev() {
 
 # True when any of the repo's remotes is the defined source itself. That repo
 # commits a versionless config by construction, so `update` must not pin it.
-# Every remote is checked, not just `origin`: the source repo itself names its
-# remote `defined`, so an `origin`-only check would miss the very repo it guards.
+# Every remote's URL is checked, not just `origin`: a clone may name the source
+# remote anything, so an `origin`-only check could miss the very repo it guards.
 is_source_repo() {
     local root="$1" name url
     while IFS= read -r name; do
