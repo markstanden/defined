@@ -7,7 +7,7 @@ tool fails loudly.
 
 House standards live in the defined repo
 (<https://github.com/markstanden/defined>): `standards/` covers tests, naming,
-shell and YAML; `practices/` covers architecture and working style. Read the
-relevant file when a task touches that area. Tighten the floor; don't fork it —
-raise improvements upstream.
+shell and YAML; `practices/architecture.md` covers delivery, structure and
+working style. Read the relevant file when a task touches that area. Tighten the
+floor; don't fork it — raise improvements upstream.
 <!-- defined:end -->
