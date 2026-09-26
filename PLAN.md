@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-09-21 | scope=PLAN.md -->
+<!-- update: agent=opencode | date=2026-09-26 | scope=PLAN.md -->
 
 # PLAN — defined: portable quality gate
 
@@ -83,8 +83,8 @@ something gets it excluded everywhere; committed content is always gated.
 
 - Each ecosystem step activates on detection (a `package.json`/`*.md` for
   `node`, a `.csproj`/`.sln`/`.slnx` for `dotnet`, lowercase `*.sh` for `shell`,
-  `.yml`/`.yaml` for `yaml`, workflow files for `workflow`, root tofu files for
-  `tofu`); missing ecosystems skip cleanly. `node-deps` restores the consumer's
+  `.yml`/`.yaml` for `yaml`, workflow files for `workflow`, tracked `*.tf` at
+  any depth for `tofu`); missing ecosystems skip cleanly. `node-deps` restores the consumer's
   dependencies before `node` and `node-checks` run: every declared
   `node.packages` entry, plus the root package whenever a consumer Prettier
   config is tracked, so a config-declared plugin resolves on a fresh checkout
@@ -102,13 +102,13 @@ something gets it excluded everywhere; committed content is always gated.
 - Dependency restore, formatting, node-checks and coverage must write into the
   repo (`node_modules/` for node-deps, prettier's rewrites for node,
   `coverage/lcov.info` for node-coverage, `obj/`/`bin/`/`TestResults/` for
-  dotnet), which a read-only `verify` (local `defined verify`, CI) cannot do in
-  place. No-fix therefore runs `node-deps`, `node`, `node-checks`,
-  `node-coverage`, `dotnet` and `dotnet-coverage` against a **scratch copy of
-  the repo's git scope under `/tmp`** (`runtime/lib/scratch.mts`) — one copy
-  shared across those steps, created on first use, cleaned after the pass. Fix
-  mode works in the repo as before. The repo mount is never written by either
-  mode.
+  dotnet, `.terraform/` for tofu init), which a read-only `verify` (local
+  `defined verify`, CI) cannot do in place. No-fix therefore runs `node-deps`,
+  `node`, `node-checks`, `node-coverage`, `dotnet`, `dotnet-coverage` and `tofu`
+  against a **scratch copy of the repo's git scope under `/tmp`**
+  (`runtime/lib/scratch.mts`) — one copy shared across those steps, created on
+  first use, cleaned after the pass. Fix mode works in the repo as before. The
+  repo mount is never written by either mode.
 - `smoke` always probes the container's git.
 - Missing applicable tools fail loudly pointing at the Containerfile — there is
   no optional tier.
@@ -209,8 +209,9 @@ so re-pushing an identical gate is cheap.
 `version` is optional — omitted means the launcher uses the current published
 default image; a written pin is immutable (a 7–40 char hex SHA). Optional
 `coverage` configuration activates the per-ecosystem coverage gate, an optional
-`node` configuration activates consumer Node project checks, and an optional
-`naming` configuration supplies consumer naming rules:
+`node` configuration activates consumer Node project checks, an optional
+`naming` configuration supplies consumer naming rules, and an optional `tofu`
+configuration pins the OpenTofu module directories:
 
 ```jsonc
 {
@@ -265,6 +266,10 @@ default image; a written pin is immutable (a 7–40 char hex SHA). Optional
   `naming` section adds the consumer's own rules: `command` runs over the git
   scope and must exit non-zero on violations; `fix` runs first in `comply` only,
   then `command` always re-runs. Absent `naming` = grammar only.
+- An optional `tofu` section's `dirs` lists the module directories
+  (repo-relative) the tofu step lints, initialises and validates; absent =
+  auto-discover the top-most directories holding tracked `.tf`. fmt always runs
+  over the tracked `.tf` files (git scope), never a recursive filesystem walk.
 
 ### Bootstrap contract
 
@@ -350,7 +355,11 @@ doctrine lives in `standards/naming.md` + `standards/naming/`), #27
 (consumer-owned prettier config wins), #28 (`.gitattributes` is managed), #35
 (the launcher gains `version`/`update` and a verified `cli/install.sh`), #40
 (`node-deps` restores consumer dependencies before formatting, so a
-config-declared Prettier plugin resolves on a fresh checkout).
+config-declared Prettier plugin resolves on a fresh checkout), #42 (actionlint
+parses workflow definitions only — `dependabot.yml` false-failed it and masked
+zizmor; zizmor keeps auditing the wider set) and #43 (the `tofu` step checks
+each module directory, not an empty repo root, and runs in the no-fix scratch
+because `init` writes `.terraform/`).
 
 Both previously unfiled items are now delivered:
 

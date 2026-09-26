@@ -62,11 +62,11 @@ The gate detects the stack (steps run in order `naming → node-deps → node �
 node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml →
 workflow → tofu`), skips cleanly when an ecosystem is absent, and fails loudly
 when a pinned tool is missing. Because `verify` never writes to the repo, the
-steps that must write — `node-deps`, `node`, `node-checks`, `node-coverage` and
-the `dotnet` family — work in a scratch copy of the git scope under the
+steps that must write — `node-deps`, `node`, `node-checks`, `node-coverage`, the
+`dotnet` family and `tofu` — work in a scratch copy of the git scope under the
 container's `/tmp` (a read-only mount cannot host `node_modules/`,
-`coverage/lcov.info` or `obj/`/`bin/`); the repo checkout itself is never
-touched. Tool versions are pinned in
+`coverage/lcov.info`, `obj/`/`bin/` or `.terraform/`); the repo checkout itself
+is never touched. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 
@@ -142,6 +142,16 @@ the image.
 
     `command` must exit non-zero on violations; `fix` runs first in `comply`
     only. Absent `naming` runs the workflow grammar alone.
+
+    The `tofu` step runs `fmt`, `tflint`, `init` and `validate` — `fmt` over the
+    tracked `.tf` files, and the rest once per module directory (the top-most
+    directories holding tracked `.tf`), so a module under `infrastructure/` is
+    actually checked, not skipped because the repo root has no `.tf`. Pin the
+    directories explicitly when the layout is ambiguous:
+
+    ```jsonc
+    "tofu": { "dirs": ["infrastructure"] }
+    ```
 
     **Coverage command examples** — the command must land the report at a fixed
     path: `coverage/lcov.info` (node) or `coverage.cobertura.xml` /
