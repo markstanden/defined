@@ -192,10 +192,11 @@ here. State this in the PR so nobody "fixes" it by lowering severity.
 
 ## Process and release
 
-- Update **`PLAN.md`**: record both defects with decision numbers (next free
-  after #40 — likely #41 for the actionlint/zizmor split, #42 for per-directory
-  tofu) and reflect them under "Open gaps" / "Recently delivered" as
-  appropriate. The plan is the entry point for a fresh session.
+- **`PLAN.md`**: both defects are recorded as decisions **#42** (the
+  actionlint/zizmor view split, GitHub issue #42) and **#43** (per-directory
+  tofu + no-fix scratch, issue #43), and listed under "Recently delivered".
+  (#41 was the docs PR, not a free decision number — GitHub shares the issue/PR
+  sequence.) The plan is the entry point for a fresh session.
 - Run the gate's own suite (`node --test`) and the podman end-to-end
   (`./runtime/comply.sh`). Note the producer repo commits a versionless
   coverage-only `.defined.json` and has no `.tf`, so `tofu` skips there — test
