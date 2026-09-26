@@ -9,8 +9,9 @@
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
 // `verify` shares the orchestrator. Steps run in fixed order (naming →
-// node-deps → node → node-checks → node-coverage → dotnet → dotnet-coverage →
-// shell → smoke → yaml → workflow → tofu), strictly sequentially. Output
+// node-deps → node → eslint → node-checks → node-coverage → dotnet →
+// dotnet-coverage → shell → smoke → yaml → workflow → tofu), strictly
+// sequentially. Output
 // follows the report contract (decision #24): green runs print exactly one
 // `compliant` line; anything else prints a stable, agent-actionable breakdown.
 
@@ -27,6 +28,7 @@ import { checkSetup, runSetup } from "./setup.mts";
 import { formatReport } from "./lib/report.mts";
 import { runDotNetStep } from "./steps/dotnet.mts";
 import { runDotNetCoverageStep } from "./steps/dotnet-coverage.mts";
+import { runEslintStep } from "./steps/eslint.mts";
 import { runNamingStep } from "./steps/naming.mts";
 import { runNodeChecksStep } from "./steps/node-checks.mts";
 import { runNodeDepsStep } from "./steps/node-deps.mts";
@@ -89,6 +91,14 @@ const STEPS: Step[] = [
         id: "node",
         run: ({ mode, repoRoot, files, scratch }) =>
             runNodeStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
+    },
+    {
+        id: "eslint",
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runEslintStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
             }),
