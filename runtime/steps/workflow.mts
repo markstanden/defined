@@ -165,8 +165,11 @@ export async function runWorkflowStep({
             cwd: ctx.repoRoot,
         });
         if (actionlint.status !== 0) {
+            // Findings go to stdout; stderr is a fallback for a tool-level
+            // error (bad flag, unreadable file). Preferring stderr would let
+            // any chatter mask the findings.
             return failed({
-                notice: `workflow: actionlint failed: ${actionlint.stderr.trim() || actionlint.stdout.trim()}`,
+                notice: `workflow: actionlint failed: ${actionlint.stdout.trim() || actionlint.stderr.trim()}`,
             });
         }
     }
@@ -181,8 +184,13 @@ export async function runWorkflowStep({
             cwd: ctx.repoRoot,
         });
         if (zizmor.status !== 0) {
+            // zizmor writes findings to stdout and its INFO/WARN progress
+            // chatter to stderr. Preferring stderr reported "zizmor failed"
+            // with no findings whatsoever — the whole point of the step. stdout
+            // first, stderr only when there is no finding output (a tool-level
+            // error).
             return failed({
-                notice: `workflow: zizmor failed: ${zizmor.stderr.trim() || zizmor.stdout.trim()}`,
+                notice: `workflow: zizmor failed: ${zizmor.stdout.trim() || zizmor.stderr.trim()}`,
             });
         }
     }

@@ -188,6 +188,13 @@ Once Fix 1 lands, consumer gates will surface genuine zizmor findings
 **consumer content** to fix in the consumer repo, not a reason to narrow zizmor
 here. State this in the PR so nobody "fixes" it by lowering severity.
 
+**Follow-up (#45, found adopting the gate).** The step's failure notice
+preferred stderr, so zizmor's progress chatter masked its stdout findings: the
+gate reported "zizmor failed" with nothing to act on, which contradicts the
+"surface genuine findings" line above. The notice now prefers stdout for both
+zizmor and actionlint, falling back to stderr only for a tool-level error. This
+is an output fix, not a severity change — the consumer findings still fail.
+
 ---
 
 ## Process and release
