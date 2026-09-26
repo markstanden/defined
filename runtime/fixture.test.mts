@@ -20,7 +20,7 @@
 // comply.sh mounts a temp repo path, but that path lives in the runner
 // container's namespace, which the host engine (reached via the mounted
 // socket) cannot see. Gate-in-container cannot work under act; the real
-// runner or direct podman is required. See PLAN.md "Local workflow testing".
+// runner or direct podman is required.
 // Run: node --test fixture.test.mts
 
 import assert from "node:assert/strict";

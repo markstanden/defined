@@ -2,8 +2,6 @@
 
 # defined
 
-A single source of truth for my development project configuration files, workflow templates, and development tools to ensure consistency across projects.
-
 **defined** — a portable, drop-in quality gate. A single container image
 (`runtime/`) that detects any project's stack and runs the right checks,
 backed by shared building blocks (`lib/`) and house standards (`standards/`).
@@ -69,6 +67,12 @@ container's `/tmp` (a read-only mount cannot host `node_modules/`,
 is never touched. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
+
+**Scope is git's.** Every step judges the repo's git content — tracked plus
+untracked-but-not-ignored files (`git ls-files -co --exclude-standard`).
+Gitignored paths are never analysed, locally or in CI, so local and CI agree by
+construction; committed content is always gated. Tools that would otherwise walk
+the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
 
 ## Adopt the gate in a consumer repo
 
@@ -189,8 +193,6 @@ the image.
    with its own rules keeps them and the gate never gated on theirs. The gate
    workflow and the AGENTS block are **managed**: `comply` keeps the workflow
    byte-identical to the image's copy (updating it when the gate changes).
-   Use `comply` every time — it is the whole local loop; `verify` is reserved
-   for CI.
 
     **Tighten the floor; don't fork it.** The house config is a floor, not a
     straitjacket — the seeded files are yours once installed (the gate never
@@ -211,15 +213,10 @@ the image.
 4. **Gate in CI** — nothing to add: `comply` installed
    `.github/workflows/defined--verify.yml`, and it gates every pull request and
    push on its own (no reusable-workflow ref, so there is no gate SHA in your
-   workflow to keep in step).
-
-    The workflow reads `.defined.json` for the image tag — the same pin the
-    local launcher reads — so local and CI run the same image. Omitted `version`
-    rides the current published image; a written pin restores immutability.
-    Because the tag lives in exactly one place, local green = merge green by
-    construction. The workflow is a managed file: change its triggers or steps
-    by editing `.defined.json`/standards upstream, not by hand — a local edit is
-    drift and fails `verify`.
+   workflow to keep in step). It reads the same `.defined.json` pin as the local
+   launcher, so local and CI run the same image: a written pin is immutable, an
+   omitted `version` rides the current published image. Like the AGENTS block it
+   is managed — change it upstream, never by hand.
 
 ## Quality pipeline
 
@@ -247,7 +244,9 @@ the same pinned image as the local launcher. It contains no gate version: the
 only gate SHA anywhere is the one in `.defined.json` (decision #36).
 
 `defined--test.yml` and `defined--publish.yml` are this repo's own CI (tests and
-image publication); they are not consumer templates.
+image publication); they are not consumer templates. `defined--publish.yml` runs
+on **every** main push — deliberately unfiltered, so every main commit carries an
+image tag and `defined update latest` always resolves to a pullable SHA.
 
 ## Standards
 
@@ -263,7 +262,11 @@ image publication); they are not consumer templates.
 - [`standards/Directory.Build.props`](standards/Directory.Build.props) — common MSBuild properties (installed by gate setup)
 - [`standards/.gitattributes`](standards/.gitattributes) — LF/whitespace checkout contract (installed by gate setup)
 - [`standards/workflows/defined--verify.yml`](standards/workflows/defined--verify.yml) — the managed gate workflow, installed by gate setup
-- [`standards/githooks/pre-commit`](standards/githooks/pre-commit) — optional reference commit hook that runs `defined verify` (opt-in, repo-owned)
+- [`standards/githooks/pre-commit`](standards/githooks/pre-commit) — optional
+  reference commit hook that runs `defined verify` (opt-in, repo-owned).
+  Deferring to the gate means it can never format to different rules than CI; it
+  is a full pass over the working tree and `--no-verify` bypasses it, so it is
+  convenience, not a guarantee.
 
 ## Project structure
 
@@ -284,7 +287,8 @@ defined/
 ├── lib/                             # shared building blocks (proc, paths, git)
 ├── standards/                       # house standards and tools
 │   └── workflows/defined--verify.yml # managed gate workflow (installed by setup)
-├── practices/                       # docs / how-to
+├── practices/                       # architecture + working-style guidance
+├── records/                         # historical session records (not guidance)
 └── .github/workflows/                # defined--verify/test/publish
 ```
 
