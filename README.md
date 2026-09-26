@@ -182,6 +182,17 @@ the image.
    Use `comply` every time — it is the whole local loop; `verify` is reserved
    for CI.
 
+    **Tighten the floor; don't fork it.** The house config is a floor, not a
+    straitjacket — the seeded files are yours once installed (the gate never
+    overwrites or re-gates them), so a repo may go stricter. Keep that
+    tightening in a layer you own rather than editing the seeded baseline: for
+    .NET, put project-specific settings (e.g. `TreatWarningsAsErrors`,
+    `Deterministic`, extra analyzers) in an unmanaged `Directory.Build.targets`,
+    which MSBuild imports after `Directory.Build.props`. The house default then
+    stays recognisable and your deltas are explicit and diffable. The managed
+    gate workflow is the one exception — it stays byte-identical to the image
+    and is never hand-edited.
+
     Prettier runs to house defaults; a consumer-owned `prettier.config.mjs` (or
     any `.prettierrc*` / `prettier.config.*` file) at the repo root is honoured
     instead, so project preferences need no fork. Indentation stays owned by

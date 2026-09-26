@@ -1,4 +1,4 @@
-<!-- update: agent=opencode | date=2026-09-01 | scope=practices/2026-09-01_rollout-energy-comparison.md -->
+<!-- update: agent=opencode | date=2026-09-26 | scope=practices/2026-09-01_rollout-energy-comparison.md -->
 
 # Rollout — first consumer adoption: energy-comparison
 
@@ -15,7 +15,11 @@ friction, feed fixes back into `defined`, and align the template afterwards.
    refused to run. No self-update; a consumer following the README once, long
    ago, silently runs an old launcher. Manual reinstall fixed it. Worth
    considering: launcher version check against the pinned image, or a
-   `defined upgrade` verb. [NEEDS DECISION]
+   `defined upgrade` verb. **Resolved** — the launcher now carries a lifecycle
+   surface: `defined version` reports launcher/pin/image/engine drift (read-only,
+   degrades to "unknown" offline) and `defined update [<sha>|latest]` moves the
+   launcher, pin and image together, so a stale install self-heals instead of
+   demanding a manual reinstall.
 
 2. **Bootstrap refuses to adopt over differing managed files.** The gate's
    contract (by design) is byte-identical-or-fail: a differing `.editorconfig`
@@ -24,7 +28,11 @@ friction, feed fixes back into `defined`, and align the template afterwards.
    different) versions of both, so the first `comply` was blocked. Adoption
    into any repo that already has these files is a conscious decision to adopt
    the standards floor verbatim. This is the raises-only contract in action,
-   but it deserves a documented adoption note.
+   but it deserves a documented adoption note. **Superseded** — the shared
+   config files (`.editorconfig`, `Directory.Build.props`, `.gitattributes`) are
+   now _seeded defaults_: installed only when absent, never overwritten and
+   never gated. A repo with its own copies keeps them, so the first `comply` is
+   no longer blocked. Only the gate workflow is a byte-identical managed file.
 
 3. **The template is not aligned with standards.** `csharp-template`'s
    `.editorconfig` (88 lines vs standards' 200) and `Directory.Build.props`
@@ -33,14 +41,23 @@ friction, feed fixes back into `defined`, and align the template afterwards.
    `src/...Core.csproj` depends on — adopting the standards props (no TF)
    breaks the build unless TF moves into the csproj. The template must be
    re-aligned to standards before it can be a gate-ready starting point
-   (Phase 3).
+   (Phase 3). **Open — external (Phase 3).** The only rollout item still
+   outstanding: aligning `csharp-template` to the standards floor is a change in
+   that repo, not the gate. Note the adoption _blocker_ is gone (seeded defaults
+   keep the template's own richer props), so this is now a tidy-up rather than a
+   prerequisite.
 
 4. **The tightening layer is undocumented.** The template's stricter settings
    (`TreatWarningsAsErrors`, `Deterministic`) cannot live in the managed
    `Directory.Build.props` (byte-identical or fail). The unmanaged
    `Directory.Build.targets` is the natural "tighten here" layer. The
    raises-only story ("projects may tighten the floor") needs this mechanism
-   documented.
+   documented. **Documented, premise updated** — `Directory.Build.props` is now
+   a _seeded default_, not a managed file (only the gate workflow stays
+   byte-identical), so a repo owns its props once installed. The README's
+   "Tighten the floor; don't fork it" note directs project-specific tightening
+   into an unmanaged `Directory.Build.targets` so the house baseline stays
+   recognisable and the deltas stay diffable.
 
 5. **XML-declared coverage gates vs CLI-declared.** The template enforced a
    **100% branch** gate via coverlet XML thresholds in the test csproj
@@ -56,7 +73,10 @@ friction, feed fixes back into `defined`, and align the template afterwards.
    `TestResults/<guid>/coverage.cobertura.xml` — not a gate fixed path. For a
    coverlet-based dotnet project the gate reads `TestResults/coverage.cobertura.xml`
    directly. Documenting a canonical dotnet example per project type is still
-   worth doing.
+   worth doing. **Documented** — the README coverage section now carries a
+   node (built-in lcov reporter) and a dotnet (coverlet + `find` staging)
+   example, notes the XPlat GUID-subfolder caveat, and states that minimums are
+   declared only in `.defined.json` — never duplicated in XML thresholds.
 
 7. **Standards props is not CPM-compatible.** `standards/Directory.Build.props`
    hard-codes `Microsoft.SourceLink.GitHub` with an inline `Version="1.1.1"`.
@@ -139,6 +159,28 @@ All` (plus the consumer's `TreatWarningsAsErrors` tightening), the template's
       because setup itself writes `.defined.json` + `AGENTS.md` — files a
       pre-bootstrap snapshot cannot contain (the old whole-tree walk saw them
       at runtime; a file-list snapshot would not).
+
+## Disposition (2026-09-26)
+
+Status of each finding against the current plan of record (`PLAN.md`):
+
+| #   | Finding                                   | Status                                                         |
+| --- | ----------------------------------------- | -------------------------------------------------------------- |
+| 1   | Installed launcher drifts                 | **Resolved** — `defined version` / `defined update` (PLAN #35) |
+| 2   | Bootstrap refuses differing managed files | **Superseded** — shared config is now seeded, not managed      |
+| 3   | Template not aligned to standards         | **Open** — external (Phase 3), no longer a blocker             |
+| 4   | Tightening layer undocumented             | **Documented** — README "Tighten the floor; don't fork it"     |
+| 5   | XML vs CLI coverage gates                 | Resolved — minimums live only in `.defined.json`               |
+| 6   | Dotnet coverage path example              | **Documented** — README coverage examples                      |
+| 7   | Standards props not CPM-compatible        | Resolved — built-in SourceLink, no package ref                 |
+| 8   | Gate caught un-initialised template       | Resolved — template renamer run; signal is correct             |
+| 9   | xUnit names vs the floor                  | Resolved — `[tests/**/*.cs]` policy upstreamed                 |
+| 10  | dotnet step not read-only-verify safe     | Resolved — no-fix scratch workspace                            |
+| 11  | Prettier flags gitignored artifacts       | Resolved — gate scope = git scope                              |
+
+Items 1, 2, 4 and 6 were the residual documentation/behaviour gaps; they are
+now closed or recorded as delivered. Item 3 is the sole remaining rollout
+action and lives in another repo.
 
 ## Actions in the consumer repo
 
