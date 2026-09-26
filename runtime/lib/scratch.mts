@@ -1,18 +1,20 @@
 // lib/scratch.mts — no-fix scratch workspace for steps that must write.
 //
-// The dotnet family (restore/build/test/coverlet) writes obj/, bin/ and
-// TestResults/ into the repo. That is fine under `comply` (rw mount), but a
-// read-only `verify` — local `defined verify` and every CI run mount the repo
-// read-only — cannot build a dotnet repo in place (finding #10). In no-fix
-// mode the dotnet steps instead work in a scratch copy of the repo's git
-// scope under /tmp: identical content, writable filesystem, repo mount
-// untouched. The shared NuGet cache (named volume) is unchanged.
+// Several steps write into the working tree: the node family restores
+// node_modules/ and coverage reports, the dotnet family writes obj/, bin/ and
+// TestResults/, and tofu init writes .terraform/ + a lock file. That is fine
+// under `comply` (rw mount), but a read-only `verify` — local `defined verify`
+// and every CI run mount the repo read-only — cannot write in place (findings
+// #10, #20; issue #43). In no-fix mode those steps instead work in a scratch
+// copy of the repo's git scope under /tmp: identical content, writable
+// filesystem, repo mount untouched. Shared caches (the named volumes) are
+// unchanged.
 
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-/** Mutable box shared by the dotnet steps so one scratch serves a pass. */
+/** Mutable box shared by the write-capable steps so one scratch serves a pass. */
 export interface Scratch {
     dir: string | null;
 }

@@ -75,6 +75,15 @@ export interface NamingConfig {
     fix?: string;
 }
 
+/** Consumer OpenTofu module layout (`.defined.json` `tofu` key). */
+export interface TofuConfig {
+    /**
+     * Module directories (repo-relative) to lint/init/validate. Absent means
+     * auto-discover the top-most tracked `.tf` directories.
+     */
+    dirs?: string[];
+}
+
 export interface DefinedConfig {
     /**
      * Immutable image tag (7–40 hex chars). Empty when omitted — the launcher
@@ -90,6 +99,8 @@ export interface DefinedConfig {
     node?: NodeChecksConfig;
     /** Consumer naming rules. Absent key = no consumer rules. */
     naming?: NamingConfig;
+    /** OpenTofu module layout. Absent key = auto-discover tracked .tf dirs. */
+    tofu?: TofuConfig;
 }
 
 /** Empty config: all coverage steps skip, version is empty. */
@@ -360,6 +371,50 @@ function validateNaming(raw: unknown): NamingConfig | undefined {
     return result;
 }
 
+const TOFU_KEYS = new Set(["dirs"]);
+
+/** A repo-relative, non-escaping module directory. `.` is the repo root. */
+function validateTofuDir(where: string, raw: unknown): string {
+    if (typeof raw !== "string" || raw.trim() === "") {
+        throw new Error(`.defined.json: "${where}" must be a non-empty string`);
+    }
+    const normalised = normaliseDir(raw);
+    if (
+        normalised === "" ||
+        normalised === ".." ||
+        normalised.startsWith("../") ||
+        normalised.startsWith("/")
+    ) {
+        throw new Error(
+            `.defined.json: "${where}" must be a repo-relative directory`,
+        );
+    }
+    return normalised;
+}
+
+function validateTofu(raw: unknown): TofuConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new TypeError(`.defined.json: "tofu" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, TOFU_KEYS, "tofu");
+    if (entry.dirs === undefined) {
+        // `tofu` present but nothing declared: auto-discovery applies.
+        return undefined;
+    }
+    if (!Array.isArray(entry.dirs) || entry.dirs.length === 0) {
+        throw new Error(`.defined.json: "tofu.dirs" must be a non-empty array`);
+    }
+    return {
+        dirs: entry.dirs.map((dir, index) =>
+            validateTofuDir(`tofu.dirs[${index}]`, dir),
+        ),
+    };
+}
+
 function validateParsed(raw: unknown): DefinedConfig {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new Error(`.defined.json: must be a JSON object`);
@@ -372,7 +427,8 @@ function validateParsed(raw: unknown): DefinedConfig {
     const coverage = validateCoverage(obj.coverage);
     const node = validateNode(obj.node);
     const naming = validateNaming(obj.naming);
-    return { version, coverage, node, naming };
+    const tofu = validateTofu(obj.tofu);
+    return { version, coverage, node, naming, tofu };
 }
 
 /**

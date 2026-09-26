@@ -10,11 +10,11 @@ import { afterEach, test } from "node:test";
 import {
     buildGitleaksConfig,
     escapeRegexPath,
-    filterWorkflowFiles,
     gitleaksIgnoreArgs,
     parseIgnoredPaths,
     runWorkflowStep,
 } from "./workflow.mts";
+import { filterWorkflowFiles } from "../lib/workflow-files.mts";
 import {
     baseCtx,
     cleanupTempDirs,
@@ -24,7 +24,7 @@ import {
 
 afterEach(cleanupTempDirs);
 
-test("filterWorkflowFiles finds .github/workflows/*.yml and dependabot.yml", () => {
+test("filterWorkflowFiles keeps only workflow definitions (never dependabot.yml)", () => {
     assert.deepEqual(
         filterWorkflowFiles({
             files: [
@@ -34,11 +34,7 @@ test("filterWorkflowFiles finds .github/workflows/*.yml and dependabot.yml", () 
                 "a.sh",
             ],
         }),
-        [
-            ".github/workflows/ci.yml",
-            ".github/dependabot.yml",
-            ".github/workflows/cd.yaml",
-        ],
+        [".github/workflows/ci.yml", ".github/workflows/cd.yaml"],
     );
 });
 
@@ -49,6 +45,40 @@ test("filterWorkflowFiles ignores non-workflow yaml in .github/", () => {
         }),
         [".github/workflows/ci.yml"],
     );
+});
+
+test("actionlint never receives dependabot.yml; zizmor audits it", async () => {
+    const { runner, calls } = fakeRunner({}, true);
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml", ".github/dependabot.yml"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    const actionlint = calls.find((c) => c[0] === "actionlint")!;
+    assert.deepEqual(actionlint.slice(1, -1), [".github/workflows/ci.yml"]);
+    const zizmor = calls.find((c) => c[0] === "zizmor")!;
+    assert.deepEqual(zizmor.slice(1, -1), [
+        "--no-progress",
+        ".github/workflows/ci.yml",
+        ".github/dependabot.yml",
+    ]);
+});
+
+test("a dependabot-only repo runs zizmor but never actionlint", async () => {
+    const { runner, calls } = fakeRunner({}, true);
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/dependabot.yml"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.deepEqual(
+        calls.map((c) => c[0]),
+        ["zizmor", "git", "gitleaks"],
+    );
+    assert.ok((result.notice ?? "").includes("zizmor"));
+    assert.ok(!(result.notice ?? "").includes("actionlint"));
 });
 
 test("runWorkflowStep skips actionlint/zizmor when no workflow files", async () => {

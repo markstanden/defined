@@ -7,11 +7,11 @@ import { writeFile } from "node:fs/promises";
 import { afterEach, test } from "node:test";
 
 import {
-    filterWorkflowFiles,
     isValidWorkflowName,
     runNamingStep,
     workflowNameViolations,
 } from "./naming.mts";
+import { filterWorkflowFiles } from "../lib/workflow-files.mts";
 import { cleanupScratch } from "../lib/scratch.mts";
 import { baseCtx, cleanupTempDirs, makeTempDir } from "../test-helpers.mts";
 import type { CommandResult } from "../../lib/proc.mts";
