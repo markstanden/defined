@@ -55,7 +55,9 @@ export function tfDirectories({ files }: { files: string[] }): string[] {
     for (const file of filterTofuFiles({ files })) {
         dirs.add(dirname(file));
     }
-    return [...dirs].filter((dir) => !hasModuleAncestor({ dir, dirs })).sort();
+    return [...dirs]
+        .filter((dir) => !hasModuleAncestor({ dir, dirs }))
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /** True when `dir` sits below a discovered module dir other than the root. */
@@ -80,19 +82,19 @@ function hasModuleAncestor({
     return false;
 }
 
-function runTofuCommand(
+async function runTofuCommand(
     runner: Runner,
     args: string[],
     cwd: string,
-): { status: number; stdout: string; stderr: string } {
+): Promise<{ status: number; stdout: string; stderr: string }> {
     return runner({ cmd: "tofu", args, cwd });
 }
 
-function runTflintCommand(
+async function runTflintCommand(
     runner: Runner,
     args: string[],
     cwd: string,
-): { status: number; stdout: string; stderr: string } {
+): Promise<{ status: number; stdout: string; stderr: string }> {
     return runner({ cmd: "tflint", args, cwd });
 }
 
