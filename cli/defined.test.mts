@@ -440,6 +440,30 @@ test("does not pull when the image is already present", async () => {
     });
 });
 
+test("refreshes a mutable latest tag even when it is present locally", async () => {
+    await withFixture(undefined, async (fixture) => {
+        const r = await runLauncher({ fixture, args: ["verify"] });
+        assert.equal(r.status, 0);
+        assert.ok(
+            r.log.some((line) => line.startsWith(`pull ${IMAGE_REPO}:latest`)),
+            "a mutable tag must be re-fetched, never trusted from the cache",
+        );
+    });
+});
+
+test("offline uses a present mutable tag but warns it may be stale", async () => {
+    await withFixture(undefined, async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["verify"],
+            env: { DEFINED_OFFLINE: "1" },
+        });
+        assert.equal(r.status, 0);
+        assert.ok(!r.log.some((line) => line.startsWith("pull")));
+        assert.match(r.stderr, /mutable tag|may be stale/u);
+    });
+});
+
 test("fails when the pinned image cannot be pulled", async () => {
     await withFixture("feedface", async (fixture) => {
         const r = await runLauncher({
@@ -887,6 +911,59 @@ test("update refuses the defined source repository", async () => {
         assert.equal(r.status, 1);
         assert.match(r.stderr, /source repo/u);
         assert.ok(!r.log.some((line) => line.startsWith("pull")));
+    });
+});
+
+test("runs the local runtime for comply and verify in the source repo", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const shimDir = join(fixture.repo, "runtime");
+        await mkdir(shimDir, { recursive: true });
+        const shim = join(shimDir, "comply.sh");
+        await writeFile(
+            shim,
+            "#!/usr/bin/env bash\nprintf 'shim:%s\\n' \"$*\"\n",
+        );
+        await chmod(shim, 0o755);
+
+        // The source repo names its remote `defined`, not `origin`.
+        const source = {
+            FAKE_GIT_REMOTE: "defined",
+            FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
+        };
+
+        const comply = await runLauncher({
+            fixture,
+            args: ["comply"],
+            env: source,
+        });
+        assert.equal(comply.status, 0);
+        assert.match(comply.stderr, /source repo/u);
+        assert.equal(comply.stdout.trim(), "shim:");
+        assert.deepEqual(comply.log, [], "no engine runs in the source repo");
+
+        const verify = await runLauncher({
+            fixture,
+            args: ["verify"],
+            env: source,
+        });
+        assert.equal(verify.status, 0);
+        assert.equal(verify.stdout.trim(), "shim:--check-only");
+        assert.deepEqual(verify.log, [], "no engine runs in the source repo");
+    });
+});
+
+test("fails loudly in the source repo when the local runtime is absent", async () => {
+    await withFixture(PIN, async (fixture) => {
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            env: {
+                FAKE_GIT_REMOTE: "defined",
+                FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
+            },
+        });
+        assert.equal(r.status, 1);
+        assert.match(r.stderr, /runtime\/comply\.sh/u);
     });
 });
 
