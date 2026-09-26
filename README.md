@@ -37,6 +37,14 @@ writes the pin into `.defined.json` as a working-tree change for you to commit,
 reinstalls the launcher at that revision, then pulls the exact image. It refuses
 to run in the defined source repo itself.
 
+In the defined source repo itself, `comply` and `verify` never use the published
+image: the image is built _from_ this code, so gating against it would test the
+last release rather than the change in hand. Both verbs delegate to
+`runtime/comply.sh`, which builds an image from the working tree and mounts
+`runtime/`, `lib/` and `standards/` over the baked copies — `verify` runs its
+read-only `--check-only` pass. A one-line note on stderr says so, keeping the
+stdout report contract (exactly one `compliant` line when green) intact.
+
 **Always use `comply` for local and agent work.** It bootstraps the managed
 files, repairs safe findings, then re-verifies — one command, exit 0 only when
 the checkout is green. `verify` exists solely for the pipeline: it is the

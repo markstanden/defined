@@ -16,7 +16,9 @@
 # pin, the installed launcher and the local image together.
 #
 # Needs only git + podman/docker on the host. Install with cli/install.sh
-# (normally ~/.local/bin/defined). Source development uses runtime/comply.sh.
+# (normally ~/.local/bin/defined). In the defined source repo itself both verbs
+# delegate automatically to runtime/comply.sh, which builds and gates the
+# working tree rather than the published image (see main()).
 # The runtime's .defined.json parser is exercised here end-to-end; the
 # producer repo commits its own versionless config (a coverage pin, see the
 # repo root .defined.json).
@@ -126,15 +128,39 @@ pick_engine() {
     fi
 }
 
-# Ensure the exact image is present. Pull on first use; in offline mode never
-# touch the network — the image must already be local.
+# True when an image reference names a mutable tag. Revisions reaching
+# ensure_image are validated hex SHAs (immutable by construction); the only
+# other reference is the default `latest`, which moves in the registry.
+is_mutable_ref() {
+    [[ "$1" == *":latest" ]]
+}
+
+# Ensure the image is present, and current when the reference is mutable.
+#
+# An immutable revision tag is safe to trust on presence: the bytes behind a
+# SHA cannot change, so a local copy is the pinned one. `latest` is not — a
+# stale local copy satisfies `image inspect` exactly as a fresh one does, so
+# presence alone once left a host gating every repo against an image many
+# commits old. A mutable tag is therefore re-fetched when online: the pull is
+# a no-op when already current and a refresh when not, leaving the registry to
+# do the comparison. Offline, the local copy is used with a warning.
 ensure_image() {
     local engine="$1" image="$2" offline="$3"
+    local present="false"
     if "${engine}" image inspect "${image}" >/dev/null 2>&1; then
-        return 0
+        present="true"
     fi
     if [[ -n "${offline}" ]]; then
-        die "image ${image} not present locally — pre-pull it, or run without DEFINED_OFFLINE"
+        if [[ "${present}" == "false" ]]; then
+            die "image ${image} not present locally — pre-pull it, or run without DEFINED_OFFLINE"
+        fi
+        if is_mutable_ref "${image}"; then
+            echo "${PROGRAM}: ${image} is a mutable tag and DEFINED_OFFLINE is set — using the local copy, which may be stale" >&2
+        fi
+        return 0
+    fi
+    if [[ "${present}" == "true" ]] && ! is_mutable_ref "${image}"; then
+        return 0
     fi
     if ! "${engine}" pull "${image}" >/dev/null 2>&1; then
         die "image ${image} unavailable (offline, or pin not yet published?)"
@@ -382,8 +408,8 @@ validate_rev() {
 
 # True when any of the repo's remotes is the defined source itself. That repo
 # commits a versionless config by construction, so `update` must not pin it.
-# Every remote is checked, not just `origin`: the source repo itself names its
-# remote `defined`, so an `origin`-only check would miss the very repo it guards.
+# Every remote's URL is checked, not just `origin`: a clone may name the source
+# remote anything, so an `origin`-only check could miss the very repo it guards.
 is_source_repo() {
     local root="$1" name url
     while IFS= read -r name; do
@@ -526,8 +552,31 @@ main() {
         return 2
     fi
 
-    local root engine pin image offline
+    local root
     root="$(repo_root)" || return 1
+
+    # The published image is built *from* this checkout, so gating here against
+    # it would test the last release, not the change in hand — a launcher or
+    # runtime edit could not be tested without committing and pushing. Delegate
+    # to the local dev shim, which builds an image from the working tree and
+    # bind-mounts runtime/, lib/ and standards/ over the baked copies. Both
+    # verbs keep their meaning: `verify` becomes the shim's read-only
+    # `--check-only` pass. The notice goes to stderr, so the stdout report
+    # contract (exactly one `compliant` line when green) is untouched.
+    if is_source_repo "${root}"; then
+        local shim="${root}/runtime/comply.sh"
+        if [[ ! -x "${shim}" ]]; then
+            die "defined source repo detected, but ${shim} is missing or not executable — run from a full checkout"
+        fi
+        if [[ "${verb}" == "verify" ]]; then
+            echo "${PROGRAM}: defined source repo — running the local runtime (${shim} --check-only)" >&2
+            exec "${shim}" --check-only
+        fi
+        echo "${PROGRAM}: defined source repo — running the local runtime (${shim})" >&2
+        exec "${shim}"
+    fi
+
+    local engine pin image offline
     engine="$(pick_engine)" || return 1
     pin="$(read_pin "${root}")" || return 1
     image="${IMAGE_REPO}:${pin}"
