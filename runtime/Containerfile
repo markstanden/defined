@@ -14,8 +14,8 @@
 # defaults below exist only so a bare `docker build` (or the buildkit linter)
 # has a valid base image name — they must mirror tool-versions.env, and the
 # node version assertion in the first RUN gates any drift loudly.
-ARG NODE_IMAGE_TAG=26.7.0-slim
-ARG NODE_IMAGE_DIGEST=sha256:5758d367d7b4f48b73a9bb3530e687e47efb289f3b43f9c0450a25225ae0db5d
+ARG NODE_IMAGE_TAG=26.10.0-slim
+ARG NODE_IMAGE_DIGEST=sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1
 
 FROM docker.io/library/node:${NODE_IMAGE_TAG}@${NODE_IMAGE_DIGEST}
 
