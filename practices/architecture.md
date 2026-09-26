@@ -1,11 +1,22 @@
-<!-- update: agent=opencode | date=2026-08-31 | scope=practices/architecture.md -->
-
 # Architecture preferences
 
 Working principles for how I design and structure projects. These are
 preferences, recorded so agents and reviewers apply them consistently — the
 hard rules (gate steps, module conventions, naming) live in
 `standards/naming.md` and the gate's PLAN.md.
+
+## Working style
+
+- **Small everything**: small commits, small functions and methods, small
+  files. One change per commit, verification green at every step.
+- **Tight, predefined contracts**: settle the interface before the body; keep
+  the surface minimal and explicit.
+- **Failing test first**: write the failing test, then the smallest change that
+  passes it; table-test the boundaries.
+- **Small pure functions**: extract pure logic and inject the effects, so a
+  function reads as one idea.
+- **Gate-clean commits**: every commit passes `defined comply` on its own — no
+  "fix the gate later" debt.
 
 ## Delivery
 

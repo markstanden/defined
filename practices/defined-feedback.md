@@ -1,4 +1,3 @@
-<!-- update: agent=opencode | date=2026-08-31 | scope=practices/defined-feedback.md -->
 <!-- status: historical input — reviewed and dispositioned; the original
 feedback is retained verbatim below. Do not treat it as current guidance. -->
 

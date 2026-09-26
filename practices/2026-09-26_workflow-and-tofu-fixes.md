@@ -1,5 +1,3 @@
-<!-- update: agent=opencode | date=2026-09-26 | scope=practices/2026-09-26_workflow-and-tofu-fixes.md -->
-
 # Plan — `workflow` actionlint scope and per-directory `tofu`
 
 Two producer-side defects in the gate, found while adopting `defined` into

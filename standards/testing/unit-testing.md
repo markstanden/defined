@@ -1,5 +1,3 @@
-<!-- update: agent=opencode | date=2026-08-31 | scope=standards/testing/unit-testing.md -->
-
 # TDD Testing Standards and Patterns
 
 ## Overview

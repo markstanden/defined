@@ -1,5 +1,3 @@
-<!-- update: agent=opencode | date=2026-09-21 | scope=standards/testing/node-testing.md -->
-
 # Node testing and quality standards
 
 House conventions for Node/TypeScript projects, mirroring
