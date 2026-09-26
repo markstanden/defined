@@ -1,5 +1,3 @@
-<!-- update: agent=opencode | date=2026-09-21 | scope=standards/naming.md -->
-
 # Naming conventions
 
 House naming doctrine. One question, one answer:

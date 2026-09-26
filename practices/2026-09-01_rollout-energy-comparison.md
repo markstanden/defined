@@ -1,5 +1,3 @@
-<!-- update: agent=opencode | date=2026-09-26 | scope=practices/2026-09-01_rollout-energy-comparison.md -->
-
 # Rollout — first consumer adoption: energy-comparison
 
 Working log of the first real rollout of the `defined` gate into a consumer

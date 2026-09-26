@@ -1,5 +1,3 @@
-<!-- update: agent=opencode | date=2026-09-26 | scope=PLAN.md -->
-
 # PLAN — defined: portable quality gate
 
 `defined` is a portable engineering quality gate that works against **any**

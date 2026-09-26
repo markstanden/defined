@@ -1,5 +1,3 @@
-<!-- update: agent=opencode | date=2026-09-20 | scope=standards/naming/typescript.md -->
-
 # TypeScript naming conventions
 
 Part of the house naming doctrine (see [`../naming.md`](../naming.md)). This
