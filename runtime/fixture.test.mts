@@ -99,7 +99,14 @@ test(
                 1,
                 `check-only should fail, got:\n${checkOnly.stdout}`,
             );
-            for (const step of ["node", "shell", "yaml", "workflow", "tofu"]) {
+            for (const step of [
+                "node",
+                "eslint",
+                "shell",
+                "yaml",
+                "workflow",
+                "tofu",
+            ]) {
                 assert.match(
                     checkOnly.stdout,
                     new RegExp(`^fail ${step} `, "m"),
@@ -133,6 +140,11 @@ test(
                 comply.stdout,
                 /^fail workflow /m,
                 "workflow stays red after comply (actionlint is check-only)",
+            );
+            assert.match(
+                comply.stdout,
+                /^fail eslint /m,
+                "eslint stays red after comply (the regexp rule is not auto-fixable)",
             );
 
             // Ignored file untouched even by comply's repair pass.
@@ -188,6 +200,13 @@ test(
                 "",
             ].join("\n");
             await writeFile(workflowPath, repaired);
+
+            // Repair the ESLint finding too: the post-fix regex from
+            // system-config PR #62 (exclude `[` from the class).
+            await writeFile(
+                join(root, "lib/healthcheck.mts"),
+                "export const MARKDOWN_LINK = /\\[[^\\[\\]]*\\]\\(([^)]*)\\)/g;\n",
+            );
 
             for (const args of [["--check-only"], []]) {
                 const label = args.length === 0 ? "comply" : args[0];
