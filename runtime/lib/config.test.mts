@@ -355,6 +355,58 @@ test("loadConfig rejects malformed naming configs", async () => {
     }
 });
 
+test("loadConfig parses tofu.dirs and normalises each entry", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({
+            tofu: { dirs: ["./infrastructure", "modules/net/"] },
+        }),
+    );
+    const config = await loadConfig({ repoRoot: dir });
+    assert.deepEqual(config.tofu?.dirs, ["infrastructure", "modules/net"]);
+});
+
+test("loadConfig treats a tofu key without dirs as absent", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ tofu: {} }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.tofu, undefined);
+});
+
+test("loadConfig rejects malformed tofu configs", async () => {
+    const cases: Array<{ config: unknown; re: RegExp }> = [
+        { config: { tofu: "infra" }, re: /"tofu" must be an object/u },
+        {
+            config: { tofu: { dirs: [] } },
+            re: /"tofu\.dirs" must be a non-empty array/u,
+        },
+        {
+            config: { tofu: { dirs: [" "] } },
+            re: /"tofu\.dirs\[0\]" must be a non-empty string/u,
+        },
+        {
+            config: { tofu: { dirs: ["../outside"] } },
+            re: /"tofu\.dirs\[0\]" must be a repo-relative directory/u,
+        },
+        {
+            config: { tofu: { dirs: ["/abs"] } },
+            re: /"tofu\.dirs\[0\]" must be a repo-relative directory/u,
+        },
+        {
+            config: { tofu: { dirs: ["infra"], typo: true } },
+            re: /unknown tofu key "typo"/u,
+        },
+    ];
+    for (const { config, re } of cases) {
+        await rejectsLoad({
+            dir: await makeTempDir("quality-config-"),
+            config: config as Record<string, unknown>,
+            re,
+        });
+    }
+});
+
 test("loadConfig accepts minimum at the boundary of 0 and 100", async () => {
     for (const line of [0, 100]) {
         const dir = await makeTempDir("quality-config-");

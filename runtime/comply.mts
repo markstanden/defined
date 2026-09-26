@@ -44,7 +44,7 @@ interface StepInput {
     repoRoot: string;
     /** Git-tracked files relative to repoRoot (lib/git.mts). */
     files: string[];
-    /** Shared scratch box: node-deps, node-coverage and the dotnet steps work in /tmp for no-fix (findings #10, #20). */
+    /** Shared scratch box: the write-capable steps (node/dotnet families, tofu) work in /tmp for no-fix (findings #10, #20; issue #43). */
     scratch?: Scratch;
 }
 
@@ -143,8 +143,11 @@ const STEPS: Step[] = [
     },
     {
         id: "tofu",
-        run: ({ mode, repoRoot, files }) =>
-            runTofuStep({ ctx: { mode, repoRoot }, trackedFiles: files }),
+        run: ({ mode, repoRoot, files, scratch }) =>
+            runTofuStep({
+                ctx: { mode, repoRoot, scratch },
+                trackedFiles: files,
+            }),
     },
 ];
 
