@@ -151,6 +151,46 @@ test("zizmor failure fails the step", async () => {
     assert.ok((result.notice ?? "").includes("zizmor"));
 });
 
+test("zizmor findings survive stderr progress chatter", async () => {
+    const { runner } = fakeRunner(
+        {
+            zizmor: {
+                status: 14,
+                stdout: "error[unpinned-uses]: unpinned action reference",
+                stderr: " INFO zizmor: 🌈 zizmor v1.29.0\n WARN audit: offline mode",
+            },
+        },
+        true,
+    );
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+    assert.equal(result.status, "fail");
+    assert.match(result.notice ?? "", /unpinned-uses/u);
+});
+
+test("actionlint findings survive stderr chatter", async () => {
+    const { runner } = fakeRunner(
+        {
+            actionlint: {
+                status: 1,
+                stdout: 'ci.yml:3:1: unexpected key "foo"',
+                stderr: "actionlint 1.7.7",
+            },
+        },
+        true,
+    );
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+    assert.equal(result.status, "fail");
+    assert.match(result.notice ?? "", /unexpected key/u);
+});
+
 test("gitleaks failure fails the step", async () => {
     const { runner } = fakeRunner(
         { gitleaks: { status: 1, stdout: "leaks found" } },
