@@ -57,7 +57,18 @@ export function tfDirectories({ files }: { files: string[] }): string[] {
     }
     return [...dirs]
         .filter((dir) => !hasModuleAncestor({ dir, dirs }))
-        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+        .sort(comparePaths);
+}
+
+/** Codepoint order for paths: deterministic and locale-independent. */
+function comparePaths(a: string, b: string): number {
+    if (a < b) {
+        return -1;
+    }
+    if (a > b) {
+        return 1;
+    }
+    return 0;
 }
 
 /** True when `dir` sits below a discovered module dir other than the root. */
