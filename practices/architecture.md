@@ -2,8 +2,8 @@
 
 Working principles for how I design and structure projects. These are
 preferences, recorded so agents and reviewers apply them consistently — the
-hard rules (gate steps, module conventions, naming) live in
-`standards/naming.md` and the gate's PLAN.md.
+hard rules (gate steps, module conventions, naming) live in `standards/` and
+are enforced by the gate.
 
 ## Working style
 

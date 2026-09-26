@@ -12,8 +12,7 @@
 //           NOTE (2026-08-30): prettier resolves ignore patterns relative to
 //           the ignore FILE, not CWD (getRelativePath(file, ignoreFile)) — a
 //           travelling/temp ignore must live at the repo root for
-//           repo-relative directory patterns to match. See PLAN.md "Confirmed:
-//           prettier resolves ignore patterns…".
+//           repo-relative directory patterns to match.
 // Fix:      prettier --write rewrites, then the step re-checks before
 //           reporting — a fix that leaves diffs can never read as success
 //
@@ -130,7 +129,6 @@ export function filterPrettierFiles({ files }: { files: string[] }): string[] {
  * --ignore-path flags (its ignorePath is an array), and resolves each file's
  * patterns relative to that file's own location (getRelativePath) — so a
  * merged temp file would silently no-op repo-relative directory patterns.
- * See PLAN.md "Confirmed: prettier resolves ignore patterns…".
  */
 export async function prettierIgnoreArgs({
     repoRoot,

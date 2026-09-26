@@ -41,13 +41,6 @@ consumer repos; it carries its own triggers and reads the gate version from the
 consumer's `.defined.json`. It is **not** a reusable workflow, so no consumer
 pins a gate ref. The other two are ordinary CI for this repo.
 
-Consequences:
-
-- The double hyphen makes the segment boundaries greppable and unambiguous:
-  `rg '^defined--'` finds every gate workflow.
-- A `--` inside a segment is impossible by construction, so single-hyphen
-  namespaces/targets need no escaping.
-
 ## Scope and enforcement
 
 This grammar covers tracked `.github/workflows/*.yml` and `*.yaml` files.
@@ -59,17 +52,8 @@ their names follow the shell/TypeScript doctrine above.
   always, over every tracked workflow file. A filename that breaks the grammar
   fails the gate.
 - **Shell and TypeScript** rules are enforced by a project-supplied rules
-  command, declared under the `.defined.json` `naming` key:
-
-    ```json
-    {
-        "naming": {
-            "command": "quality/naming.sh",
-            "fix": "quality/naming.sh --fix"
-        }
-    }
-    ```
-
-    The `command` runs over the git scope and must exit non-zero on violations;
-    the optional `fix` runs first in `comply` (fix) mode only. The gate provides
-    the framework and the workflow grammar; projects bring their own doctrine.
+  command declared under the `.defined.json` `naming` key (see the
+  [README](../README.md) for the config shape): the `command` runs over the git
+  scope and must exit non-zero on violations; the optional `fix` runs first in
+  `comply` mode only. The gate provides the framework and the workflow grammar;
+  projects bring their own doctrine.

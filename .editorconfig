@@ -183,7 +183,7 @@ indent_style = space
 indent_size = 2
 
 # JSON files (4-space to match prettier — .editorconfig is the single source
-# of indent; prettier reads it natively per PLAN decision)
+# of indent; prettier reads it natively)
 [*.json]
 end_of_line = lf
 indent_style = space
