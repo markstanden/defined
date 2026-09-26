@@ -5,33 +5,13 @@ House conventions for Node/TypeScript projects, mirroring
 
 ## What the gate enforces
 
-The gate's `node` step activates when a repo has a tracked `package.json` or
-`*.md` file. It runs repo-wide prettier (house config + `.editorconfig` for
-indentation):
-
-| Check      | Tool     | Fix                    |
-| ---------- | -------- | ---------------------- |
-| Formatting | prettier | `comply` (repair pass) |
-
-The `node-deps` step restores the consumer's dependencies first — every
-declared `node.packages` entry, plus the root package when a consumer Prettier
-config is tracked, so a config-declared plugin resolves on a fresh checkout.
-The `node-checks` step then runs the consumer's own project checks — ESLint,
-`tsc --noEmit`, tests — when the repo declares them under `.defined.json`'s
-`node` key (see the README), prepending the package's `node_modules/.bin` to
-`PATH`, so the consumer's pinned toolchain is used, never the gate's global
-tools; nested and monorepo `package.json` locations are supported. An absent
-declaration skips cleanly.
-
-```jsonc
-"node": {
-    "checks": [
-        { "name": "lint", "command": "eslint .", "fix": "eslint --fix ." },
-        { "name": "typecheck", "command": "tsc --noEmit" },
-        { "name": "test", "command": "vitest run" },
-    ],
-}
-```
+The `node` step activates on a tracked `package.json` or `*.md` file and formats
+the repo with prettier (house config + `.editorconfig` for indentation).
+`node-deps` restores the consumer's dependencies first, and `node-checks` then
+runs the consumer's declared ESLint/`tsc`/tests from the package's own
+`node_modules/.bin` — never the gate's global tools. Nested and monorepo
+packages are supported; an absent declaration skips cleanly. The `.defined.json`
+`node` key and its examples are documented in the [README](../../README.md).
 
 ## Testing stack (gate-internal, guidance)
 
