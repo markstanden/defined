@@ -8,9 +8,12 @@
 //           reports fails.
 // Fix:      none — these are check-only tools
 //
-// Detection: actionlint/zizmor run only when tracked workflow files exist
-// (.github/workflows/*.yml, .github/workflows/*.yaml, .github/dependabot.yml).
-// gitleaks always runs (scans the repo's git scope for secrets).
+// Detection: the workflow tools run only when tracked .github/ YAML exists.
+// actionlint parses workflow *definitions* only (.github/workflows/*.yml|yaml)
+// — handed dependabot.yml it false-fails; zizmor audits the wider set
+// (workflow definitions plus .github/dependabot.yml), where its dependabot
+// findings come from (issue #42). gitleaks always runs (scans the repo's git
+// scope for secrets).
 // The runner is injected so tests need no host binaries.
 //
 // gitleaks scope (decision: "gate scope = git scope"): gitleaks `dir` walks
@@ -30,6 +33,10 @@ import { join } from "node:path";
 
 import { failed, passed, type StepResult } from "../lib/step-result.mts";
 import { run } from "../../lib/proc.mts";
+import {
+    filterWorkflowAuditFiles,
+    filterWorkflowFiles,
+} from "../lib/workflow-files.mts";
 
 export interface WorkflowRunContext {
     mode: "fix" | "no-fix";
@@ -37,22 +44,6 @@ export interface WorkflowRunContext {
 }
 
 type Runner = typeof run;
-
-export const WORKFLOW_GLOBS = [
-    ".github/workflows/*.yml",
-    ".github/workflows/*.yaml",
-    ".github/dependabot.yml",
-] as const;
-
-export function filterWorkflowFiles({ files }: { files: string[] }): string[] {
-    return files.filter((file) => {
-        return (
-            (file.startsWith(".github/workflows/") &&
-                (file.endsWith(".yml") || file.endsWith(".yaml"))) ||
-            file === ".github/dependabot.yml"
-        );
-    });
-}
 
 /** Escape a path for use as a regex literal (gitleaks allowlist paths are regexes). */
 export function escapeRegexPath(path: string): string {
@@ -164,12 +155,13 @@ export async function runWorkflowStep({
     runner?: Runner;
     existsSyncFn?: typeof existsSync;
 }): Promise<StepResult> {
-    const workflowFiles = filterWorkflowFiles({ files: trackedFiles });
+    const auditFiles = filterWorkflowAuditFiles({ files: trackedFiles });
+    const actionlintFiles = filterWorkflowFiles({ files: trackedFiles });
 
-    if (workflowFiles.length > 0) {
+    if (actionlintFiles.length > 0) {
         const actionlint = runner({
             cmd: "actionlint",
-            args: workflowFiles,
+            args: actionlintFiles,
             cwd: ctx.repoRoot,
         });
         if (actionlint.status !== 0) {
@@ -177,12 +169,15 @@ export async function runWorkflowStep({
                 notice: `workflow: actionlint failed: ${actionlint.stderr.trim() || actionlint.stdout.trim()}`,
             });
         }
+    }
 
+    if (auditFiles.length > 0) {
         const zizmor = runner({
             cmd: "zizmor",
             // No --min-severity: zizmor's own default (informational) applies,
-            // so nothing is silently filtered out.
-            args: ["--no-progress", ...workflowFiles],
+            // so nothing is silently filtered out. Audit set is workflow
+            // definitions plus dependabot.yml (issue #42).
+            args: ["--no-progress", ...auditFiles],
             cwd: ctx.repoRoot,
         });
         if (zizmor.status !== 0) {
@@ -232,9 +227,15 @@ export async function runWorkflowStep({
         });
     }
 
-    if (workflowFiles.length > 0) {
+    if (actionlintFiles.length > 0) {
         return passed({
-            notice: `workflow: actionlint/zizmor/gitleaks clean (${workflowFiles.length} workflow file(s))`,
+            notice: `workflow: actionlint/zizmor/gitleaks clean (${auditFiles.length} file(s))`,
+        });
+    }
+    if (auditFiles.length > 0) {
+        // A dependabot-only run: zizmor audited it, actionlint did not run.
+        return passed({
+            notice: `workflow: zizmor/gitleaks clean (${auditFiles.length} audit file(s))`,
         });
     }
     return passed({ notice: "workflow: no workflow files; gitleaks clean" });

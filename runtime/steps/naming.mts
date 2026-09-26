@@ -31,6 +31,7 @@ import { runScopedCommand } from "../lib/coverage.mts";
 import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import { loadConfig } from "../lib/config.mts";
+import { filterWorkflowFiles } from "../lib/workflow-files.mts";
 
 export interface NamingRunContext {
     mode: "fix" | "no-fix";
@@ -52,15 +53,6 @@ export const WORKFLOW_NAME_RE = new RegExp(
     String.raw`^${SEGMENT}--${SEGMENT}(?:--${SEGMENT})?\.ya?ml$`,
     "u",
 );
-
-/** Workflow files the naming grammar applies to (not dependabot.yml). */
-export function filterWorkflowFiles({ files }: { files: string[] }): string[] {
-    return files.filter(
-        (file) =>
-            file.startsWith(".github/workflows/") &&
-            (file.endsWith(".yml") || file.endsWith(".yaml")),
-    );
-}
 
 /** True when a workflow filename matches the documented grammar. */
 export function isValidWorkflowName({ name }: { name: string }): boolean {
