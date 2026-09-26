@@ -84,6 +84,12 @@ export interface TofuConfig {
     dirs?: string[];
 }
 
+/** Consumer ESLint configuration (`.defined.json` `eslint` key). */
+export interface EslintConfig {
+    /** True switches the house ESLint step off for this repo. */
+    disable?: boolean;
+}
+
 export interface DefinedConfig {
     /**
      * Immutable image tag (7–40 hex chars). Empty when omitted — the launcher
@@ -101,6 +107,8 @@ export interface DefinedConfig {
     naming?: NamingConfig;
     /** OpenTofu module layout. Absent key = auto-discover tracked .tf dirs. */
     tofu?: TofuConfig;
+    /** ESLint switch. Absent key = the house ESLint step runs. */
+    eslint?: EslintConfig;
 }
 
 /** Empty config: all coverage steps skip, version is empty. */
@@ -415,6 +423,29 @@ function validateTofu(raw: unknown): TofuConfig | undefined {
     };
 }
 
+const ESLINT_KEYS = new Set(["disable"]);
+
+function validateEslint(raw: unknown): EslintConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new TypeError(`.defined.json: "eslint" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, ESLINT_KEYS, "eslint");
+    if (entry.disable === undefined) {
+        // `eslint` present but nothing declared: the house step still runs.
+        return undefined;
+    }
+    if (typeof entry.disable !== "boolean") {
+        throw new TypeError(
+            `.defined.json: "eslint.disable" must be a boolean`,
+        );
+    }
+    return { disable: entry.disable };
+}
+
 function validateParsed(raw: unknown): DefinedConfig {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new Error(`.defined.json: must be a JSON object`);
@@ -428,7 +459,8 @@ function validateParsed(raw: unknown): DefinedConfig {
     const node = validateNode(obj.node);
     const naming = validateNaming(obj.naming);
     const tofu = validateTofu(obj.tofu);
-    return { version, coverage, node, naming, tofu };
+    const eslint = validateEslint(obj.eslint);
+    return { version, coverage, node, naming, tofu, eslint };
 }
 
 /**

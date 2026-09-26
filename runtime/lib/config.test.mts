@@ -421,3 +421,30 @@ test("loadConfig accepts minimum at the boundary of 0 and 100", async () => {
         assert.equal(config.coverage?.node?.minimums?.line, line);
     }
 });
+
+test("loadConfig parses the eslint disable flag", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ eslint: { disable: true } }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.eslint?.disable, true);
+});
+
+test("loadConfig treats an empty eslint key as absent", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ eslint: {} }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.eslint, undefined);
+});
+
+test("loadConfig rejects an unknown eslint key or non-boolean disable", async () => {
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: { eslint: { rules: {} } },
+        re: /unknown eslint key "rules"/,
+    });
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: { eslint: { disable: "yes" } },
+        re: /"eslint\.disable" must be a boolean/,
+    });
+});

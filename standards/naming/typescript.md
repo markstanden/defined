@@ -29,9 +29,11 @@ user. Test files are colocated `*.test.mts`.
 
 ## Enforcement
 
-TypeScript naming is not enforced by a built-in gate step. Projects declare
-their own rules command under the `.defined.json` `naming` key (see
+TypeScript naming is not enforced by a built-in gate step. The gate's ESLint
+step runs (see [`../node-eslint.md`](../node-eslint.md)), but its v1 rule set is
+the super-linear-regex floor only — it does **not** check naming. Projects
+declare their own rules command under the `.defined.json` `naming` key (see
 [`../naming.md`](../naming.md)); ESLint's
 `@typescript-eslint/naming-convention` rule (camelCase functions, PascalCase
 types, UPPER_CASE constants; looser properties for env-var and wire-format
-names) is the reference implementation.
+names) is the reference implementation, and the likely v2 addition.

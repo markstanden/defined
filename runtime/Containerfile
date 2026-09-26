@@ -41,8 +41,16 @@ RUN set -eux; \
     test "$(yamllint --version | cut -d' ' -f2)" = "${YAMLLINT_VERSION}"; \
     npm install --global "typescript@${TYPESCRIPT_VERSION}"; \
     npm install --global "prettier@${PRETTIER_VERSION}"; \
+    npm install --global "eslint@${ESLINT_VERSION}"; \
     tsc --version; \
     test "$(prettier --version)" = "${PRETTIER_VERSION}"; \
+    test "$(eslint --version)" = "v${ESLINT_VERSION}"; \
+    npm install --prefix /opt/defined --no-audit --no-fund \
+        "eslint@${ESLINT_VERSION}" \
+        "typescript-eslint@${TYPESCRIPT_ESLINT_VERSION}" \
+        "eslint-plugin-regexp@${ESLINT_PLUGIN_REGEXP_VERSION}" \
+        "eslint-config-prettier@${ESLINT_CONFIG_PRETTIER_VERSION}" \
+        "typescript@${ESLINT_TYPESCRIPT_VERSION}"; \
     arch="$(uname -m)"; \
     case "${arch}" in \
         x86_64) ARCH="amd64"; ZIZMOR_ARCH="x86_64"; GITLEAKS_ARCH="x64" ;; \
