@@ -6,7 +6,12 @@
 //           fingerprint baseline survives regardless of CWD. zizmor runs at
 //           its own default min-severity (informational): every finding it
 //           reports fails.
-// Fix:      none — these are check-only tools
+// Fix:      zizmor's *safe* autofixes (--fix) run first in fix mode, then the
+//           step always re-checks: a fix that leaves breakage can never read
+//           as success. Unsafe fixes are deliberately not applied — they encode
+//           design decisions (e.g. syntax a validator may not yet accept), and
+//           the re-check surfaces whatever remains. actionlint and gitleaks
+//           stay check-only. The gate-managed workflow is never rewritten.
 //
 // Detection: the workflow tools run only when tracked .github/ YAML exists.
 // actionlint parses workflow *definitions* only (.github/workflows/*.yml|yaml)
@@ -34,6 +39,7 @@ import { join } from "node:path";
 import { failed, passed, type StepResult } from "../lib/step-result.mts";
 import { run } from "../../lib/proc.mts";
 import {
+    filterFixableFiles,
     filterWorkflowAuditFiles,
     filterWorkflowFiles,
 } from "../lib/workflow-files.mts";
@@ -141,7 +147,9 @@ export function gitleaksIgnoreArgs({
 
 /**
  * Run actionlint, zizmor on workflow files, and gitleaks on the whole repo.
- * Returns pass when all clean; fail naming the offending tool.
+ * In fix mode, zizmor's safe autofixes are applied first, then the checks
+ * below judge the result. Returns pass when all clean; fail naming the
+ * offending tool.
  * If no workflow files tracked, skips actionlint/zizmor but still runs gitleaks.
  */
 export async function runWorkflowStep({
@@ -157,6 +165,22 @@ export async function runWorkflowStep({
 }): Promise<StepResult> {
     const auditFiles = filterWorkflowAuditFiles({ files: trackedFiles });
     const actionlintFiles = filterWorkflowFiles({ files: trackedFiles });
+
+    // Repair pass: apply zizmor's *safe* autofixes before the checks run. The
+    // output and exit status are discarded — the checks below are the verdict,
+    // so a fix that leaves breakage can never read as success. Unsafe fixes
+    // are never applied (they encode design decisions). The gate-managed
+    // workflow is excluded: the gate owns it and repairs it upstream.
+    if (ctx.mode === "fix") {
+        const fixableFiles = filterFixableFiles({ files: trackedFiles });
+        if (fixableFiles.length > 0) {
+            runner({
+                cmd: "zizmor",
+                args: ["--fix", "--no-progress", ...fixableFiles],
+                cwd: ctx.repoRoot,
+            });
+        }
+    }
 
     if (actionlintFiles.length > 0) {
         const actionlint = runner({

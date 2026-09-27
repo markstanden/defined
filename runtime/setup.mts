@@ -34,6 +34,7 @@ import {
     type ManagedFile,
 } from "./lib/managed-files.mts";
 import { gateConfigPath, standardsDir } from "./lib/config-path.mts";
+import { MANAGED_WORKFLOW_FILE } from "./lib/workflow-files.mts";
 import { deriveRepoRoot } from "../lib/paths.mts";
 
 // Shared files for every consumer repo, in two tiers. standards/ is the single
@@ -60,7 +61,7 @@ const BOOTSTRAP_FILES: ManagedFile[] = [
     { source: ".gitattributes", target: ".gitattributes", mode: "seeded" },
     {
         source: "workflows/defined--verify.yml",
-        target: ".github/workflows/defined--verify.yml",
+        target: MANAGED_WORKFLOW_FILE,
         mode: "managed",
     },
 ];

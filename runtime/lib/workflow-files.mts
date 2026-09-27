@@ -11,8 +11,11 @@
 //   .github/dependabot.yml. zizmor audits both (its dependabot-cooldown
 //   findings live there); it is not a workflow parser and accepts the extra
 //   file.
+// - filterFixableFiles — the audit set minus the gate-managed workflow: what a
+//   zizmor autofix may rewrite. The managed file belongs to the gate and is
+//   repaired upstream, never by a consumer-side autofix.
 //
-// One source of truth so the two views can never drift apart again.
+// One source of truth so the views can never drift apart again.
 
 /** Workflow definitions under .github/workflows/ (never dependabot.yml). */
 export function filterWorkflowFiles({ files }: { files: string[] }): string[] {
@@ -34,5 +37,24 @@ export function filterWorkflowAuditFiles({
             (file.startsWith(".github/workflows/") &&
                 (file.endsWith(".yml") || file.endsWith(".yaml"))) ||
             file === ".github/dependabot.yml",
+    );
+}
+
+/**
+ * The gate-managed gate workflow: gate-owned plumbing that must stay
+ * byte-identical to the image (installManagedFiles/checkManagedFiles enforce
+ * it). Single source of truth — setup.mts installs it and the workflow step's
+ * fixer excludes it.
+ */
+export const MANAGED_WORKFLOW_FILE = ".github/workflows/defined--verify.yml";
+
+/**
+ * The audit set minus the gate-managed workflow: the files a zizmor autofix
+ * may rewrite. The managed file is repaired upstream in the gate, never in a
+ * consumer's working tree, so an autofix must leave it alone.
+ */
+export function filterFixableFiles({ files }: { files: string[] }): string[] {
+    return filterWorkflowAuditFiles({ files }).filter(
+        (file) => file !== MANAGED_WORKFLOW_FILE,
     );
 }

@@ -14,7 +14,10 @@ import {
     parseIgnoredPaths,
     runWorkflowStep,
 } from "./workflow.mts";
-import { filterWorkflowFiles } from "../lib/workflow-files.mts";
+import {
+    filterFixableFiles,
+    filterWorkflowFiles,
+} from "../lib/workflow-files.mts";
 import {
     baseCtx,
     cleanupTempDirs,
@@ -23,6 +26,9 @@ import {
 } from "../test-helpers.mts";
 
 afterEach(cleanupTempDirs);
+
+/** Repair-mode context: comply's first pass, where autofixes may be applied. */
+const fixCtx = { mode: "fix" as const, repoRoot: "/repo" };
 
 test("filterWorkflowFiles keeps only workflow definitions (never dependabot.yml)", () => {
     assert.deepEqual(
@@ -121,6 +127,120 @@ test("actionlint runs on workflow files, then zizmor, then gitleaks", async () =
     assert.equal(calls[3]![2], "--config");
     assert.match(calls[3]![3]!, /defined-gitleaks\.toml$/u);
     assert.equal(calls[3]![4], ".");
+});
+
+test("filterFixableFiles drops the gate-managed workflow", () => {
+    assert.deepEqual(
+        filterFixableFiles({
+            files: [
+                ".github/workflows/ci.yml",
+                ".github/workflows/defined--verify.yml",
+                ".github/dependabot.yml",
+                "a.sh",
+            ],
+        }),
+        [".github/workflows/ci.yml", ".github/dependabot.yml"],
+    );
+});
+
+test("fix mode applies zizmor's safe autofixes before the checks", async () => {
+    const { runner, calls } = fakeRunner({}, true);
+    const result = await runWorkflowStep({
+        ctx: fixCtx,
+        trackedFiles: [".github/workflows/ci.yml", ".github/dependabot.yml"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.deepEqual(
+        calls.map((c) => c[0]),
+        ["zizmor", "actionlint", "zizmor", "git", "gitleaks"],
+    );
+    assert.deepEqual(calls[0]!.slice(1, -1), [
+        "--fix",
+        "--no-progress",
+        ".github/workflows/ci.yml",
+        ".github/dependabot.yml",
+    ]);
+});
+
+test("no-fix mode never asks zizmor to fix", async () => {
+    const { runner, calls } = fakeRunner({}, true);
+    await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+    assert.ok(!calls.some((call) => call.includes("--fix")));
+});
+
+test("a failed autofix run cannot pass the step; the re-check decides", async () => {
+    const { runner } = fakeRunner(
+        { "zizmor --fix": { status: 1, stderr: "fixer blew up" } },
+        true,
+    );
+    const result = await runWorkflowStep({
+        ctx: fixCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+});
+
+test("a finding the fixer leaves still fails the step", async () => {
+    const { runner } = fakeRunner(
+        {
+            "zizmor --no-progress": {
+                status: 12,
+                stdout: "error[template-injection]: code injection",
+            },
+        },
+        true,
+    );
+    const result = await runWorkflowStep({
+        ctx: fixCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+    assert.equal(result.status, "fail");
+    assert.match(result.notice ?? "", /template-injection/u);
+});
+
+test("the fixer never rewrites the gate-managed workflow", async () => {
+    const { runner, calls } = fakeRunner({}, true);
+    await runWorkflowStep({
+        ctx: fixCtx,
+        trackedFiles: [
+            ".github/workflows/ci.yml",
+            ".github/workflows/defined--verify.yml",
+        ],
+        runner,
+    });
+    const fixer = calls.find(
+        (call) => call[0] === "zizmor" && call.includes("--fix"),
+    )!;
+    assert.deepEqual(fixer.slice(1, -1), [
+        "--fix",
+        "--no-progress",
+        ".github/workflows/ci.yml",
+    ]);
+});
+
+test("a dependabot-only repo still runs the fixer in fix mode", async () => {
+    const { runner, calls } = fakeRunner({}, true);
+    const result = await runWorkflowStep({
+        ctx: fixCtx,
+        trackedFiles: [".github/dependabot.yml"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    const fixer = calls.find(
+        (call) => call[0] === "zizmor" && call.includes("--fix"),
+    )!;
+    assert.deepEqual(fixer.slice(1, -1), [
+        "--fix",
+        "--no-progress",
+        ".github/dependabot.yml",
+    ]);
 });
 
 test("actionlint failure fails the step", async () => {
