@@ -57,7 +57,7 @@ RUN set -eux; \
         aarch64) ARCH="arm64"; ZIZMOR_ARCH="aarch64"; GITLEAKS_ARCH="arm64" ;; \
         *) echo "Unsupported arch: ${arch}" >&2; exit 1 ;; \
     esac; \
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin actionlint; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/kjanat/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin actionlint; \
     actionlint --version >/dev/null; \
     curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${ZIZMOR_ARCH}-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin zizmor; \
     zizmor --version >/dev/null; \
