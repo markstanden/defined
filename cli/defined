@@ -19,6 +19,10 @@
 # (normally ~/.local/bin/defined). In the defined source repo itself both verbs
 # delegate automatically to runtime/comply.sh, which builds and gates the
 # working tree rather than the published image (see main()).
+# On a Windows host the supported shape is WSL: install the launcher inside
+# WSL and let a git-bash shim on the Windows PATH delegate to it (see the
+# README's Windows hosts section); main() refuses to run the Windows-side
+# copy when WSL resolves it through the appended Windows PATH.
 # The runtime's .defined.json parser is exercised here end-to-end; the
 # producer repo commits its own versionless config (a coverage pin, see the
 # repo root .defined.json).
@@ -53,6 +57,21 @@ LAUNCHER_REV=""
 usage() {
     echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
     return 0
+}
+
+# True when this copy of the launcher lives on a Windows drive mount
+# (/mnt/...). That is the signature of the git-bash shim copy (a copy of this
+# script kept on the Windows side so IDE terminals on the Windows host can
+# reach the WSL launcher) being executed *inside* WSL: a non-login WSL shell
+# has no ~/.local/bin on PATH, so a bare `defined` resolves through the
+# appended Windows PATH and finds the shim again. Running it here fails
+# confusingly (it speaks git-bash: `pwd -W`), so name the situation and the
+# fix instead of recursing.
+is_windows_mounted() {
+    case "$1" in
+        /mnt/*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 die() {
@@ -526,6 +545,10 @@ print_version() {
 }
 
 main() {
+    # The Windows-side shim copy running inside WSL (see is_windows_mounted).
+    if is_windows_mounted "${BASH_SOURCE[0]}"; then
+        die "this is the Windows-side copy running inside WSL (${BASH_SOURCE[0]}) — WSL resolved it through the appended Windows PATH. Run the WSL install by absolute path (e.g. ~/.local/bin/defined inside WSL; reinstall there with cli/install.sh if missing — see the README's Windows hosts section)"
+    fi
     local verb="${1:-}"
     if [[ "${verb}" == "-h" || "${verb}" == "--help" ]]; then
         usage
@@ -626,4 +649,8 @@ main() {
         "${image}" "${verb}"
 }
 
-main "$@"
+# Execute only when run as a script (BASH_SOURCE matches $0); when sourced,
+# expose the functions for testing and do nothing.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
