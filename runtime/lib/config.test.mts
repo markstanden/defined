@@ -448,3 +448,30 @@ test("loadConfig rejects an unknown eslint key or non-boolean disable", async ()
         re: /"eslint\.disable" must be a boolean/,
     });
 });
+
+test("loadConfig parses the workflow disable flag", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ workflow: { disable: true } }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.workflow?.disable, true);
+});
+
+test("loadConfig treats an empty workflow key as absent", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ workflow: {} }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.workflow, undefined);
+});
+
+test("loadConfig rejects an unknown workflow key or non-boolean disable", async () => {
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: { workflow: { host: "ado" } },
+        re: /unknown workflow key "host"/,
+    });
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: { workflow: { disable: "yes" } },
+        re: /"workflow\.disable" must be a boolean/,
+    });
+});

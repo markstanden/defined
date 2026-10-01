@@ -207,3 +207,69 @@ test("checkSetup reports drift when the managed workflow differs", async () => {
         await rm(repo, { recursive: true, force: true });
     }
 });
+
+test("runSetup skips the managed workflow when workflow.disable is true", async () => {
+    const repo = await makeTempRepo();
+    try {
+        await writeFile(
+            join(repo, ".defined.json"),
+            `${JSON.stringify({ version: "deadbeef", workflow: { disable: true } })}\n`,
+        );
+        await runSetup({ startDir: repo });
+        await assert.rejects(
+            () =>
+                readFile(
+                    join(repo, ".github/workflows/defined--verify.yml"),
+                    "utf8",
+                ),
+            { code: "ENOENT" },
+            "an opted-out repo is never seeded a workflow it cannot run",
+        );
+        // Seeded defaults still install; only the workflow is dropped.
+        assert.ok(
+            (await readFile(join(repo, ".editorconfig"), "utf8")).includes(
+                "root = true",
+            ),
+        );
+        const check = await checkSetup({ startDir: repo });
+        assert.deepEqual(check.files, [], "verify does not gate the workflow");
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("runSetup leaves a present workflow when disabled and warns", async () => {
+    const repo = await makeTempRepo();
+    try {
+        const target = join(
+            repo,
+            ".github",
+            "workflows",
+            "defined--verify.yml",
+        );
+        await mkdir(join(repo, ".github", "workflows"), { recursive: true });
+        await writeFile(target, "name: Stale\n");
+        await writeFile(
+            join(repo, ".defined.json"),
+            `${JSON.stringify({ version: "deadbeef", workflow: { disable: true } })}\n`,
+        );
+        const notices: string[] = [];
+        await runSetup({
+            startDir: repo,
+            notifyFn: (line) => notices.push(line),
+        });
+        assert.equal(
+            await readFile(target, "utf8"),
+            "name: Stale\n",
+            "comply never deletes a possibly-committed file",
+        );
+        assert.ok(
+            notices.some((line) => line.includes("workflow disabled")),
+            "the contributor is told the stale workflow is deliberate",
+        );
+        const check = await checkSetup({ startDir: repo });
+        assert.deepEqual(check.files, [], "drift is not gated when opted out");
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});

@@ -34,6 +34,7 @@ import {
     type ManagedFile,
 } from "./lib/managed-files.mts";
 import { gateConfigPath, standardsDir } from "./lib/config-path.mts";
+import { loadConfig, type DefinedConfig } from "./lib/config.mts";
 import { MANAGED_WORKFLOW_FILE } from "./lib/workflow-files.mts";
 import { deriveRepoRoot } from "../lib/paths.mts";
 
@@ -67,6 +68,40 @@ const BOOTSTRAP_FILES: ManagedFile[] = [
 ];
 
 const CONFIG_FILE = ".defined.json";
+
+/**
+ * The bootstrap set for this repo. The managed workflow is gate-owned plumbing
+ * for GitHub-hosted repos; `.defined.json` `"workflow": { "disable": true }`
+ * drops it from both install and check, so a non-GitHub host is never seeded a
+ * workflow it can never run and `verify` never fails on its absence.
+ */
+function bootstrapFiles(config: DefinedConfig): ManagedFile[] {
+    if (config.workflow?.disable === true) {
+        return BOOTSTRAP_FILES.filter(
+            (file) => file.target !== MANAGED_WORKFLOW_FILE,
+        );
+    }
+    return BOOTSTRAP_FILES;
+}
+
+/**
+ * One stderr notice when the workflow is disabled but a copy is already on
+ * disk: comply never deletes a possibly-committed file, so the contributor is
+ * told it is deliberate rather than silently left wondering.
+ */
+async function warnWorkflowDisabled({
+    repoRoot,
+    notify,
+}: {
+    repoRoot: string;
+    notify: (line: string) => void;
+}): Promise<void> {
+    if (existsSync(join(repoRoot, MANAGED_WORKFLOW_FILE))) {
+        notify(
+            `defined: workflow disabled in .defined.json; left ${MANAGED_WORKFLOW_FILE} in place (git rm it if unwanted)`,
+        );
+    }
+}
 
 // tool-versions.env lives next to setup.mts — /opt/defined/runtime baked in
 // the image, runtime/ on a host checkout. Same bytes either way, so the
@@ -111,15 +146,22 @@ async function ensureConfigFile(repoRoot: string): Promise<void> {
  */
 export async function runSetup({
     startDir,
+    notifyFn = (line) => process.stderr.write(`${line}\n`),
 }: {
     startDir: string;
+    /** Sink for the disabled-workflow advisory (stderr by default). */
+    notifyFn?: (line: string) => void;
 }): Promise<void> {
     const repoRoot = await deriveRepoRoot({ startDir });
+    const config = await loadConfig({ repoRoot });
     await installManagedFiles({
         sourceDir: await standardsDir(),
-        files: BOOTSTRAP_FILES,
+        files: bootstrapFiles(config),
         repoRoot,
     });
+    if (config.workflow?.disable === true) {
+        await warnWorkflowDisabled({ repoRoot, notify: notifyFn });
+    }
     await ensureConfigFile(repoRoot);
 
     const block = await readMarkedBlock({
@@ -147,9 +189,10 @@ export async function checkSetup({
     startDir: string;
 }): Promise<SetupCheck> {
     const repoRoot = await deriveRepoRoot({ startDir });
+    const config = await loadConfig({ repoRoot });
     const files = await checkManagedFiles({
         sourceDir: await standardsDir(),
-        files: BOOTSTRAP_FILES,
+        files: bootstrapFiles(config),
         repoRoot,
     });
     const block = await readMarkedBlock({
