@@ -7,7 +7,8 @@
 // No-fix:   runs the consumer's coverage command in a /tmp scratch copy of the
 //           git scope (a read-only verify cannot write a report into the repo)
 //           and validates the scratch report
-// Skip:     no .defined.json entry for "dotnet", or no Cobertura XML found
+// Skip:     dotnet disabled by .defined.json, no .defined.json entry for
+//           "dotnet", or no Cobertura XML found
 //
 // Detection is config-driven: the step only activates when .defined.json
 // includes a "coverage.dotnet" entry. The consumer provides the shell command
@@ -160,6 +161,36 @@ function findCoberturaFile({ repoRoot }: { repoRoot: string }): string | null {
  * — then validates the report against configured minimums. Looks for
  * coverage.cobertura.xml at the working root or TestResults/.
  */
+/**
+ * Locate, read and parse the Cobertura report: `coverage.cobertura.xml` at
+ * the working root or under TestResults/. Returns the failed result when the
+ * report is missing or contains no coverage data.
+ */
+async function loadCoberturaSummary({
+    workingRoot,
+    readFileFn,
+}: {
+    workingRoot: string;
+    readFileFn: typeof readFile;
+}): Promise<StepResult | { summary: CoberturaSummary }> {
+    const coberturaPath = findCoberturaFile({ repoRoot: workingRoot });
+    if (coberturaPath === null) {
+        return failed({
+            notice: `dotnet-coverage: no coverage report at ${COBERTURA_NAME} (or TestResults/coverage.cobertura.xml) — run coverage in a prior step or check command`,
+        });
+    }
+
+    const content = await readFileFn(resolve(coberturaPath), "utf8");
+    const summary = parseCobertura({ content });
+
+    if (summary.lineRate === 0 && summary.branchRate === undefined) {
+        return failed({
+            notice: "dotnet-coverage: Cobertura XML contains no coverage data",
+        });
+    }
+    return { summary };
+}
+
 export async function runDotNetCoverageStep({
     ctx,
     trackedFiles,
@@ -172,6 +203,11 @@ export async function runDotNetCoverageStep({
     readFileFn?: typeof readFile;
 }): Promise<StepResult> {
     const config = await loadConfig({ repoRoot: ctx.repoRoot, readFileFn });
+    if (config.dotnet?.disable === true) {
+        return skipped({
+            notice: "dotnet-coverage: disabled by .defined.json",
+        });
+    }
     if (!config.coverage?.dotnet) {
         return skipped({
             notice: "dotnet-coverage: no coverage.dotnet entry in .defined.json",
@@ -197,21 +233,11 @@ export async function runDotNetCoverageStep({
         });
     }
 
-    const coberturaPath = findCoberturaFile({ repoRoot: workingRoot });
-    if (coberturaPath === null) {
-        return failed({
-            notice: `dotnet-coverage: no coverage report at ${COBERTURA_NAME} (or TestResults/coverage.cobertura.xml) — run coverage in a prior step or check command`,
-        });
+    const loaded = await loadCoberturaSummary({ workingRoot, readFileFn });
+    if (!("summary" in loaded)) {
+        return loaded;
     }
-
-    const content = await readFileFn(resolve(coberturaPath), "utf8");
-    const summary = parseCobertura({ content });
-
-    if (summary.lineRate === 0 && summary.branchRate === undefined) {
-        return failed({
-            notice: "dotnet-coverage: Cobertura XML contains no coverage data",
-        });
-    }
+    const { summary } = loaded;
 
     const minimums = effectiveMinimums(coverageConfig.minimums);
     const { pass, failures } = checkMinimums({ summary, minimums });

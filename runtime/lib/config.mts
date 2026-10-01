@@ -108,6 +108,17 @@ export interface WorkflowConfig {
     disable?: boolean;
 }
 
+/** Consumer .NET configuration (`.defined.json` `dotnet` key). */
+export interface DotnetConfig {
+    /**
+     * True switches the dotnet and dotnet-coverage steps off and stops the
+     * gate seeding `Directory.Build.props` (which is seeded only to repos
+     * with tracked .NET projects anyway). A repo that has already been
+     * seeded owns its copy — remove it with `git rm` if unwanted.
+     */
+    disable?: boolean;
+}
+
 export interface DefinedConfig {
     /**
      * Immutable image tag (7–40 hex chars). Empty when omitted — the launcher
@@ -129,6 +140,8 @@ export interface DefinedConfig {
     eslint?: EslintConfig;
     /** Managed-workflow switch. Absent key = the workflow is installed. */
     workflow?: WorkflowConfig;
+    /** .NET switch. Absent key = the dotnet steps run when .NET is detected. */
+    dotnet?: DotnetConfig;
 }
 
 /** Empty config: all coverage steps skip, version is empty. */
@@ -484,6 +497,29 @@ function validateWorkflow(raw: unknown): WorkflowConfig | undefined {
     return { disable: entry.disable };
 }
 
+const DOTNET_KEYS = new Set(["disable"]);
+
+function validateDotnet(raw: unknown): DotnetConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new TypeError(`.defined.json: "dotnet" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, DOTNET_KEYS, "dotnet");
+    if (entry.disable === undefined) {
+        // `dotnet` present but nothing declared: detection applies.
+        return undefined;
+    }
+    if (typeof entry.disable !== "boolean") {
+        throw new TypeError(
+            `.defined.json: "dotnet.disable" must be a boolean`,
+        );
+    }
+    return { disable: entry.disable };
+}
+
 function validateParsed(raw: unknown): DefinedConfig {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new Error(`.defined.json: must be a JSON object`);
@@ -499,7 +535,13 @@ function validateParsed(raw: unknown): DefinedConfig {
     const tofu = validateTofu(obj.tofu);
     const eslint = validateEslint(obj.eslint);
     const workflow = validateWorkflow(obj.workflow);
-    return { version, coverage, node, naming, tofu, eslint, workflow };
+    const dotnet = validateDotnet(obj.dotnet);
+    if (dotnet?.disable === true && coverage?.dotnet !== undefined) {
+        throw new Error(
+            `.defined.json: "dotnet.disable" cannot be combined with "coverage.dotnet"`,
+        );
+    }
+    return { version, coverage, node, naming, tofu, eslint, workflow, dotnet };
 }
 
 /**

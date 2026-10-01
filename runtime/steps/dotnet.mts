@@ -10,7 +10,8 @@
 //           fails here, loudly, before anything builds.
 //
 // Detection is sync and data-driven: activation = at least one tracked
-// *.csproj, *.sln, or *.slnx file. Workspace discovery follows
+// *.csproj, *.sln, or *.slnx file, unless `.defined.json` sets
+// "dotnet": { "disable": true }. Workspace discovery follows
 // dev-tools' pattern: explicit flag/env → single slnx/sln at root → repo root.
 // The runner is injected so tests need no host binaries.
 //
@@ -27,6 +28,7 @@ import {
 } from "../lib/step-result.mts";
 import { ensureScratch, type Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
+import { loadConfig } from "../lib/config.mts";
 
 export interface DotNetRunContext {
     mode: "fix" | "no-fix";
@@ -173,6 +175,10 @@ export async function runDotNetStep({
     trackedFiles: string[];
     runner?: Runner;
 }): Promise<StepResult> {
+    const config = await loadConfig({ repoRoot: ctx.repoRoot });
+    if (config.dotnet?.disable === true) {
+        return skipped({ notice: "dotnet: disabled by .defined.json" });
+    }
     const dotnetFiles = filterDotNetFiles({ files: trackedFiles });
     if (dotnetFiles.length === 0) {
         return skipped({

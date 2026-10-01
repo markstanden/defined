@@ -191,6 +191,20 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
     `verify` never fails on its absence; an already-present copy is left in
     place with a stderr notice (remove it yourself with `git rm`).
 
+    `Directory.Build.props` is MSBuild plumbing: it is seeded only into repos
+    with tracked `.csproj`/`.sln`/`.slnx` files, so a TypeScript-only repo that
+    deletes it stays rid of it. A repo that has .NET files it does not want
+    gated switches the dotnet tooling off entirely:
+
+    ```jsonc
+    "dotnet": { "disable": true }
+    ```
+
+    That turns the `dotnet` and `dotnet-coverage` steps off and stops the
+    seeding; an already-seeded copy is yours — `git rm` it if unwanted. It
+    cannot be combined with `coverage.dotnet`; the config parse rejects that
+    combination.
+
     The `tofu` step runs `fmt`, `tflint`, `init` and `validate` — `fmt` over the
     tracked `.tf` files, and the rest once per module directory (the top-most
     directories holding tracked `.tf`), so a module under `infrastructure/` is
@@ -237,7 +251,9 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
    with its own rules keeps them and the gate never gated on theirs. The gate
    workflow and the AGENTS block are **managed**: `comply` keeps the workflow
    byte-identical to the image's copy (updating it when the gate changes). A
-   non-GitHub host opts out with `"workflow": { "disable": true }` (see above).
+   non-GitHub host opts out with `"workflow": { "disable": true }` (see above),
+   and `Directory.Build.props` is seeded only when tracked .NET projects exist
+   (or never, with `"dotnet": { "disable": true }`).
 
     **Tighten the floor; don't fork it.** The house config is a floor, not a
     straitjacket — the seeded files are yours once installed (the gate never
