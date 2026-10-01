@@ -186,6 +186,21 @@ test("skips when no .defined.json exists", async () => {
     assert.equal(calls.length, 0);
 });
 
+test("skips when dotnet is disabled by .defined.json", async () => {
+    const dir = await makeTempDir("quality-dc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: { version: TEST_SHA, dotnet: { disable: true } },
+    });
+    const { result, calls } = await runCoverageScenario({
+        step: runDotNetCoverageStep,
+        repoRoot: dir,
+        trackedFiles: ["App.csproj"],
+    });
+    assert.equal(result.status, "skip");
+    assert.equal(calls.length, 0);
+});
+
 test("fails when fix mode command fails", async () => {
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({

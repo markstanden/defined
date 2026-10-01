@@ -494,3 +494,41 @@ test("loadConfig rejects an unknown workflow key or non-boolean disable", async 
         re: /"workflow\.disable" must be a boolean/,
     });
 });
+
+test("loadConfig parses the dotnet disable flag", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ dotnet: { disable: true } }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.dotnet?.disable, true);
+});
+
+test("loadConfig treats an empty dotnet key as absent", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ dotnet: {} }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.dotnet, undefined);
+});
+
+test("loadConfig rejects an unknown dotnet key or non-boolean disable", async () => {
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: { dotnet: { framework: "net10.0" } },
+        re: /unknown dotnet key "framework"/,
+    });
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: { dotnet: { disable: "yes" } },
+        re: /"dotnet\.disable" must be a boolean/,
+    });
+});
+
+test("loadConfig rejects dotnet.disable combined with coverage.dotnet", async () => {
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: {
+            coverage: { dotnet: { command: "dotnet test" } },
+            dotnet: { disable: true },
+        },
+        re: /"dotnet\.disable" cannot be combined with "coverage\.dotnet"/u,
+    });
+});

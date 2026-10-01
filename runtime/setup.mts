@@ -35,8 +35,12 @@ import {
 } from "./lib/managed-files.mts";
 import { gateConfigPath, standardsDir } from "./lib/config-path.mts";
 import { loadConfig, type DefinedConfig } from "./lib/config.mts";
+import { trackedFiles } from "../lib/git.mts";
 import { MANAGED_WORKFLOW_FILE } from "./lib/workflow-files.mts";
+import { filterDotNetFiles } from "./steps/dotnet.mts";
 import { deriveRepoRoot } from "../lib/paths.mts";
+
+const DOTNET_PROPS_FILE = "Directory.Build.props";
 
 // Shared files for every consumer repo, in two tiers. standards/ is the single
 // source of truth (decision #19): each file lives there and is installed from
@@ -48,17 +52,16 @@ import { deriveRepoRoot } from "../lib/paths.mts";
 //   .gitattributes). Installed only when absent — a repo with its own rules
 //   keeps them, and `verify` never gates on them. `.gitattributes` carries the
 //   same LF/whitespace contract as .editorconfig's end_of_line.
+//   Directory.Build.props is .NET plumbing: it is seeded only when tracked
+//   .NET projects exist and `"dotnet": { "disable": true }` is not set, so a
+//   TS-only repo that deletes it stays rid of it.
 // - managed: gate-owned plumbing (.github/workflows/defined--verify.yml).
 //   Byte-identical to the image: `comply` overwrites a differing copy so a
 //   gate update propagates, and `verify` fails on drift. It carries no gate
 //   version, so the pin lives only in .defined.json (decision #36).
 const BOOTSTRAP_FILES: ManagedFile[] = [
     { source: ".editorconfig", target: ".editorconfig", mode: "seeded" },
-    {
-        source: "Directory.Build.props",
-        target: "Directory.Build.props",
-        mode: "seeded",
-    },
+    { source: DOTNET_PROPS_FILE, target: DOTNET_PROPS_FILE, mode: "seeded" },
     { source: ".gitattributes", target: ".gitattributes", mode: "seeded" },
     {
         source: "workflows/defined--verify.yml",
@@ -70,18 +73,31 @@ const BOOTSTRAP_FILES: ManagedFile[] = [
 const CONFIG_FILE = ".defined.json";
 
 /**
- * The bootstrap set for this repo. The managed workflow is gate-owned plumbing
- * for GitHub-hosted repos; `.defined.json` `"workflow": { "disable": true }`
- * drops it from both install and check, so a non-GitHub host is never seeded a
- * workflow it can never run and `verify` never fails on its absence.
+ * The bootstrap set for this repo. Two gates apply on top of the static list:
+ *
+ * - the managed workflow is gate-owned plumbing for GitHub-hosted repos;
+ *   `"workflow": { "disable": true }` drops it from install and check, so a
+ *   non-GitHub host is never seeded a workflow it can never run and `verify`
+ *   never fails on its absence.
+ * - `Directory.Build.props` is MSBuild plumbing: seeded only when tracked .NET
+ *   projects exist and `"dotnet": { "disable": true }` is not set — a TS-only
+ *   repo that deletes it stays rid of it.
  */
-function bootstrapFiles(config: DefinedConfig): ManagedFile[] {
+function bootstrapFiles(
+    config: DefinedConfig,
+    tracked: string[],
+): ManagedFile[] {
+    const wanted = new Set(BOOTSTRAP_FILES.map((file) => file.target));
     if (config.workflow?.disable === true) {
-        return BOOTSTRAP_FILES.filter(
-            (file) => file.target !== MANAGED_WORKFLOW_FILE,
-        );
+        wanted.delete(MANAGED_WORKFLOW_FILE);
     }
-    return BOOTSTRAP_FILES;
+    const dotnetWanted =
+        config.dotnet?.disable !== true &&
+        filterDotNetFiles({ files: tracked }).length > 0;
+    if (!dotnetWanted) {
+        wanted.delete(DOTNET_PROPS_FILE);
+    }
+    return BOOTSTRAP_FILES.filter((file) => wanted.has(file.target));
 }
 
 /**
@@ -156,7 +172,7 @@ export async function runSetup({
     const config = await loadConfig({ repoRoot });
     await installManagedFiles({
         sourceDir: await standardsDir(),
-        files: bootstrapFiles(config),
+        files: bootstrapFiles(config, trackedFiles({ repoRoot })),
         repoRoot,
     });
     if (config.workflow?.disable === true) {
@@ -192,7 +208,7 @@ export async function checkSetup({
     const config = await loadConfig({ repoRoot });
     const files = await checkManagedFiles({
         sourceDir: await standardsDir(),
-        files: bootstrapFiles(config),
+        files: bootstrapFiles(config, trackedFiles({ repoRoot })),
         repoRoot,
     });
     const block = await readMarkedBlock({

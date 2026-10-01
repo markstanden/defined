@@ -257,3 +257,23 @@ test("test failure fails the step", async () => {
         cleanupScratch(scratch);
     }
 });
+
+test("runDotNetStep skips when dotnet is disabled by .defined.json", async () => {
+    const repoRoot = await makeTempDir("quality-dotnet-off-");
+    await writeFile(
+        join(repoRoot, ".defined.json"),
+        `${JSON.stringify({ dotnet: { disable: true } })}\n`,
+    );
+    const { runner, calls } = fakeRunner({});
+    const result = await runDotNetStep({
+        ctx: { ...baseCtx, repoRoot },
+        trackedFiles: ["MyProj.csproj"],
+        runner,
+    });
+    assert.equal(result.status, "skip");
+    assert.equal(
+        calls.length,
+        0,
+        "the switch wins even with .NET files tracked",
+    );
+});

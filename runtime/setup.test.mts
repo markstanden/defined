@@ -2,6 +2,7 @@
 // Run: node --test setup.test.mts
 
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,13 +13,16 @@ import { checkSetup, runSetup } from "./setup.mts";
 
 async function makeTempRepo(): Promise<string> {
     const root = await mkdtemp(join(tmpdir(), "quality-setup-"));
-    await mkdir(join(root, ".git"));
+    // A real init, not a bare .git dir: runSetup consults `git ls-files` for
+    // detection-driven seeding, and git needs a valid repository to answer.
+    spawnSync("git", ["init", "-q", root]);
     return root;
 }
 
 test("runSetup installs managed files and seeds the AGENTS.md managed block", async () => {
     const repo = await makeTempRepo();
     try {
+        await writeFile(join(repo, "App.csproj"), "<Project/>");
         await runSetup({ startDir: repo });
         assert.ok(
             (await readFile(join(repo, ".editorconfig"), "utf8")).includes(
@@ -269,6 +273,53 @@ test("runSetup leaves a present workflow when disabled and warns", async () => {
         );
         const check = await checkSetup({ startDir: repo });
         assert.deepEqual(check.files, [], "drift is not gated when opted out");
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("runSetup skips Directory.Build.props when no .NET files are tracked", async () => {
+    const repo = await makeTempRepo();
+    try {
+        await runSetup({ startDir: repo });
+        await assert.rejects(
+            () => readFile(join(repo, "Directory.Build.props"), "utf8"),
+            { code: "ENOENT" },
+            "MSBuild defaults are not seeded into a repo without .NET projects",
+        );
+        // Seeded defaults that are not .NET-specific still install.
+        assert.ok(
+            (await readFile(join(repo, ".editorconfig"), "utf8")).includes(
+                "root = true",
+            ),
+        );
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("runSetup skips Directory.Build.props when dotnet is disabled", async () => {
+    const repo = await makeTempRepo();
+    try {
+        await writeFile(join(repo, "App.csproj"), "<Project/>");
+        await writeFile(
+            join(repo, ".defined.json"),
+            `${JSON.stringify({
+                version: "deadbeef",
+                dotnet: { disable: true },
+            })}\n`,
+        );
+        await runSetup({ startDir: repo });
+        await assert.rejects(
+            () => readFile(join(repo, "Directory.Build.props"), "utf8"),
+            { code: "ENOENT" },
+            "the switch wins even with a .NET project tracked",
+        );
+        assert.ok(
+            (await readFile(join(repo, ".gitattributes"), "utf8")).includes(
+                "eol=lf",
+            ),
+        );
     } finally {
         await rm(repo, { recursive: true, force: true });
     }
