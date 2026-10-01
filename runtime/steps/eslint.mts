@@ -7,7 +7,9 @@
 //           repo has no config of its own; its plugins resolve in-image. A
 //           repo-owned eslint.config.* runs instead, and the house default is
 //           written beside it as eslint.config.defined.mjs (example sidecar).
-//           `.defined.json` "eslint": { "disable": true } switches the step off.
+//           `.defined.json` "eslint": { "disable": true } switches the step off;
+//           "eslint": { "complexityMax": N | false } tunes the house config's
+//           cyclomatic-complexity ceiling (forwarded as an env var).
 // Fix:      --fix first, then always re-run without --fix and report on the
 //           re-run — a fix that leaves findings can never read as success.
 //           --fix rewrites repo code (that is what `comply` is for); the
@@ -36,7 +38,7 @@ import {
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
 import { run, type CommandResult } from "../../lib/proc.mts";
 import { gateConfigPath } from "../lib/config-path.mts";
-import { loadConfig } from "../lib/config.mts";
+import { loadConfig, type DefinedConfig } from "../lib/config.mts";
 import {
     ESLINT_EXAMPLE_NAME,
     hasConsumerEslintConfig,
@@ -143,6 +145,7 @@ function invokeEslint({
     fix,
     workingRoot,
     runner,
+    env,
 }: {
     kind: ConfigKind;
     configPath: string;
@@ -150,12 +153,15 @@ function invokeEslint({
     fix: boolean;
     workingRoot: string;
     runner: Runner;
+    /** House-config override channel (complexityMax); undefined inherits. */
+    env?: NodeJS.ProcessEnv;
 }): CommandResult {
     if (kind === "house") {
         return runner({
             cmd: "eslint",
             args: houseArgs({ configPath, files, fix }),
             cwd: workingRoot,
+            env,
         });
     }
     return runWithLocalBin({
@@ -198,6 +204,18 @@ function toFinding({
     };
 }
 
+/** Error-severity findings from one ESLint file report. */
+function fileFindings({ raw }: { raw: EslintFileResult }): Finding[] {
+    const file = raw?.filePath;
+    const messages = raw?.messages;
+    if (typeof file !== "string" || !Array.isArray(messages)) {
+        return [];
+    }
+    return (messages as EslintMessage[])
+        .filter((message) => message?.severity === 2)
+        .map((message) => toFinding({ file, message }));
+}
+
 /** Error-severity messages from ESLint's JSON output; [] when unparseable. */
 function parseFindings({ stdout }: { stdout: string }): Finding[] {
     let parsed: unknown;
@@ -209,20 +227,9 @@ function parseFindings({ stdout }: { stdout: string }): Finding[] {
     if (!Array.isArray(parsed)) {
         return [];
     }
-    const findings: Finding[] = [];
-    for (const raw of parsed as EslintFileResult[]) {
-        const file = raw?.filePath;
-        const messages = raw?.messages;
-        if (typeof file !== "string" || !Array.isArray(messages)) {
-            continue;
-        }
-        for (const message of messages as EslintMessage[]) {
-            if (message?.severity === 2) {
-                findings.push(toFinding({ file, message }));
-            }
-        }
-    }
-    return findings;
+    return (parsed as EslintFileResult[]).flatMap((raw) =>
+        fileFindings({ raw }),
+    );
 }
 
 /** First non-empty line of a result's output, for a one-line notice. */
@@ -351,6 +358,50 @@ async function removeExample({
 }
 
 /**
+ * Fix-mode-only sidecar management: with a repo config, write/refresh the
+ * house example beside it; without one, remove a stale example. A read-only
+ * verify never writes.
+ */
+async function manageExample({
+    mode,
+    kind,
+    workingRoot,
+    notifyFn,
+}: {
+    mode: EslintRunContext["mode"];
+    kind: ConfigKind;
+    workingRoot: string;
+    notifyFn: (line: string) => void;
+}): Promise<void> {
+    if (mode !== "fix") {
+        return;
+    }
+    if (kind === "repo") {
+        await writeExample({ workingRoot, notify: notifyFn });
+        return;
+    }
+    await removeExample({ workingRoot });
+}
+
+/**
+ * The house config's complexity ceiling as an env overlay: `.defined.json`
+ * "eslint": { "complexityMax": N | false } forwarded as
+ * DEFINED_ESLINT_COMPLEXITY_MAX (a baked config cannot read the repo).
+ * Undefined when unset — the baked config keeps its own default; a repo-owned
+ * config governs itself and must not see the variable.
+ */
+function complexityEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
+    const max = config.eslint?.complexityMax;
+    if (max === undefined) {
+        return undefined;
+    }
+    return {
+        ...process.env,
+        DEFINED_ESLINT_COMPLEXITY_MAX: max === false ? "off" : String(max),
+    };
+}
+
+/**
  * Lint the repo's git-scoped JS/TS. Skips when the step is disabled or nothing
  * is lintable; otherwise runs the repo's config when present, else the baked
  * house config, and reports on a final no-fix pass.
@@ -386,16 +437,10 @@ export async function runEslintStep({
         files: trackedFiles,
     });
 
-    // Sidecars are advisory and a read-only verify never writes.
-    if (ctx.mode === "fix") {
-        if (kind === "repo") {
-            await writeExample({ workingRoot, notify: notifyFn });
-        } else {
-            await removeExample({ workingRoot });
-        }
-    }
+    await manageExample({ mode: ctx.mode, kind, workingRoot, notifyFn });
 
     const configPath = await gateConfigPath({ name: "eslint.config.mjs" });
+    const env = kind === "house" ? complexityEnv(config) : undefined;
     if (ctx.mode === "fix") {
         invokeEslint({
             kind,
@@ -404,6 +449,7 @@ export async function runEslintStep({
             fix: true,
             workingRoot,
             runner,
+            env,
         });
     }
     const check = invokeEslint({
@@ -413,6 +459,7 @@ export async function runEslintStep({
         fix: false,
         workingRoot,
         runner,
+        env,
     });
     if (check.status === 0) {
         return passed({

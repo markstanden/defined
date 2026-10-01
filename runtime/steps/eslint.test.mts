@@ -102,9 +102,64 @@ test("house config runs the baked config from the scratch root", async () => {
         // No-fix lints the scratch copy, never the read-only checkout.
         assert.equal(call.cwd, scratch.dir);
         assert.notEqual(call.cwd, root);
+        // No override declared: the house config keeps its own default.
+        assert.equal(call.env?.DEFINED_ESLINT_COMPLEXITY_MAX, undefined);
     } finally {
         cleanupScratch(scratch);
     }
+});
+
+test("a complexityMax override reaches the house config as an env var", async () => {
+    const root = await makeTempDir("quality-eslint-cx-");
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "complexityMax": 12 } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root },
+        trackedFiles: [".defined.json", "src/a.ts"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, "12");
+});
+
+test("complexityMax false drops the rule via the off sentinel", async () => {
+    const root = await makeTempDir("quality-eslint-cx-off-");
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "complexityMax": false } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root },
+        trackedFiles: [".defined.json", "src/a.ts"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, "off");
+});
+
+test("a repo config never receives the complexity override", async () => {
+    const root = await makeTempDir("quality-eslint-cx-repo-");
+    await writeTree(root, {
+        "eslint.config.mjs": "export default [];\n",
+        ".defined.json": '{ "eslint": { "complexityMax": 7 } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root },
+        trackedFiles: ["eslint.config.mjs", ".defined.json", "src/a.ts"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.equal(
+        calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX,
+        undefined,
+        "a repo-owned config governs itself",
+    );
 });
 
 test("house config fix mode --fixes then re-checks in the repo, writing nothing", async () => {

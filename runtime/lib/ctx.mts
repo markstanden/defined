@@ -21,6 +21,21 @@ export interface RunContext {
     repoRoot: string;
 }
 
+/** Retired public surface: the one-line reason it went away. */
+const RETIRED: Record<string, string> = {
+    setup: "'setup' is no longer public — run 'comply' to bootstrap",
+    "--fix": "'--fix' is gone — run 'comply' to repair",
+    "--no-fix": "'--no-fix' is gone — run 'verify' to check",
+    "--silent": "'--silent' is gone — run 'verify' to check",
+};
+
+function parseHelp({ argv }: { argv: string[] }): ParsedCommand {
+    if (argv.length > 1) {
+        throw new Error(`unexpected argument: ${argv[1]}`);
+    }
+    return { verb: "verify", help: true };
+}
+
 /**
  * Parse the positional verb. Returns help for `-h`/`--help`; throws a concise
  * usage error for anything else so typos never silently change behaviour.
@@ -30,28 +45,17 @@ export function parseCommand({ argv }: { argv: string[] }): ParsedCommand {
         throw new Error("missing command — expected 'comply' or 'verify'");
     }
     if (argv[0] === "-h" || argv[0] === "--help") {
-        if (argv.length > 1) {
-            throw new Error(`unexpected argument: ${argv[1]}`);
-        }
-        return { verb: "verify", help: true };
+        return parseHelp({ argv });
     }
     if (argv.length > 1) {
         throw new Error(`unexpected argument: ${argv[1]}`);
     }
-    const verb = argv[0];
+    const verb = argv[0] as string;
     if (verb === "comply" || verb === "verify") {
         return { verb, help: false };
     }
-    if (verb === "setup") {
-        throw new Error(
-            "'setup' is no longer public — run 'comply' to bootstrap",
-        );
-    }
-    if (verb === "--fix") {
-        throw new Error("'--fix' is gone — run 'comply' to repair");
-    }
-    if (verb === "--no-fix" || verb === "--silent") {
-        throw new Error(`'${verb}' is gone — run 'verify' to check`);
+    if (RETIRED[verb] !== undefined) {
+        throw new Error(RETIRED[verb]!);
     }
     throw new Error(
         `unknown command '${verb}' — expected 'comply' or 'verify'`,

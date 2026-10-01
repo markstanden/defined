@@ -30,7 +30,7 @@ import {
 import { runScopedCommand } from "../lib/coverage.mts";
 import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
-import { loadConfig } from "../lib/config.mts";
+import { loadConfig, type NamingConfig } from "../lib/config.mts";
 import { filterWorkflowFiles } from "../lib/workflow-files.mts";
 
 export interface NamingRunContext {
@@ -71,6 +71,68 @@ export function workflowNameViolations({
 }
 
 /**
+ * Run the consumer's rules command over the git scope — its optional fix
+ * first in fix mode — appending a failure line per broken phase.
+ */
+function runConsumerRules({
+    ctx,
+    naming,
+    trackedFiles,
+    runner,
+    failures,
+}: {
+    ctx: NamingRunContext;
+    naming: NamingConfig;
+    trackedFiles: string[];
+    runner: Runner;
+    failures: string[];
+}): void {
+    if (ctx.mode === "fix" && naming.fix !== undefined) {
+        const fix = runScopedCommand({
+            mode: ctx.mode,
+            repoRoot: ctx.repoRoot,
+            scratch: ctx.scratch,
+            trackedFiles,
+            command: naming.fix,
+            runner,
+        });
+        if (fix.failure !== null) {
+            failures.push(`autofix failed: ${fix.failure}`);
+        }
+    }
+    const check = runScopedCommand({
+        mode: ctx.mode,
+        repoRoot: ctx.repoRoot,
+        scratch: ctx.scratch,
+        trackedFiles,
+        command: naming.command,
+        runner,
+    });
+    if (check.failure !== null) {
+        failures.push(`rules failed: ${check.failure}`);
+    }
+}
+
+/** The step verdict: every failure, or the clean-pass notice. */
+function namingVerdict({
+    checked,
+    hasRules,
+    failures,
+}: {
+    checked: number;
+    hasRules: boolean;
+    failures: string[];
+}): StepResult {
+    if (failures.length > 0) {
+        return failed({ notice: `naming: ${failures.join("; ")}` });
+    }
+    const rules = hasRules ? "; consumer rules clean" : "";
+    return passed({
+        notice: `naming: ${checked} workflow name(s) valid${rules}`,
+    });
+}
+
+/**
  * Run the naming step: enforce the workflow-filename grammar over tracked
  * workflow files and, when declared, the consumer's rules command. Returns skip
  * when there is nothing to check; fail naming every violation.
@@ -101,45 +163,22 @@ export async function runNamingStep({
         });
     }
 
-    const failures: string[] = [];
-    for (const file of violations) {
-        failures.push(
+    const failures = violations.map(
+        (file) =>
             `${file}: filename must match <namespace>--<verb>[--<target>].yml`,
-        );
-    }
-
+    );
     if (naming?.command !== undefined) {
-        if (ctx.mode === "fix" && naming.fix !== undefined) {
-            const fix = runScopedCommand({
-                mode: ctx.mode,
-                repoRoot: ctx.repoRoot,
-                scratch: ctx.scratch,
-                trackedFiles,
-                command: naming.fix,
-                runner,
-            });
-            if (fix.failure !== null) {
-                failures.push(`autofix failed: ${fix.failure}`);
-            }
-        }
-        const check = runScopedCommand({
-            mode: ctx.mode,
-            repoRoot: ctx.repoRoot,
-            scratch: ctx.scratch,
+        runConsumerRules({
+            ctx,
+            naming,
             trackedFiles,
-            command: naming.command,
             runner,
+            failures,
         });
-        if (check.failure !== null) {
-            failures.push(`rules failed: ${check.failure}`);
-        }
     }
-
-    if (failures.length > 0) {
-        return failed({ notice: `naming: ${failures.join("; ")}` });
-    }
-    const rules = naming?.command !== undefined ? "; consumer rules clean" : "";
-    return passed({
-        notice: `naming: ${checked} workflow name(s) valid${rules}`,
+    return namingVerdict({
+        checked,
+        hasRules: naming?.command !== undefined,
+        failures,
     });
 }

@@ -143,6 +143,24 @@ export async function runCoverageScenario<T>({
     }
 }
 
+/** First declared outcome for the given keys, or a clean pass. */
+function outcomeFor(
+    outcomes: Record<string, RunResult>,
+    keys: string[],
+): RunResult {
+    for (const key of keys) {
+        const o = outcomes[key];
+        if (o !== undefined) {
+            return o;
+        }
+    }
+    return { status: 0 };
+}
+
+function toResult({ status, stdout, stderr }: RunResult): CommandResult {
+    return { status, stdout: stdout ?? "", stderr: stderr ?? "" };
+}
+
 /**
  * Scriptable fake runner: maps command name (or "cmd subcommand") to canned
  * results and records every call as [cmd, ...args] (plus trailing cwd when
@@ -163,23 +181,9 @@ export function fakeRunner(
         args: string[];
         cwd?: string;
     }) => {
-        if (withCwd) {
-            calls.push([cmd, ...args, cwd ?? ""]);
-            const key = `${cmd} ${args[0] ?? ""}`.trim();
-            const o = outcomes[key] ?? outcomes[cmd] ?? { status: 0 };
-            return {
-                status: o.status,
-                stdout: o.stdout ?? "",
-                stderr: o.stderr ?? "",
-            } satisfies CommandResult;
-        }
-        calls.push([cmd, ...args]);
-        const o = outcomes[cmd] ?? { status: 0 };
-        return {
-            status: o.status,
-            stdout: o.stdout ?? "",
-            stderr: o.stderr ?? "",
-        } satisfies CommandResult;
+        calls.push(withCwd ? [cmd, ...args, cwd ?? ""] : [cmd, ...args]);
+        const key = withCwd ? `${cmd} ${args[0] ?? ""}`.trim() : cmd;
+        return toResult(outcomeFor(outcomes, withCwd ? [key, cmd] : [cmd]));
     }) as typeof import("../lib/proc.mts").run;
     return { runner, calls };
 }

@@ -155,13 +155,24 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
     `command` must exit non-zero on violations; `fix` runs first in `comply`
     only. Absent `naming` runs the workflow grammar alone.
 
-    The `eslint` key only carries a switch; the gate lints with its house config
-    by default (see the batteries/override table above). Turn it off when a repo
-    deliberately owns its own lint entirely:
+    The `eslint` key carries the house-step switches. Turn the step off when a
+    repo deliberately owns its own lint entirely:
 
     ```jsonc
     "eslint": { "disable": true }
     ```
+
+    The house config also carries a cyclomatic-complexity floor — every
+    function, max 10 by default (ESLint core `complexity`, tighter than Sonar's
+    cognitive 15 so a branchy function is named with its score at review
+    time). Test files (`*.test.*`, `*.spec.*`) are exempt. Raise it or drop it
+    per repo; a repo-owned `eslint.config.*` governs itself and is unaffected:
+
+    ```jsonc
+    "eslint": { "complexityMax": 12 }
+    ```
+
+    `false` drops the rule entirely.
 
     An `eslint` entry in `node.checks` is only needed to run your _own_
     config/toolchain at a version or with plugins the gate does not carry; a

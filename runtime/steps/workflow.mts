@@ -146,42 +146,54 @@ export function gitleaksIgnoreArgs({
 }
 
 /**
- * Run actionlint, zizmor on workflow files, and gitleaks on the whole repo.
- * In fix mode, zizmor's safe autofixes are applied first, then the checks
- * below judge the result. Returns pass when all clean; fail naming the
- * offending tool.
- * If no workflow files tracked, skips actionlint/zizmor but still runs gitleaks.
+ * Repair pass: apply zizmor's *safe* autofixes before the checks run. The
+ * output and exit status are discarded — the checks below are the verdict, so
+ * a fix that leaves breakage can never read as success. Unsafe fixes are
+ * never applied (they encode design decisions). The gate-managed workflow is
+ * excluded: the gate owns it and repairs it upstream.
  */
-export async function runWorkflowStep({
+function runZizmorFixes({
     ctx,
     trackedFiles,
-    runner = run,
-    existsSyncFn = existsSync,
+    runner,
 }: {
     ctx: WorkflowRunContext;
     trackedFiles: string[];
-    runner?: Runner;
-    existsSyncFn?: typeof existsSync;
-}): Promise<StepResult> {
-    const auditFiles = filterWorkflowAuditFiles({ files: trackedFiles });
-    const actionlintFiles = filterWorkflowFiles({ files: trackedFiles });
-
-    // Repair pass: apply zizmor's *safe* autofixes before the checks run. The
-    // output and exit status are discarded — the checks below are the verdict,
-    // so a fix that leaves breakage can never read as success. Unsafe fixes
-    // are never applied (they encode design decisions). The gate-managed
-    // workflow is excluded: the gate owns it and repairs it upstream.
-    if (ctx.mode === "fix") {
-        const fixableFiles = filterFixableFiles({ files: trackedFiles });
-        if (fixableFiles.length > 0) {
-            runner({
-                cmd: "zizmor",
-                args: ["--fix", "--no-progress", ...fixableFiles],
-                cwd: ctx.repoRoot,
-            });
-        }
+    runner: Runner;
+}): void {
+    if (ctx.mode !== "fix") {
+        return;
     }
+    const fixableFiles = filterFixableFiles({ files: trackedFiles });
+    if (fixableFiles.length > 0) {
+        runner({
+            cmd: "zizmor",
+            args: ["--fix", "--no-progress", ...fixableFiles],
+            cwd: ctx.repoRoot,
+        });
+    }
+}
 
+/**
+ * actionlint over the workflow definitions, zizmor over the audit set.
+ * actionlint parses workflow *definitions* only — handed dependabot.yml it
+ * false-fails — while zizmor audits the wider set (issue #42). No
+ * --min-severity: zizmor's own default (informational) applies, so nothing is
+ * silently filtered out. Findings go to stdout and tool-level errors to
+ * stderr; preferring stderr would report "failed" with no findings at all.
+ * Returns the failed result, or null when both are clean (or have no files).
+ */
+function runWorkflowTools({
+    ctx,
+    actionlintFiles,
+    auditFiles,
+    runner,
+}: {
+    ctx: WorkflowRunContext;
+    actionlintFiles: string[];
+    auditFiles: string[];
+    runner: Runner;
+}): StepResult | null {
     if (actionlintFiles.length > 0) {
         const actionlint = runner({
             cmd: "actionlint",
@@ -189,43 +201,44 @@ export async function runWorkflowStep({
             cwd: ctx.repoRoot,
         });
         if (actionlint.status !== 0) {
-            // Findings go to stdout; stderr is a fallback for a tool-level
-            // error (bad flag, unreadable file). Preferring stderr would let
-            // any chatter mask the findings.
             return failed({
                 notice: `workflow: actionlint failed: ${actionlint.stdout.trim() || actionlint.stderr.trim()}`,
             });
         }
     }
-
     if (auditFiles.length > 0) {
         const zizmor = runner({
             cmd: "zizmor",
-            // No --min-severity: zizmor's own default (informational) applies,
-            // so nothing is silently filtered out. Audit set is workflow
-            // definitions plus dependabot.yml (issue #42).
             args: ["--no-progress", ...auditFiles],
             cwd: ctx.repoRoot,
         });
         if (zizmor.status !== 0) {
-            // zizmor writes findings to stdout and its INFO/WARN progress
-            // chatter to stderr. Preferring stderr reported "zizmor failed"
-            // with no findings whatsoever — the whole point of the step. stdout
-            // first, stderr only when there is no finding output (a tool-level
-            // error).
             return failed({
                 notice: `workflow: zizmor failed: ${zizmor.stdout.trim() || zizmor.stderr.trim()}`,
             });
         }
     }
+    return null;
+}
 
-    // gitleaks always scans the repo's git scope. gitleaks `dir` walks the
-    // filesystem and ignores .gitignore (no flag as of 8.30.x), so the gate
-    // generates a config that keeps default rules and allowlists exactly the
-    // repo's git-ignored paths — a local gitignored .env with a real secret
-    // must not fail the gate while CI (no .env) stays green. The consumer's
-    // `.gitleaksignore` fingerprint baseline is honoured via an explicit
-    // --gitleaks-ignore-path pinned to the repo root (issue #24).
+/**
+ * gitleaks over the repo's git scope. gitleaks `dir` walks the filesystem and
+ * ignores .gitignore (no flag as of 8.30.x), so the gate generates a config
+ * that keeps default rules and allowlists exactly the repo's git-ignored
+ * paths — a local gitignored .env with a real secret must not fail the gate
+ * while CI (no .env) stays green. The consumer's `.gitleaksignore`
+ * fingerprint baseline is honoured via an explicit --gitleaks-ignore-path
+ * pinned to the repo root (issue #24). Returns the failed result, or null.
+ */
+async function runGitleaks({
+    ctx,
+    runner,
+    existsSyncFn,
+}: {
+    ctx: WorkflowRunContext;
+    runner: Runner;
+    existsSyncFn: typeof existsSync;
+}): Promise<StepResult | null> {
     const ignoredStatus = runner({
         cmd: "git",
         args: ["status", "--porcelain", "--ignored"],
@@ -258,7 +271,17 @@ export async function runWorkflowStep({
             notice: `workflow: gitleaks found secrets: ${gitleaks.stdout.trim() || gitleaks.stderr.trim()}`,
         });
     }
+    return null;
+}
 
+/** The clean-pass notice, worded by what actually ran. */
+function workflowVerdict({
+    actionlintFiles,
+    auditFiles,
+}: {
+    actionlintFiles: string[];
+    auditFiles: string[];
+}): StepResult {
     if (actionlintFiles.length > 0) {
         return passed({
             notice: `workflow: actionlint/zizmor/gitleaks clean (${auditFiles.length} file(s))`,
@@ -271,4 +294,44 @@ export async function runWorkflowStep({
         });
     }
     return passed({ notice: "workflow: no workflow files; gitleaks clean" });
+}
+
+/**
+ * Run actionlint, zizmor on workflow files, and gitleaks on the whole repo.
+ * In fix mode, zizmor's safe autofixes are applied first, then the checks
+ * below judge the result. Returns pass when all clean; fail naming the
+ * offending tool. If no workflow files tracked, skips actionlint/zizmor but
+ * still runs gitleaks.
+ */
+export async function runWorkflowStep({
+    ctx,
+    trackedFiles,
+    runner = run,
+    existsSyncFn = existsSync,
+}: {
+    ctx: WorkflowRunContext;
+    trackedFiles: string[];
+    runner?: Runner;
+    existsSyncFn?: typeof existsSync;
+}): Promise<StepResult> {
+    const auditFiles = filterWorkflowAuditFiles({ files: trackedFiles });
+    const actionlintFiles = filterWorkflowFiles({ files: trackedFiles });
+
+    runZizmorFixes({ ctx, trackedFiles, runner });
+
+    const toolFailure = runWorkflowTools({
+        ctx,
+        actionlintFiles,
+        auditFiles,
+        runner,
+    });
+    if (toolFailure !== null) {
+        return toolFailure;
+    }
+
+    const leakFailure = await runGitleaks({ ctx, runner, existsSyncFn });
+    if (leakFailure !== null) {
+        return leakFailure;
+    }
+    return workflowVerdict({ actionlintFiles, auditFiles });
 }

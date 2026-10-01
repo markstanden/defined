@@ -449,6 +449,25 @@ test("loadConfig rejects an unknown eslint key or non-boolean disable", async ()
     });
 });
 
+test("loadConfig parses the eslint complexityMax override", async () => {
+    for (const complexityMax of [10, 1, false] as const) {
+        const dir = await makeTempDir("quality-config-");
+        await writeConfig(dir, JSON.stringify({ eslint: { complexityMax } }));
+        const config = await loadConfig({ repoRoot: dir });
+        assert.equal(config.eslint?.complexityMax, complexityMax);
+    }
+});
+
+test("loadConfig rejects a malformed eslint complexityMax", async () => {
+    for (const complexityMax of [0, -3, 2.5, "12", true]) {
+        await rejectsLoad({
+            dir: await makeTempDir("quality-config-"),
+            config: { eslint: { complexityMax } },
+            re: /"eslint\.complexityMax" must be a positive integer or false/u,
+        });
+    }
+});
+
 test("loadConfig parses the workflow disable flag", async () => {
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ workflow: { disable: true } }));

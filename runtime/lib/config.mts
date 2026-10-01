@@ -88,6 +88,13 @@ export interface TofuConfig {
 export interface EslintConfig {
     /** True switches the house ESLint step off for this repo. */
     disable?: boolean;
+    /**
+     * Cyclomatic-complexity ceiling for the house config's `complexity` rule:
+     * a positive integer per-function max, or `false` to drop the rule.
+     * Absent = the house default (10). Only the house config honours it — a
+     * repo-owned config governs itself.
+     */
+    complexityMax?: number | false;
 }
 
 /** Consumer managed-workflow configuration (`.defined.json` `workflow` key). */
@@ -138,6 +145,26 @@ function validateVersion(version: unknown): string {
     return version;
 }
 
+const MINIMUM_METRICS = ["line", "branch", "function"] as const;
+
+/** One metric entry: known name, numeric value in 0–100. */
+function validateMinimumEntry(
+    key: string,
+    metric: string,
+    value: unknown,
+): void {
+    if (!(MINIMUM_METRICS as readonly string[]).includes(metric)) {
+        throw new Error(
+            `.defined.json: unknown minimum metric "${metric}" in "coverage.${key}.minimums"`,
+        );
+    }
+    if (typeof value !== "number" || value < 0 || value > 100) {
+        throw new Error(
+            `.defined.json: "coverage.${key}.minimums.${metric}" must be a number 0–100`,
+        );
+    }
+}
+
 function validateMinimums(
     key: string,
     raw: unknown,
@@ -145,42 +172,19 @@ function validateMinimums(
     if (raw === undefined || raw === null) {
         return undefined;
     }
-    if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new TypeError(
-            `.defined.json: "coverage.${key}.minimums" must be an object`,
-        );
-    }
+    const entry = expectObject(`coverage.${key}.minimums`, raw);
     const result: CoverageMinimums = {};
-    for (const [metric, value] of Object.entries(
-        raw as Record<string, unknown>,
-    )) {
-        if (metric !== "line" && metric !== "branch" && metric !== "function") {
-            throw new Error(
-                `.defined.json: unknown minimum metric "${metric}" in "coverage.${key}.minimums"`,
-            );
-        }
-        if (typeof value !== "number" || value < 0 || value > 100) {
-            throw new Error(
-                `.defined.json: "coverage.${key}.minimums.${metric}" must be a number 0–100`,
-            );
-        }
-        result[metric as keyof CoverageMinimums] = value;
+    for (const [metric, value] of Object.entries(entry)) {
+        validateMinimumEntry(key, metric, value);
+        result[metric as keyof CoverageMinimums] = value as number;
     }
     return result;
 }
 
 function validateCoverageEntry(key: string, raw: unknown): CoverageConfig {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        throw new Error(`.defined.json: "coverage.${key}" must be an object`);
-    }
-    const entry = raw as Record<string, unknown>;
-    if (typeof entry.command !== "string" || entry.command.trim() === "") {
-        throw new Error(
-            `.defined.json: "coverage.${key}.command" must be a non-empty string`,
-        );
-    }
+    const entry = expectObject(`coverage.${key}`, raw);
     return {
-        command: entry.command,
+        command: expectNonEmptyString(`coverage.${key}.command`, entry.command),
         minimums: validateMinimums(key, entry.minimums),
     };
 }
@@ -189,10 +193,7 @@ function validateCoverage(raw: unknown): DefinedConfig["coverage"] {
     if (raw === undefined || raw === null) {
         return undefined;
     }
-    if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new TypeError(`.defined.json: "coverage" must be an object`);
-    }
-    const coverage = raw as Record<string, unknown>;
+    const coverage = expectObject("coverage", raw);
     const result: NonNullable<DefinedConfig["coverage"]> = {};
     for (const [key, value] of Object.entries(coverage)) {
         if (key !== "node" && key !== "dotnet") {
@@ -222,6 +223,30 @@ function rejectUnknownKeys(
     }
 }
 
+/** Throw when raw is not a plain JSON object; return it narrowed. */
+function expectObject(where: string, raw: unknown): Record<string, unknown> {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        throw new TypeError(`.defined.json: "${where}" must be an object`);
+    }
+    return raw as Record<string, unknown>;
+}
+
+/** Throw when value is not a non-empty string; return it narrowed. */
+function expectNonEmptyString(where: string, value: unknown): string {
+    if (typeof value !== "string" || value.trim() === "") {
+        throw new Error(`.defined.json: "${where}" must be a non-empty string`);
+    }
+    return value;
+}
+
+/** Throw when value is not a non-empty array; return it narrowed. */
+function expectNonEmptyArray(where: string, value: unknown): unknown[] {
+    if (!Array.isArray(value) || value.length === 0) {
+        throw new Error(`.defined.json: "${where}" must be a non-empty array`);
+    }
+    return value;
+}
+
 /** Normalise a declared package dir: strip a leading "./" and trailing slashes. */
 function normaliseDir(dir: string): string {
     let result = dir.startsWith("./") ? dir.slice(2) : dir;
@@ -232,81 +257,67 @@ function normaliseDir(dir: string): string {
 }
 
 function validateNodeCheck(where: string, raw: unknown): NodeCheck {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        throw new Error(`.defined.json: "${where}" must be an object`);
-    }
-    const entry = raw as Record<string, unknown>;
+    const entry = expectObject(where, raw);
     rejectUnknownKeys(entry, NODE_CHECK_KEYS, where);
-    if (typeof entry.name !== "string" || entry.name.trim() === "") {
-        throw new Error(
-            `.defined.json: "${where}.name" must be a non-empty string`,
-        );
-    }
-    if (typeof entry.command !== "string" || entry.command.trim() === "") {
-        throw new Error(
-            `.defined.json: "${where}.command" must be a non-empty string`,
-        );
-    }
-    if (
-        entry.fix !== undefined &&
-        (typeof entry.fix !== "string" || entry.fix.trim() === "")
-    ) {
-        throw new Error(
-            `.defined.json: "${where}.fix" must be a non-empty string`,
-        );
-    }
     return {
-        name: entry.name,
-        command: entry.command,
-        fix: entry.fix as string | undefined,
+        name: expectNonEmptyString(`${where}.name`, entry.name),
+        command: expectNonEmptyString(`${where}.command`, entry.command),
+        fix:
+            entry.fix === undefined
+                ? undefined
+                : expectNonEmptyString(`${where}.fix`, entry.fix),
     };
 }
 
-function validateNodePackage(raw: unknown, where: string): NodePackageConfig {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-        throw new Error(`.defined.json: "${where}" must be an object`);
+/** A declared package dir: a string, normalised, `.` meaning the repo root. */
+function validateNodePackageDir(where: string, value: unknown): string {
+    if (typeof value !== "string") {
+        throw new TypeError(`.defined.json: "${where}.dir" must be a string`);
     }
-    const entry = raw as Record<string, unknown>;
-    rejectUnknownKeys(entry, NODE_PACKAGE_KEYS, where);
+    const normalised = normaliseDir(value);
+    return normalised === "." ? "" : normalised;
+}
 
-    let dir: string | undefined;
-    if (entry.dir !== undefined) {
-        if (typeof entry.dir !== "string") {
-            throw new TypeError(
-                `.defined.json: "${where}.dir" must be a string`,
-            );
-        }
-        const normalised = normaliseDir(entry.dir);
-        dir = normalised === "." ? "" : normalised;
+/** A dependency-restore command: a non-empty string, or `false` to skip. */
+function validateNodePackageInstall(
+    where: string,
+    value: unknown,
+): string | false {
+    if (value === false) {
+        return false;
     }
-
-    let install: string | false | undefined;
-    if (entry.install !== undefined) {
-        if (entry.install === false) {
-            install = false;
-        } else if (
-            typeof entry.install === "string" &&
-            entry.install.trim() !== ""
-        ) {
-            install = entry.install;
-        } else {
-            throw new Error(
-                `.defined.json: "${where}.install" must be a non-empty string or false`,
-            );
-        }
-    }
-
-    if (!Array.isArray(entry.checks) || entry.checks.length === 0) {
+    if (typeof value !== "string" || value.trim() === "") {
         throw new Error(
-            `.defined.json: "${where}.checks" must be a non-empty array`,
+            `.defined.json: "${where}.install" must be a non-empty string or false`,
         );
     }
+    return value;
+}
 
+function validateNodePackage(raw: unknown, where: string): NodePackageConfig {
+    const entry = expectObject(where, raw);
+    rejectUnknownKeys(entry, NODE_PACKAGE_KEYS, where);
     return {
-        dir,
-        install,
-        checks: entry.checks.map((check, index) =>
-            validateNodeCheck(`${where}.checks[${index}]`, check),
+        dir:
+            entry.dir === undefined
+                ? undefined
+                : validateNodePackageDir(where, entry.dir),
+        install:
+            entry.install === undefined
+                ? undefined
+                : validateNodePackageInstall(where, entry.install),
+        checks: expectNonEmptyArray(`${where}.checks`, entry.checks).map(
+            (check, index) =>
+                validateNodeCheck(`${where}.checks[${index}]`, check),
+        ),
+    };
+}
+
+/** The packages form: a non-empty array of package objects. */
+function validateNodePackages(raw: unknown): NodeChecksConfig {
+    return {
+        packages: expectNonEmptyArray("node.packages", raw).map((pkg, index) =>
+            validateNodePackage(pkg, `node.packages[${index}]`),
         ),
     };
 }
@@ -315,10 +326,7 @@ function validateNode(raw: unknown): NodeChecksConfig | undefined {
     if (raw === undefined || raw === null) {
         return undefined;
     }
-    if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new TypeError(`.defined.json: "node" must be an object`);
-    }
-    const entry = raw as Record<string, unknown>;
+    const entry = expectObject("node", raw);
     rejectUnknownKeys(entry, NODE_KEYS, "node");
     if (entry.packages !== undefined && entry.checks !== undefined) {
         throw new Error(
@@ -326,35 +334,26 @@ function validateNode(raw: unknown): NodeChecksConfig | undefined {
         );
     }
     if (entry.packages !== undefined) {
-        if (!Array.isArray(entry.packages) || entry.packages.length === 0) {
-            throw new Error(
-                `.defined.json: "node.packages" must be a non-empty array`,
-            );
-        }
-        return {
-            packages: entry.packages.map((pkg, index) =>
-                validateNodePackage(pkg, `node.packages[${index}]`),
+        return validateNodePackages(entry.packages);
+    }
+    if (entry.checks === undefined) {
+        // `node` present but no checks declared: nothing to run, skip cleanly.
+        return undefined;
+    }
+    // Flat form: one package, whose directory may be inferred from the
+    // sole tracked package.json when `dir` is omitted.
+    return {
+        packages: [
+            validateNodePackage(
+                {
+                    dir: entry.dir,
+                    install: entry.install,
+                    checks: entry.checks,
+                },
+                "node",
             ),
-        };
-    }
-    if (entry.checks !== undefined) {
-        // Flat form: one package, whose directory may be inferred from the
-        // sole tracked package.json when `dir` is omitted.
-        return {
-            packages: [
-                validateNodePackage(
-                    {
-                        dir: entry.dir,
-                        install: entry.install,
-                        checks: entry.checks,
-                    },
-                    "node",
-                ),
-            ],
-        };
-    }
-    // `node` present but no checks declared: nothing to run, so skip cleanly.
-    return undefined;
+        ],
+    };
 }
 
 const NAMING_KEYS = new Set(["command", "fix"]);
@@ -363,21 +362,12 @@ function validateNaming(raw: unknown): NamingConfig | undefined {
     if (raw === undefined || raw === null) {
         return undefined;
     }
-    if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new TypeError(`.defined.json: "naming" must be an object`);
-    }
-    const entry = raw as Record<string, unknown>;
+    const entry = expectObject("naming", raw);
     rejectUnknownKeys(entry, NAMING_KEYS, "naming");
     const result: NamingConfig = {};
     for (const key of ["command", "fix"] as const) {
-        const value = entry[key];
-        if (value !== undefined) {
-            if (typeof value !== "string" || value.trim() === "") {
-                throw new Error(
-                    `.defined.json: "naming.${key}" must be a non-empty string`,
-                );
-            }
-            result[key] = value;
+        if (entry[key] !== undefined) {
+            result[key] = expectNonEmptyString(`naming.${key}`, entry[key]);
         }
     }
     // An empty `naming` object declares nothing: treat it as absent.
@@ -396,10 +386,8 @@ const TOFU_KEYS = new Set(["dirs"]);
 
 /** A repo-relative, non-escaping module directory. `.` is the repo root. */
 function validateTofuDir(where: string, raw: unknown): string {
-    if (typeof raw !== "string" || raw.trim() === "") {
-        throw new Error(`.defined.json: "${where}" must be a non-empty string`);
-    }
-    const normalised = normaliseDir(raw);
+    const value = expectNonEmptyString(where, raw);
+    const normalised = normaliseDir(value);
     if (
         normalised === "" ||
         normalised === ".." ||
@@ -436,27 +424,41 @@ function validateTofu(raw: unknown): TofuConfig | undefined {
     };
 }
 
-const ESLINT_KEYS = new Set(["disable"]);
+const ESLINT_KEYS = new Set(["disable", "complexityMax"]);
+
+/** The complexity ceiling: a positive integer, or `false` to drop the rule. */
+function validateComplexityMax(value: unknown): number | false {
+    if (value === false) {
+        return false;
+    }
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+        throw new TypeError(
+            `.defined.json: "eslint.complexityMax" must be a positive integer or false`,
+        );
+    }
+    return value;
+}
 
 function validateEslint(raw: unknown): EslintConfig | undefined {
     if (raw === undefined || raw === null) {
         return undefined;
     }
-    if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new TypeError(`.defined.json: "eslint" must be an object`);
-    }
-    const entry = raw as Record<string, unknown>;
+    const entry = expectObject("eslint", raw);
     rejectUnknownKeys(entry, ESLINT_KEYS, "eslint");
-    if (entry.disable === undefined) {
-        // `eslint` present but nothing declared: the house step still runs.
-        return undefined;
+    const result: EslintConfig = {};
+    if (entry.disable !== undefined) {
+        if (typeof entry.disable !== "boolean") {
+            throw new TypeError(
+                `.defined.json: "eslint.disable" must be a boolean`,
+            );
+        }
+        result.disable = entry.disable;
     }
-    if (typeof entry.disable !== "boolean") {
-        throw new TypeError(
-            `.defined.json: "eslint.disable" must be a boolean`,
-        );
+    if (entry.complexityMax !== undefined) {
+        result.complexityMax = validateComplexityMax(entry.complexityMax);
     }
-    return { disable: entry.disable };
+    // `eslint` present but nothing declared: the house step still runs.
+    return Object.keys(result).length === 0 ? undefined : result;
 }
 
 const WORKFLOW_KEYS = new Set(["disable"]);
