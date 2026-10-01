@@ -157,6 +157,45 @@ async function runModuleChecks({
 }
 
 /**
+ * The fmt phase: `-write` over the exact git scope in fix mode, then `-check`
+ * always. Returns the failed result, or null when formatting is clean.
+ */
+async function runFmtPhase({
+    ctx,
+    runner,
+    workingRoot,
+    tfFiles,
+}: {
+    ctx: TofuRunContext;
+    runner: Runner;
+    workingRoot: string;
+    tfFiles: string[];
+}): Promise<StepResult | null> {
+    // fmt: exact git scope — the tracked .tf files, never a recursive walk.
+    if (ctx.mode === "fix") {
+        const fmtWrite = await runTofuCommand(
+            runner,
+            ["fmt", "-write", ...tfFiles],
+            workingRoot,
+        );
+        if (fmtWrite.status !== 0) {
+            return failed({
+                notice: `tofu: fmt -write failed: ${fmtWrite.stderr.trim()}`,
+            });
+        }
+    }
+    const fmtCheck = await runTofuCommand(
+        runner,
+        ["fmt", "-check", ...tfFiles],
+        workingRoot,
+    );
+    if (fmtCheck.status !== 0) {
+        return failed({ notice: "tofu: fmt found diffs (run with --fix)" });
+    }
+    return null;
+}
+
+/**
  * Run tofu fmt, then tflint/init/validate per module directory.
  * Returns skip when no .tf files tracked; fail naming the failing phase/dir.
  */
@@ -183,27 +222,14 @@ export async function runTofuStep({
         files: trackedFiles,
     });
 
-    // fmt: exact git scope — the tracked .tf files, never a recursive walk.
-    if (ctx.mode === "fix") {
-        const fmtWrite = await runTofuCommand(
-            runner,
-            ["fmt", "-write", ...tfFiles],
-            workingRoot,
-        );
-        if (fmtWrite.status !== 0) {
-            return failed({
-                notice: `tofu: fmt -write failed: ${fmtWrite.stderr.trim()}`,
-            });
-        }
-    }
-
-    const fmtCheck = await runTofuCommand(
+    const fmtFailure = await runFmtPhase({
+        ctx,
         runner,
-        ["fmt", "-check", ...tfFiles],
         workingRoot,
-    );
-    if (fmtCheck.status !== 0) {
-        return failed({ notice: "tofu: fmt found diffs (run with --fix)" });
+        tfFiles,
+    });
+    if (fmtFailure !== null) {
+        return fmtFailure;
     }
 
     const config = await loadConfig({ repoRoot: ctx.repoRoot, readFileFn });

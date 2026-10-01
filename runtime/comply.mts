@@ -210,6 +210,94 @@ export interface RunGateDeps {
     exitFn?: (code: number) => void;
 }
 
+/** The comply flow: bootstrap → repair (fix) pass → fresh no-fix pass → report. */
+async function runComply({
+    repoRoot,
+    files,
+    runSetupFn,
+    checkSetupFn,
+    runPassFn,
+    trackedFilesFn,
+    reportFn,
+}: {
+    repoRoot: string;
+    files: string[];
+    runSetupFn: typeof runSetup;
+    checkSetupFn: typeof checkSetup;
+    runPassFn: typeof runPass;
+    trackedFilesFn: typeof trackedFiles;
+    reportFn: typeof formatReport;
+}): Promise<string[]> {
+    await runSetupFn({ startDir: repoRoot });
+    // Bootstrap writes .editorconfig, Directory.Build.props, .gitattributes,
+    // AGENTS.md and a pinned .defined.json — files the pre-bootstrap
+    // snapshot (taken in main()) cannot contain. Re-fetch so both passes
+    // judge the repo as it exists after setup; otherwise the node step's
+    // prettier file list never sees the gate's own seeded files.
+    const filesAfterSetup = trackedFilesFn({ repoRoot });
+    await runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup });
+    const verify = await runPassFn({
+        mode: "no-fix",
+        repoRoot,
+        files: filesAfterSetup,
+    });
+    // Report any gate-owned bootstrap artifact still out of line after
+    // setup (the managed workflow and AGENTS block are brought to the gate
+    // copy; a seeded default the repo owns is never gated) through the same
+    // contract as the step findings — never a raw stack.
+    const setup = await checkSetupFn({ startDir: repoRoot });
+    return reportFn({
+        verb: "comply",
+        setup,
+        steps: [...verify].map(([id, result]) => ({ id, result })),
+    });
+}
+
+/** The verify flow: read-only bootstrap check → complete no-fix pass → report. */
+async function runVerify({
+    repoRoot,
+    files,
+    checkSetupFn,
+    runPassFn,
+    reportFn,
+}: {
+    repoRoot: string;
+    files: string[];
+    checkSetupFn: typeof checkSetup;
+    runPassFn: typeof runPass;
+    reportFn: typeof formatReport;
+}): Promise<string[]> {
+    const setup = await checkSetupFn({ startDir: repoRoot });
+    const results = await runPassFn({ mode: "no-fix", repoRoot, files });
+    return reportFn({
+        verb: "verify",
+        setup,
+        steps: [...results].map(([id, result]) => ({ id, result })),
+    });
+}
+
+/** The injectable deps with their production defaults applied. */
+function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
+    const {
+        runSetupFn = runSetup,
+        checkSetupFn = checkSetup,
+        runPassFn = runPass,
+        trackedFilesFn = trackedFiles,
+        reportFn = formatReport,
+        printFn = (line) => console.log(line),
+        exitFn = (code) => process.exit(code),
+    } = deps;
+    return {
+        runSetupFn,
+        checkSetupFn,
+        runPassFn,
+        trackedFilesFn,
+        reportFn,
+        printFn,
+        exitFn,
+    };
+}
+
 /**
  * Run the full two-verb flow against a repo. `comply` bootstraps → repair
  * (fix) pass → fresh verify (no-fix) pass, then reports bootstrap state
@@ -228,62 +316,22 @@ export async function runGate({
     files: string[];
     deps?: RunGateDeps;
 }): Promise<void> {
-    const {
-        runSetupFn = runSetup,
-        checkSetupFn = checkSetup,
-        runPassFn = runPass,
-        trackedFilesFn = trackedFiles,
-        reportFn = formatReport,
-        printFn = (line) => console.log(line),
-        exitFn = (code) => process.exit(code),
-    } = deps;
-
-    if (verb === "comply") {
-        await runSetupFn({ startDir: repoRoot });
-        // Bootstrap writes .editorconfig, Directory.Build.props, .gitattributes,
-        // AGENTS.md and a pinned .defined.json — files the pre-bootstrap
-        // snapshot (taken in main()) cannot contain. Re-fetch so both passes
-        // judge the repo as it exists after setup; otherwise the node step's
-        // prettier file list never sees the gate's own seeded files.
-        const filesAfterSetup = trackedFilesFn({ repoRoot });
-        await runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup });
-        const verify = await runPassFn({
-            mode: "no-fix",
-            repoRoot,
-            files: filesAfterSetup,
-        });
-        // Report any gate-owned bootstrap artifact still out of line after
-        // setup (the managed workflow and AGENTS block are brought to the gate
-        // copy; a seeded default the repo owns is never gated) through the same
-        // contract as the step findings — never a raw stack.
-        const setup = await checkSetupFn({ startDir: repoRoot });
-        const lines = reportFn({
-            verb: "comply",
-            setup,
-            steps: [...verify].map(([id, result]) => ({ id, result })),
-        });
-        for (const line of lines) {
-            printFn(line);
-        }
-        if (lines[0] !== "compliant") {
-            exitFn(1);
-        }
-        return;
-    }
-
-    // `verify`: read-only bootstrap check → complete no-fix pass.
-    const setup = await checkSetupFn({ startDir: repoRoot });
-    const results = await runPassFn({ mode: "no-fix", repoRoot, files });
-    const lines = reportFn({
-        verb: "verify",
-        setup,
-        steps: [...results].map(([id, result]) => ({ id, result })),
-    });
+    const resolved = resolveDeps(deps);
+    const lines =
+        verb === "comply"
+            ? await runComply({ repoRoot, files, ...resolved })
+            : await runVerify({
+                  repoRoot,
+                  files,
+                  checkSetupFn: resolved.checkSetupFn,
+                  runPassFn: resolved.runPassFn,
+                  reportFn: resolved.reportFn,
+              });
     for (const line of lines) {
-        printFn(line);
+        resolved.printFn(line);
     }
     if (lines[0] !== "compliant") {
-        exitFn(1);
+        resolved.exitFn(1);
     }
 }
 

@@ -103,6 +103,62 @@ async function runDotNetCommand(
 }
 
 /**
+ * Restore, then format: restore always first (the container's NuGet cache is
+ * shadowed by a named volume, decision #3), format -write in fix mode only and
+ * `--verify-no-changes` always. Returns the failed result, or null when both
+ * phases are clean.
+ */
+async function runRestoreAndFormat({
+    runner,
+    workspace,
+    workspaceRoot,
+    mode,
+}: {
+    runner: Runner;
+    workspace: string;
+    workspaceRoot: string;
+    mode: DotNetRunContext["mode"];
+}): Promise<StepResult | null> {
+    // Restore inside the container into the shadowed NuGet cache; later
+    // --no-restore phases assume this succeeded.
+    const restore = await runDotNetCommand(
+        runner,
+        ["restore", workspace],
+        workspaceRoot,
+    );
+    if (restore.status !== 0) {
+        return failed({
+            notice: `dotnet: restore failed: ${restore.stderr.trim()}`,
+        });
+    }
+    // Fix mode: format (write) then verify; check mode: verify only.
+    if (mode === "fix") {
+        const formatWrite = await runDotNetCommand(
+            runner,
+            ["format", workspace],
+            workspaceRoot,
+        );
+        if (formatWrite.status !== 0) {
+            return failed({
+                notice: `dotnet: format failed: ${formatWrite.stderr.trim()}`,
+            });
+        }
+    }
+    // Always verify formatting is clean.
+    const formatCheck = await runDotNetCommand(
+        runner,
+        ["format", "--verify-no-changes", workspace],
+        workspaceRoot,
+    );
+    if (formatCheck.status !== 0) {
+        return failed({
+            notice: "dotnet: format found diffs (run with --fix)",
+        });
+    }
+    return null;
+}
+
+/**
  * Run dotnet format, build, test over the discovered workspace.
  * Restore always runs first: the container's NuGet cache is shadowed by a
  * named volume (decision #3), so build/test cannot assume a host restore.
@@ -147,43 +203,14 @@ export async function runDotNetStep({
         csprojFiles,
     });
 
-    // Restore inside the container into the shadowed NuGet cache; later
-    // --no-restore phases assume this succeeded.
-    const restore = await runDotNetCommand(
+    const setupFailure = await runRestoreAndFormat({
         runner,
-        ["restore", workspace],
+        workspace,
         workspaceRoot,
-    );
-    if (restore.status !== 0) {
-        return failed({
-            notice: `dotnet: restore failed: ${restore.stderr.trim()}`,
-        });
-    }
-
-    // Fix mode: format (write) then verify; check mode: verify only.
-    if (ctx.mode === "fix") {
-        const formatWrite = await runDotNetCommand(
-            runner,
-            ["format", workspace],
-            workspaceRoot,
-        );
-        if (formatWrite.status !== 0) {
-            return failed({
-                notice: `dotnet: format failed: ${formatWrite.stderr.trim()}`,
-            });
-        }
-    }
-
-    // Always verify formatting is clean.
-    const formatCheck = await runDotNetCommand(
-        runner,
-        ["format", "--verify-no-changes", workspace],
-        workspaceRoot,
-    );
-    if (formatCheck.status !== 0) {
-        return failed({
-            notice: "dotnet: format found diffs (run with --fix)",
-        });
+        mode: ctx.mode,
+    });
+    if (setupFailure !== null) {
+        return setupFailure;
     }
 
     const build = await runDotNetCommand(
