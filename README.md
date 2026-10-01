@@ -168,6 +168,18 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
     repo-owned `eslint.config.*` at the root is already run by the ESLint step
     itself.
 
+    On a host that cannot run the managed GitHub workflow (Azure DevOps,
+    GitLab, a private server), switch off its installation and check — local
+    `comply` still runs every in-container step:
+
+    ```jsonc
+    "workflow": { "disable": true }
+    ```
+
+    `comply` then never seeds `.github/workflows/defined--verify.yml` and
+    `verify` never fails on its absence; an already-present copy is left in
+    place with a stderr notice (remove it yourself with `git rm`).
+
     The `tofu` step runs `fmt`, `tflint`, `init` and `validate` — `fmt` over the
     tracked `.tf` files, and the rest once per module directory (the top-most
     directories holding tracked `.tf`), so a module under `infrastructure/` is
@@ -213,7 +225,8 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
    config files are **seeded defaults**: installed only when absent, so a repo
    with its own rules keeps them and the gate never gated on theirs. The gate
    workflow and the AGENTS block are **managed**: `comply` keeps the workflow
-   byte-identical to the image's copy (updating it when the gate changes).
+   byte-identical to the image's copy (updating it when the gate changes). A
+   non-GitHub host opts out with `"workflow": { "disable": true }` (see above).
 
     **Tighten the floor; don't fork it.** The house config is a floor, not a
     straitjacket — the seeded files are yours once installed (the gate never
@@ -260,7 +273,8 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
    workflow to keep in step). It reads the same `.defined.json` pin as the local
    launcher, so local and CI run the same image: a written pin is immutable, an
    omitted `version` rides the current published image. Like the AGENTS block it
-   is managed — change it upstream, never by hand.
+   is managed — change it upstream, never by hand. A host that cannot run GitHub
+   Actions opts out with `"workflow": { "disable": true }`.
 
 ## Quality pipeline
 

@@ -90,6 +90,17 @@ export interface EslintConfig {
     disable?: boolean;
 }
 
+/** Consumer managed-workflow configuration (`.defined.json` `workflow` key). */
+export interface WorkflowConfig {
+    /**
+     * True stops the gate installing and checking the managed gate workflow
+     * (`.github/workflows/defined--verify.yml`) — for hosts that cannot run
+     * it (Azure DevOps, GitLab, a private server). Local `comply` is
+     * unaffected: every in-container step still runs.
+     */
+    disable?: boolean;
+}
+
 export interface DefinedConfig {
     /**
      * Immutable image tag (7–40 hex chars). Empty when omitted — the launcher
@@ -109,6 +120,8 @@ export interface DefinedConfig {
     tofu?: TofuConfig;
     /** ESLint switch. Absent key = the house ESLint step runs. */
     eslint?: EslintConfig;
+    /** Managed-workflow switch. Absent key = the workflow is installed. */
+    workflow?: WorkflowConfig;
 }
 
 /** Empty config: all coverage steps skip, version is empty. */
@@ -446,6 +459,29 @@ function validateEslint(raw: unknown): EslintConfig | undefined {
     return { disable: entry.disable };
 }
 
+const WORKFLOW_KEYS = new Set(["disable"]);
+
+function validateWorkflow(raw: unknown): WorkflowConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    if (typeof raw !== "object" || Array.isArray(raw)) {
+        throw new TypeError(`.defined.json: "workflow" must be an object`);
+    }
+    const entry = raw as Record<string, unknown>;
+    rejectUnknownKeys(entry, WORKFLOW_KEYS, "workflow");
+    if (entry.disable === undefined) {
+        // `workflow` present but nothing declared: the workflow still installs.
+        return undefined;
+    }
+    if (typeof entry.disable !== "boolean") {
+        throw new TypeError(
+            `.defined.json: "workflow.disable" must be a boolean`,
+        );
+    }
+    return { disable: entry.disable };
+}
+
 function validateParsed(raw: unknown): DefinedConfig {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new Error(`.defined.json: must be a JSON object`);
@@ -460,7 +496,8 @@ function validateParsed(raw: unknown): DefinedConfig {
     const naming = validateNaming(obj.naming);
     const tofu = validateTofu(obj.tofu);
     const eslint = validateEslint(obj.eslint);
-    return { version, coverage, node, naming, tofu, eslint };
+    const workflow = validateWorkflow(obj.workflow);
+    return { version, coverage, node, naming, tofu, eslint, workflow };
 }
 
 /**
