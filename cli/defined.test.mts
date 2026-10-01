@@ -1002,3 +1002,26 @@ test("update rejects a malformed or too-short revision", async () => {
         assert.match(tooShort.stderr, /too short/u);
     });
 });
+
+test("is_windows_mounted flags only Windows-drive (/mnt) launcher paths", () => {
+    // Sourcing the launcher must not execute main (the BASH_SOURCE == $0
+    // guard), so the predicate is probeable without a real /mnt path — which
+    // only root could create.
+    const paths = [
+        "/mnt/c/Users/me/.local/bin/defined",
+        "/home/me/.local/bin/defined",
+        "/c/Users/me/bin/defined",
+        "bin/defined",
+    ];
+    const script = `source "${LAUNCHER}"; for p in ${paths
+        .map((p) => `'${p}'`)
+        .join(
+            " ",
+        )}; do if is_windows_mounted "$p"; then echo "yes $p"; else echo "no $p"; fi; done`;
+    const r = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(
+        r.stdout.trim().split("\n"),
+        paths.map((p, i) => `${i === 0 ? "yes" : "no"} ${p}`),
+    );
+});

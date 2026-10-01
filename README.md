@@ -287,6 +287,41 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
    is managed — change it upstream, never by hand. A host that cannot run GitHub
    Actions opts out with `"workflow": { "disable": true }`.
 
+### Windows hosts (WSL2)
+
+The launcher is a bash script: on Windows, run it **inside WSL**. Install it
+there (the installer command above, run inside the distro), with Docker Engine
+installed in WSL itself — no Docker Desktop required; the engine is whatever
+`podman`/`docker` resolves to inside the distro.
+
+So IDE terminals and agent shells on the Windows side can reach it, put a
+**git-bash shim** on the Windows PATH — one small file at, say,
+`C:\Users\<me>\.local\bin\defined`:
+
+```bash
+#!/usr/bin/env bash
+# git-bash shim: forward to the WSL launcher with the CWD translated.
+set -e
+export MSYS_NO_PATHCONV=1
+exec wsl.exe -d Ubuntu-24.04 --cd "$(pwd -W)" -- /home/<me>/.local/bin/defined "$@"
+```
+
+Three pitfalls the shim has to handle — each cost someone an afternoon:
+
+1. **`wsl.exe` re-joins argv without quoting.** A compound command
+   (`bash -lc 'cd "$(wslpath ...)" && defined "$@"'`) loses its inner quotes on
+   the way through, so the remote shell word-splits the script. Passing
+   `--cd <windows-path>` plus one simple command avoids quoting entirely.
+2. **WSL non-login shells append the Windows PATH.** Call the WSL launcher by
+   **absolute path**: with a bare `defined`, a non-login WSL shell (no
+   `~/.profile`) resolves `$PATH` past the appended Windows entries, finds the
+   shim itself and re-runs it inside WSL. The launcher detects that — its
+   Windows-side copy lives under `/mnt/...` — and dies naming the problem
+   instead of recursing.
+3. **git-bash path conversion mangles POSIX-looking arguments.**
+   `/home/<me>/.local/bin/defined` arrives at `wsl.exe` rewritten as
+   `C:/.../Git/home/...` unless `MSYS_NO_PATHCONV=1` is set.
+
 ## Quality pipeline
 
 This repo's own CI (`defined--test.yml`) also runs a SonarQube Cloud scan,
