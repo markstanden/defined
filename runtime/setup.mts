@@ -35,6 +35,8 @@ import {
 } from "./lib/managed-files.mts";
 import { gateConfigPath, standardsDir } from "./lib/config-path.mts";
 import { loadConfig, type DefinedConfig } from "./lib/config.mts";
+import { hasConsumerEslintConfig } from "./lib/eslint-config.mts";
+import { removeExample } from "./lib/eslint-example.mts";
 import { trackedFiles } from "../lib/git.mts";
 import { MANAGED_WORKFLOW_FILE } from "./lib/workflow-files.mts";
 import { filterDotNetFiles } from "./steps/dotnet.mts";
@@ -170,11 +172,19 @@ export async function runSetup({
 }): Promise<void> {
     const repoRoot = await deriveRepoRoot({ startDir });
     const config = await loadConfig({ repoRoot });
+    const tracked = trackedFiles({ repoRoot });
     await installManagedFiles({
         sourceDir: await standardsDir(),
-        files: bootstrapFiles(config, trackedFiles({ repoRoot })),
+        files: bootstrapFiles(config, tracked),
         repoRoot,
     });
+    // A repair may have deleted the repo's ESLint config since the ESLint step
+    // wrote the house-example sidecar, leaving a stale file the git scope must
+    // not keep (#62). Bootstrap is the second owner: prune it (and its
+    // .git/info/exclude line) when the repo no longer has a config of its own.
+    if (!hasConsumerEslintConfig({ files: tracked })) {
+        await removeExample({ workingRoot: repoRoot });
+    }
     if (config.workflow?.disable === true) {
         await warnWorkflowDisabled({ repoRoot, notify: notifyFn });
     }

@@ -79,6 +79,26 @@ test("ensureScratch reuses an existing scratch dir", async () => {
     }
 });
 
+test("ensureScratch skips a stale path that no longer exists", async () => {
+    const repoRoot = await makeTempDir("quality-scratch-");
+    await writeFile(join(repoRoot, "App.csproj"), "<Project/>");
+    const scratch = { dir: null as string | null };
+    try {
+        // A repair deleted Old.cs between the inventory snapshot and the
+        // no-fix scratch copy; the stale path must not abort the copy (#62).
+        const dir = ensureScratch({
+            scratch,
+            repoRoot,
+            files: ["App.csproj", "Old.cs"],
+        });
+        assert.ok(existsSync(join(dir, "App.csproj")));
+        assert.ok(!existsSync(join(dir, "Old.cs")));
+    } finally {
+        cleanupScratch(scratch);
+        await rm(repoRoot, { recursive: true, force: true });
+    }
+});
+
 test("cleanupScratch removes the dir and clears the box", async () => {
     const repoRoot = await makeTempDir("quality-scratch-");
     await writeFile(join(repoRoot, "App.csproj"), "<Project/>");

@@ -10,7 +10,7 @@
 // filesystem, repo mount untouched. Shared caches (the named volumes) are
 // unchanged.
 
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -38,9 +38,16 @@ export function ensureScratch({
     }
     const dir = mkdtempSync(join(tmpdir(), "defined-scratch-"));
     for (const rel of files) {
+        const src = join(repoRoot, rel);
+        // A repair may have deleted or renamed a path since the inventory was
+        // taken, so copy only what still exists: a stale path must degrade to
+        // "absent from the copy", never abort the whole no-fix pass (#62).
+        if (!existsSync(src)) {
+            continue;
+        }
         const dest = join(dir, rel);
         mkdirSync(dirname(dest), { recursive: true });
-        cpSync(join(repoRoot, rel), dest);
+        cpSync(src, dest);
     }
     if (scratch) {
         scratch.dir = dir;

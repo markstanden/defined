@@ -212,6 +212,45 @@ test("checkSetup reports drift when the managed workflow differs", async () => {
     }
 });
 
+test("runSetup removes the eslint example sidecar when the repo has no config", async () => {
+    const repo = await makeTempRepo();
+    try {
+        await writeFile(join(repo, "eslint.config.defined.mjs"), "// stale\n");
+        await runSetup({ startDir: repo });
+        await assert.rejects(
+            () => readFile(join(repo, "eslint.config.defined.mjs"), "utf8"),
+            { code: "ENOENT" },
+            "a stale sidecar must not survive bootstrap (#62: deleted/renamed paths)",
+        );
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("runSetup prunes the eslint sidecar exclusion from .git/info/exclude", async () => {
+    const repo = await makeTempRepo();
+    try {
+        await mkdir(join(repo, ".git", "info"), { recursive: true });
+        await writeFile(
+            join(repo, ".git", "info", "exclude"),
+            "# keep\nother\neslint.config.defined.mjs\n",
+        );
+        await runSetup({ startDir: repo });
+        const exclude = await readFile(
+            join(repo, ".git", "info", "exclude"),
+            "utf8",
+        );
+        assert.equal(
+            exclude.split("\n").includes("eslint.config.defined.mjs"),
+            false,
+            "the stale example must not stay excluded",
+        );
+        assert.ok(exclude.includes("keep"), "unrelated exclusions preserved");
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
 test("runSetup skips the managed workflow when workflow.disable is true", async () => {
     const repo = await makeTempRepo();
     try {

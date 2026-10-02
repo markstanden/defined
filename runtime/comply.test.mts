@@ -228,6 +228,70 @@ test("runGate_comply_reFetchesTrackedFilesAfterBootstrap", async () => {
     assert.deepEqual(passedFiles, [["post-setup.txt"], ["post-setup.txt"]]);
 });
 
+test("runGate_comply_reFetchesTrackedFilesAfterRepair", async () => {
+    const verifyFiles: string[][] = [];
+    let fetches = 0;
+    const passes: string[] = [];
+    await runGate({
+        verb: "comply",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            runSetupFn: async () => undefined,
+            checkSetupFn: async () => cleanSetup(),
+            trackedFilesFn: () => {
+                fetches += 1;
+                return [fetches === 1 ? "after-setup.txt" : "after-repair.txt"];
+            },
+            runPassFn: async ({ mode, files }) => {
+                passes.push(mode);
+                if (mode === "no-fix") {
+                    verifyFiles.push(files);
+                }
+                return allGreen();
+            },
+            printFn: () => undefined,
+            exitFn: () => undefined,
+        },
+    });
+    // The repair pass sees the post-setup snapshot; verification re-fetches
+    // after repairs so a file created by a fixer is checked (#62).
+    assert.deepEqual(passes, ["fix", "no-fix"]);
+    assert.deepEqual(verifyFiles, [["after-repair.txt"]]);
+    assert.equal(fetches, 2, "setup refresh + a fresh fetch after repair");
+});
+
+test("runGate_comply_reRenameLeavesNoStaleVerificationPath", async () => {
+    const verifyFiles: string[][] = [];
+    const snapshots = [
+        ["Old.cs", "Keep.cs"],
+        ["New.cs", "Keep.cs"],
+    ];
+    await runGate({
+        verb: "comply",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            runSetupFn: async () => undefined,
+            checkSetupFn: async () => cleanSetup(),
+            // A repair renamed Old.cs to New.cs: the second fetch reflects it.
+            trackedFilesFn: () => snapshots.shift() ?? [],
+            runPassFn: async ({ mode, files }) => {
+                if (mode === "no-fix") {
+                    verifyFiles.push(files);
+                }
+                return allGreen();
+            },
+            printFn: () => undefined,
+            exitFn: () => undefined,
+        },
+    });
+    // Verification judges the post-repair tree: it sees the new name and never
+    // the stale one, which the no-fix scratch copy would fail to find (#62).
+    assert.deepEqual(verifyFiles, [["New.cs", "Keep.cs"]]);
+    assert.equal(verifyFiles[0]!.includes("Old.cs"), false);
+});
+
 test("runGate_verify_checksSetupThenRunsTheNoFixPass", async () => {
     const printed: string[] = [];
     const exits: number[] = [];

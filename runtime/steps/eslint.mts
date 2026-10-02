@@ -25,9 +25,8 @@
 // runner and notify sink are injected so tests need no host binaries and can
 // capture the sidecar advisory.
 
-import { existsSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { readFile } from "node:fs/promises";
+import { relative } from "node:path";
 
 import {
     errored,
@@ -41,10 +40,8 @@ import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
 import { run, type CommandResult } from "../../lib/proc.mts";
 import { gateConfigPath } from "../lib/config-path.mts";
 import { loadConfig, type DefinedConfig } from "../lib/config.mts";
-import {
-    ESLINT_EXAMPLE_NAME,
-    hasConsumerEslintConfig,
-} from "../lib/eslint-config.mts";
+import { hasConsumerEslintConfig } from "../lib/eslint-config.mts";
+import { removeExample, writeExample } from "../lib/eslint-example.mts";
 import { runWithLocalBin } from "../lib/node-packages.mts";
 
 export interface EslintRunContext {
@@ -268,96 +265,11 @@ function firstLine({ result }: { result: CommandResult }): string {
     return text.split("\n")[0] ?? "";
 }
 
-function excludeFilePath({ repoRoot }: { repoRoot: string }): string {
-    return join(repoRoot, ".git", "info", "exclude");
-}
-
-/** Add the sidecar to .git/info/exclude; false when git or the entry is absent. */
-async function excludeExample({
-    repoRoot,
-}: {
-    repoRoot: string;
-}): Promise<boolean> {
-    const excludePath = excludeFilePath({ repoRoot });
-    if (!existsSync(dirname(excludePath))) {
-        return false;
-    }
-    const current = existsSync(excludePath)
-        ? await readFile(excludePath, "utf8")
-        : "";
-    if (current.split("\n").includes(ESLINT_EXAMPLE_NAME)) {
-        return false;
-    }
-    const separator = current === "" || current.endsWith("\n") ? "" : "\n";
-    await writeFile(
-        excludePath,
-        `${current}${separator}${ESLINT_EXAMPLE_NAME}\n`,
-    );
-    return true;
-}
-
-async function pruneExampleExclusion({
-    repoRoot,
-}: {
-    repoRoot: string;
-}): Promise<void> {
-    const excludePath = excludeFilePath({ repoRoot });
-    if (!existsSync(excludePath)) {
-        return;
-    }
-    const current = await readFile(excludePath, "utf8");
-    const next = current
-        .split("\n")
-        .filter((line) => line !== ESLINT_EXAMPLE_NAME)
-        .join("\n");
-    if (next !== current) {
-        await writeFile(excludePath, next);
-    }
-}
-
-/** Write/refresh the house-example sidecar and notice the consumer. */
-async function writeExample({
-    workingRoot,
-    notify,
-}: {
-    workingRoot: string;
-    notify: (line: string) => void;
-}): Promise<void> {
-    const examplePath = join(workingRoot, ESLINT_EXAMPLE_NAME);
-    const desired = await readFile(
-        await gateConfigPath({ name: "eslint.config.mjs" }),
-        "utf8",
-    );
-    const current = existsSync(examplePath)
-        ? await readFile(examplePath, "utf8")
-        : "";
-    if (current !== desired) {
-        await writeFile(examplePath, desired);
-    }
-    const excluded = await excludeExample({ repoRoot: workingRoot });
-    notify(
-        `defined: repo eslint config kept; wrote ${ESLINT_EXAMPLE_NAME} (house example)` +
-            (excluded ? " and added it to .git/info/exclude" : ""),
-    );
-}
-
-/** Remove a now-redundant sidecar when the repo has no config of its own. */
-async function removeExample({
-    workingRoot,
-}: {
-    workingRoot: string;
-}): Promise<void> {
-    const examplePath = join(workingRoot, ESLINT_EXAMPLE_NAME);
-    if (existsSync(examplePath)) {
-        await rm(examplePath, { force: true });
-    }
-    await pruneExampleExclusion({ repoRoot: workingRoot });
-}
-
 /**
  * Fix-mode-only sidecar management: with a repo config, write/refresh the
  * house example beside it; without one, remove a stale example. A read-only
- * verify never writes.
+ * verify never writes. The sidecar's lifecycle lives in lib/eslint-example.mts,
+ * shared with bootstrap (a repair may have deleted the config since — #62).
  */
 async function manageExample({
     mode,
@@ -374,7 +286,11 @@ async function manageExample({
         return;
     }
     if (kind === "repo") {
-        await writeExample({ workingRoot, notify: notifyFn });
+        const desired = await readFile(
+            await gateConfigPath({ name: "eslint.config.mjs" }),
+            "utf8",
+        );
+        await writeExample({ workingRoot, desired, notify: notifyFn });
         return;
     }
     await removeExample({ workingRoot });
