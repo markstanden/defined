@@ -112,6 +112,48 @@ test("packagesToRestore adds the root package when a consumer Prettier config is
     );
 });
 
+test("packagesToRestore adds the root package for a consumer ESLint config", () => {
+    assert.deepEqual(
+        packagesToRestore({
+            declared: [],
+            trackedFiles: [
+                "package.json",
+                "package-lock.json",
+                "eslint.config.mjs",
+            ],
+        }),
+        [{ dir: "" }],
+    );
+});
+
+test("packagesToRestore skips the ESLint-triggered root when ESLint is disabled", () => {
+    assert.deepEqual(
+        packagesToRestore({
+            declared: [],
+            trackedFiles: ["package.json", "eslint.config.mjs"],
+            eslintEnabled: false,
+        }),
+        [],
+    );
+});
+
+test("packagesToRestore dedupes two declarations for the same package", () => {
+    assert.deepEqual(
+        packagesToRestore({
+            declared: [{ dir: "" }],
+            trackedFiles: ["package.json"],
+        }),
+        [{ dir: "" }],
+    );
+    assert.deepEqual(
+        packagesToRestore({
+            declared: [{ dir: "app" }],
+            trackedFiles: ["app/package.json"],
+        }),
+        [{ dir: "app" }],
+    );
+});
+
 test("packagesToRestore never duplicates a declared root and honours its opt-out", () => {
     // A declared root (even install:false) owns the root: no auto-added copy.
     const declared = [{ dir: "", install: false }];
