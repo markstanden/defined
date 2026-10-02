@@ -70,6 +70,12 @@ test("the block points at the JSON result surface and --min", async () => {
     );
 });
 
+test("the block points at the offline explain surface for lookups", async () => {
+    const text = await block();
+    assert.match(text, /defined explain/u);
+    assert.match(text, /offline/u);
+});
+
 test("the block preserves project content above and below on re-install", async () => {
     const template = await block();
     const root = await mkdtemp(join(tmpdir(), "quality-agents-prompt-"));

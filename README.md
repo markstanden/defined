@@ -118,6 +118,38 @@ Gitignored paths are never analysed, locally or in CI, so local and CI agree by
 construction; committed content is always gated. Tools that would otherwise walk
 the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
 
+## Guidance without the network: `defined explain`
+
+```bash
+defined explain shell       # a step id from the run plan
+defined explain SC2086      # a rule id from an error's `rule` field
+defined explain complexity
+```
+
+`explain` answers "what does this check mean?" from the house guidance **inside
+the pinned image** — no network, no repo writes — so the answer always matches
+the revision actually gating you (upstream `main` may be newer). It takes one
+topic, a **step id** (`naming`, `eslint`, `yaml`, … the ids in `results`) or a
+**rule id** (shellcheck `SC…`, a yamllint rule name, or an eslint rule such as
+`complexity` / `regexp/*`), and prints one compact JSON object:
+
+```json
+{
+    "topic": "complexity",
+    "kind": "rule",
+    "owner": { "side": "house", "detail": "runtime/config/eslint.config.mjs" },
+    "doc": "standards/node-eslint.md",
+    "guidance": "# House ESLint\n…"
+}
+```
+
+`owner` says whether the effective configuration is **house** or **consumer**
+(overridden in this repo), so you can tell the gate's default from your own
+tailoring. `doc`/`guidance` carry the governing house document verbatim; a step
+with no house document carries a one-line `notice` instead. An unknown topic is
+a concise error on stderr and exit 2, so a successful `explain` is always
+parseable. The gate's own launcher mounts the repo read-only for this verb.
+
 ## Adopt the gate in a consumer repo
 
 1. **Install the launcher** — fetch and run the installer, which verifies and

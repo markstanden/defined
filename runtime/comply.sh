@@ -20,9 +20,13 @@
 set -euo pipefail
 
 # Map the default verb and the check-only flag to the runtime contract.
+# `explain` passes through with its topic as the remaining argument.
 VERB="comply"
 if [[ "${1:-}" == "--check-only" ]]; then
     VERB="verify"
+    shift
+elif [[ "${1:-}" == "explain" ]]; then
+    VERB="explain"
     shift
 fi
 

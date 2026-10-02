@@ -414,6 +414,21 @@ test("mounts the repo read-only for verify", async () => {
     });
 });
 
+test("mounts read-only with no cache volumes for explain", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const r = await runLauncher({ fixture, args: ["explain", "shell"] });
+        assert.equal(r.status, 0);
+        const run = r.log.find((line) => line.startsWith("run --rm"));
+        assert.ok(run, "explain must invoke the engine");
+        assert.match(run!, new RegExp(`-v ${fixture.repo}:/repo:ro`));
+        assert.doesNotMatch(run!, /defined-node-/, "explain writes nothing");
+        assert.ok(
+            run!.endsWith(`${IMAGE_REPO}:abc12345 explain shell`),
+            `the topic must reach the container, got: ${run}`,
+        );
+    });
+});
+
 test("pulls the exact pinned image when it is not present locally", async () => {
     await withFixture("feedface", async (fixture) => {
         const r = await runLauncher({
@@ -970,6 +985,15 @@ test("runs the local runtime for comply and verify in the source repo", async ()
         });
         assert.equal(flagged.status, 0);
         assert.equal(flagged.stdout.trim(), "shim:--min");
+
+        const explain = await runLauncher({
+            fixture,
+            args: ["explain", "shell"],
+            env: source,
+        });
+        assert.equal(explain.status, 0);
+        assert.equal(explain.stdout.trim(), "shim:explain shell");
+        assert.deepEqual(explain.log, []);
     });
 });
 

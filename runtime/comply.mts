@@ -54,6 +54,7 @@ import {
     type StepResult,
 } from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
+import { explainTopic, renderExplanation } from "./lib/explain.mts";
 
 interface StepInput {
     mode: StepMode;
@@ -175,6 +176,9 @@ const STEPS: Step[] = [
     },
 ];
 
+/** The run-plan step ids, in order (the guide for `defined explain` coverage). */
+export const STEP_IDS: readonly string[] = STEPS.map((step) => step.id);
+
 /** Run every step in order in the given mode; nothing may crash silently. */
 export async function runPass({
     mode,
@@ -217,10 +221,10 @@ export async function runPass({
     return results;
 }
 
-/** Report the two verbs and their presentation flags. */
+/** Report the verbs: the two result verbs with flags, and the guidance verb. */
 export function printUsage(): void {
     console.log(
-        "usage: defined comply [--min|--full] | defined verify [--min|--full]",
+        "usage: defined comply [--min|--full] | defined verify [--min|--full] | defined explain <step-or-rule>",
     );
 }
 
@@ -362,6 +366,47 @@ export async function runGate({
     }
 }
 
+export interface RunExplainDeps {
+    /** Guidance resolver; injected so tests need no image or repo. */
+    explainFn?: typeof explainTopic;
+    /** Output sink (stdout). */
+    printFn?: (line: string) => void;
+    /** Error sink (stderr). */
+    errorFn?: (line: string) => void;
+    /** Process exit; injected so tests observe the exit code. */
+    exitFn?: (code: number) => void;
+}
+
+/**
+ * `explain <topic>`: resolve guidance from the pinned image and print it as one
+ * compact JSON line. A successful explain always exits 0; an unknown topic is a
+ * concise stderr error and exit 2, so stdout never carries a partial object.
+ */
+export async function runExplain({
+    topic,
+    repoRoot,
+    deps = {},
+}: {
+    topic: string;
+    repoRoot: string;
+    deps?: RunExplainDeps;
+}): Promise<void> {
+    const {
+        explainFn = explainTopic,
+        printFn = (line) => console.log(line),
+        errorFn = (line) => console.error(line),
+        exitFn = (code) => process.exit(code),
+    } = deps;
+    try {
+        const explanation = await explainFn({ topic, repoRoot });
+        printFn(renderExplanation(explanation));
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        errorFn(`explain: ${message}`);
+        exitFn(2);
+    }
+}
+
 async function main(): Promise<void> {
     const positional = process.argv.slice(2);
 
@@ -383,6 +428,10 @@ async function main(): Promise<void> {
         startDir: process.cwd(),
         presentation: parsed!.presentation,
     });
+    if (ctx.verb === "explain") {
+        await runExplain({ topic: parsed!.topic!, repoRoot: ctx.repoRoot });
+        return;
+    }
     const files = trackedFiles({ repoRoot: ctx.repoRoot });
     await runGate({
         verb: ctx.verb,
