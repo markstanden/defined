@@ -113,6 +113,55 @@ test("parseLcov returns zeros for empty content", () => {
     assert.equal(summary.functionsHit, 0);
 });
 
+test("parseLcov rejects a malformed hit counter (the reported reproduction)", () => {
+    assert.throws(
+        () => parseLcov({ content: "LF:10\nLH:garbage\n" }),
+        /LH counter 'garbage' is not a non-negative integer/u,
+    );
+});
+
+test("parseLcov rejects negative, fractional and infinite counters", () => {
+    for (const bad of ["-1", "1.5", "Infinity", "NaN", "0x10", ""]) {
+        assert.throws(
+            () => parseLcov({ content: `LF:10\nLH:${bad}\n` }),
+            /is not a non-negative integer/u,
+            `LH:${bad} must be rejected`,
+        );
+    }
+});
+
+test("parseLcov rejects a hit count exceeding found in any record", () => {
+    assert.throws(
+        () => parseLcov({ content: "LF:10\nLH:11\n" }),
+        /line hit count 11 exceeds found count 10/u,
+    );
+    // Aggregate is 15/15 (valid), but the second record alone is inconsistent —
+    // per-record validation must not let the total hide it.
+    const content = [
+        "LF:10",
+        "LH:10",
+        "end_of_record",
+        "LF:5",
+        "LH:6",
+        "end_of_record",
+    ].join("\n");
+    assert.throws(
+        () => parseLcov({ content }),
+        /line hit count 6 exceeds found count 5/u,
+    );
+});
+
+test("parseLcov rejects malformed branch and function counters too", () => {
+    assert.throws(
+        () => parseLcov({ content: "BRF:4\nBRH:oops\n" }),
+        /BRH counter 'oops'/u,
+    );
+    assert.throws(
+        () => parseLcov({ content: "FNF:2\nFNH:-3\n" }),
+        /FNH counter '-3'/u,
+    );
+});
+
 // --- checkMinimums ---
 
 test("checkMinimums passes when above minimum", () => {
@@ -211,6 +260,47 @@ test("checkMinimums treats zero lines found as 0%", () => {
         minimums: { line: 80 },
     });
     assert.equal(result.pass, false);
+});
+
+test("checkMinimums rejects a non-finite summary instead of passing it", () => {
+    const result = checkMinimums({
+        summary: {
+            linesFound: 10,
+            linesHit: Number.NaN,
+            branchesFound: 0,
+            branchesHit: 0,
+            functionsFound: 0,
+            functionsHit: 0,
+        },
+        minimums: { line: 80 },
+    });
+    assert.equal(result.pass, false);
+    assert.match(result.failures[0]!, /invalid counters/u);
+});
+
+test("checkMinimums rejects negative and hit-over-found summaries", () => {
+    const base = {
+        linesFound: 10,
+        linesHit: 5,
+        branchesFound: 0,
+        branchesHit: 0,
+        functionsFound: 0,
+        functionsHit: 0,
+    };
+    assert.equal(
+        checkMinimums({
+            summary: { ...base, linesFound: -1 },
+            minimums: { line: 80 },
+        }).pass,
+        false,
+    );
+    assert.equal(
+        checkMinimums({
+            summary: { ...base, linesHit: 11 },
+            minimums: { line: 80 },
+        }).pass,
+        false,
+    );
 });
 
 // --- runNodeCoverageStep ---
@@ -391,6 +481,24 @@ test("no-fix validates the report the command writes into the scratch", async ()
     } finally {
         cleanupScratch(scratch);
     }
+});
+
+test("reports a malformed lcov report as an execution error", async () => {
+    const dir = await makeTempDir("quality-nc-bad-");
+    await setupCoverageRepo({
+        root: dir,
+        config: { version: TEST_SHA, coverage: { node: { command: "npm t" } } },
+        reportPath: "coverage/lcov.info",
+        reportContent: "LF:10\nLH:garbage\n",
+    });
+    const { result } = await runCoverageScenario({
+        step: runNodeCoverageStep,
+        repoRoot: dir,
+        mode: "fix",
+        trackedFiles: ["package.json"],
+    });
+    assert.equal(result.status, "error");
+    assert.match(result.notice ?? "", /invalid lcov report/u);
 });
 
 test("fix mode runs the consumer command", async () => {

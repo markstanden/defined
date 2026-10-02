@@ -69,6 +69,7 @@ export async function runNodeDepsStep({
     const packages = packagesToRestore({
         declared: config.node?.packages ?? [],
         trackedFiles,
+        eslintEnabled: config.eslint?.disable !== true,
     });
     if (packages.length === 0) {
         return skipped({ notice: "node-deps: no dependencies to restore" });

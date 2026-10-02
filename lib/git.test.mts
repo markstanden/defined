@@ -97,3 +97,36 @@ test("trackedFiles drops deleted files and lists symlinks as themselves", async 
     assert.equal(files.includes("gone.sh"), false);
     assert.deepEqual(files.sort(), [".gitignore", "link.sh", "real.sh"]);
 });
+
+test("trackedFiles preserves spaces, quotes, tabs, unicode and newlines", async () => {
+    const root = await makeRepo({ committed: ["with space.sh"] });
+    const tricky = [
+        "quote'name.sh",
+        'double"name.sh',
+        "tab\tname.sh",
+        "unicode-✓-é.sh",
+        "line\nbreak.sh",
+    ];
+    for (const rel of tricky) {
+        await writeFile(join(root, rel), "x\n");
+    }
+    const files = trackedFiles({ repoRoot: root });
+    for (const rel of tricky) {
+        assert.ok(
+            files.includes(rel),
+            `${JSON.stringify(rel)} must survive the inventory`,
+        );
+    }
+    assert.ok(files.includes("with space.sh"));
+});
+
+test("trackedFiles throws when the git inventory command fails", async () => {
+    // A directory that is not a git repo: git exits non-zero, so the gate must
+    // fail loudly rather than treat the empty output as a clean scope.
+    const dir = await mkdtemp(join(tmpdir(), "quality-notgit-"));
+    tempDirs.push(dir);
+    assert.throws(
+        () => trackedFiles({ repoRoot: dir }),
+        /git ls-files failed/u,
+    );
+});

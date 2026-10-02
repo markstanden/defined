@@ -24,6 +24,7 @@ import { join } from "node:path";
 
 import { run, type CommandResult } from "../../lib/proc.mts";
 import { hasConsumerPrettierConfig } from "./prettier-config.mts";
+import { hasConsumerEslintConfig } from "./eslint-config.mts";
 
 type Runner = typeof run;
 type Exists = typeof existsSync;
@@ -135,27 +136,67 @@ export function detail(result: CommandResult): string {
 
 /**
  * The packages to restore for a pass: every declared package, plus the repo
- * root when a consumer Prettier config is tracked and the root is not already
- * declared. The root restore is what makes a config-declared plugin resolve on
- * a fresh checkout (issue #40): prettier resolves plugins relative to the
- * config file at the repo root. A declared root (even `install: false`) wins,
- * so an explicit opt-out is honoured.
+ * root when a consumer Prettier or ESLint config is tracked and the root is
+ * not already declared. A root restore is what makes a config-declared plugin
+ * resolve on a fresh checkout (issue #40 / #63): prettier and eslint both
+ * resolve plugins relative to the config file at the repo root. A declared
+ * root (even `install: false`) wins, so an explicit opt-out is honoured, and a
+ * disabled ESLint step never forces an ESLint-only root restore.
+ *
+ * Targets are deduplicated by their resolved package directory, so two
+ * declarations for the same package (e.g. an explicit `""` plus an auto-added
+ * root) restore once.
  */
 export function packagesToRestore({
     declared,
     trackedFiles,
+    eslintEnabled = true,
 }: {
     declared: RestoreTarget[];
     trackedFiles: string[];
+    /** False when `.defined.json` disables the ESLint step. */
+    eslintEnabled?: boolean;
 }): RestoreTarget[] {
     const result = [...declared];
     const rootDeclared = declared.some((pkg) => pkg.dir === "");
+    const configTriggersRoot =
+        hasConsumerPrettierConfig({ files: trackedFiles }) ||
+        (eslintEnabled && hasConsumerEslintConfig({ files: trackedFiles }));
     if (
         !rootDeclared &&
         trackedFiles.includes("package.json") &&
-        hasConsumerPrettierConfig({ files: trackedFiles })
+        configTriggersRoot
     ) {
         result.push({ dir: "" });
+    }
+    return dedupeByResolvedDir({ targets: result, trackedFiles });
+}
+
+/** Keep the first target for each resolved package directory. */
+function dedupeByResolvedDir({
+    targets,
+    trackedFiles,
+}: {
+    targets: RestoreTarget[];
+    trackedFiles: string[];
+}): RestoreTarget[] {
+    const seen = new Set<string>();
+    const result: RestoreTarget[] = [];
+    for (const target of targets) {
+        const resolved = resolvePackageDir({
+            files: trackedFiles,
+            dir: target.dir,
+        });
+        if ("error" in resolved) {
+            // Unresolvable targets are kept so restore reports the error.
+            result.push(target);
+            continue;
+        }
+        if (seen.has(resolved.dir)) {
+            continue;
+        }
+        seen.add(resolved.dir);
+        result.push(target);
     }
     return result;
 }
