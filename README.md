@@ -136,12 +136,13 @@ the image must already be present locally.
 The gate detects the stack (steps run in order `naming → node-deps → node →
 eslint → node-checks → node-coverage → dotnet → dotnet-coverage → shell →
 smoke → yaml → workflow → tofu`), skips cleanly when an ecosystem is absent, and fails loudly
-when a pinned tool is missing. Because `verify` never writes to the repo, the
-steps that must write — `node-deps`, `node`, `node-checks`, `node-coverage`, the
+when a pinned tool is missing. `verify` never writes to the repo, so its
+write-capable steps — `node-deps`, `node`, `node-checks`, `node-coverage`, the
 `dotnet` family and `tofu` — work in a scratch copy of the git scope under the
-container's `/tmp` (a read-only mount cannot host `node_modules/`,
-`coverage/lcov.info`, `obj/`/`bin/` or `.terraform/`); the repo checkout itself
-is never touched. Tool versions are pinned in
+container's `/tmp` (a read-only mount cannot host `node_modules/`, `obj/`/`bin/`
+or `.terraform/`), and the repo checkout is never touched. `comply` is
+write-capable, so its coverage step instead generates the report in the repo
+(`coverage/lcov.info`), where a scanner such as SonarQube reads it. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 
@@ -343,6 +344,25 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     - **Minimums are declared only here** (`.defined.json`) — CLI-declared.
       Don't duplicate them in XML (e.g. a coverlet `Threshold`): the gate is
       the single authority.
+
+    When the coverage command also runs your test task, tell the gate so it is
+    not run twice: `satisfies` names the `node.checks` entry the coverage
+    command executes, and `node-checks` then skips it. This is explicit — the
+    gate never infers equivalence from command text, because two superficially
+    similar commands may cover different suites:
+
+    ```jsonc
+    "coverage": {
+        "node": {
+            "command": "vitest run --coverage",
+            "satisfies": { "check": "test" },   // "package" defaults to the root
+        },
+    },
+    "node": { "checks": [{ "name": "test", "command": "vitest run" }] },
+    ```
+
+    The coverage command runs once and its report is fresh; a test-execution
+    failure and a coverage-threshold failure stay distinct diagnostics.
 
 3. **Gate locally** — run `defined comply`. It bootstraps `.editorconfig`,
    `Directory.Build.props`, `.gitattributes` and the gate workflow

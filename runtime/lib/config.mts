@@ -32,11 +32,25 @@ export interface CoverageMinimums {
     function?: number;
 }
 
+/** The node check a coverage command runs, so the check is not run twice. */
+export interface CoverageSatisfies {
+    /** Package directory (`""` is the repo root); default repo root. */
+    package: string;
+    /** The `node.checks` name this coverage command also executes. */
+    check: string;
+}
+
 export interface CoverageConfig {
     /** Shell command to generate coverage reports (fix mode). */
     command: string;
     /** Minimums to enforce. Omitted key = not checked. */
     minimums?: CoverageMinimums;
+    /**
+     * Explicit relationship to a declared node check this coverage command
+     * also executes (issue #66): the named check is skipped in `node-checks`
+     * and the coverage command runs once. Never inferred from command text.
+     */
+    satisfies?: CoverageSatisfies;
 }
 
 /** One consumer-declared Node check (lint/typecheck/test/...). */
@@ -194,11 +208,39 @@ function validateMinimums(
     return result;
 }
 
+function validateSatisfies(
+    key: string,
+    raw: unknown,
+): CoverageSatisfies | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    const entry = expectObject(`coverage.${key}.satisfies`, raw);
+    rejectUnknownKeys(
+        entry,
+        new Set(["package", "check"]),
+        `coverage.${key}.satisfies`,
+    );
+    const check = expectNonEmptyString(
+        `coverage.${key}.satisfies.check`,
+        entry.check,
+    );
+    const pkg =
+        entry.package === undefined
+            ? ""
+            : validateNodePackageDir(
+                  `coverage.${key}.satisfies`,
+                  entry.package,
+              );
+    return { package: pkg, check };
+}
+
 function validateCoverageEntry(key: string, raw: unknown): CoverageConfig {
     const entry = expectObject(`coverage.${key}`, raw);
     return {
         command: expectNonEmptyString(`coverage.${key}.command`, entry.command),
         minimums: validateMinimums(key, entry.minimums),
+        satisfies: validateSatisfies(key, entry.satisfies),
     };
 }
 

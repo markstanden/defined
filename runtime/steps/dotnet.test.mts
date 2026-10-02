@@ -165,7 +165,7 @@ test("no-fix mode runs restore, format --verify-no-changes, build, test in a scr
     }
 });
 
-test("fix mode runs restore then format then re-verify, build, test", async () => {
+test("fix mode runs restore and format (write) only, mutating", async () => {
     const { runner, calls } = fakeRunner({}, true);
     const result = await runDotNetStep({
         ctx: { ...baseCtx, mode: "fix" },
@@ -173,14 +173,13 @@ test("fix mode runs restore then format then re-verify, build, test", async () =
         runner,
     });
     assert.equal(result.status, "pass");
-    const cmds = calls.map((c) => c[0]);
-    assert.deepEqual(cmds, ["dotnet", "dotnet", "dotnet", "dotnet", "dotnet"]);
+    // Repair-only (#65): restore (prerequisite) and format (mutation). No
+    // re-verify, build or test — those are verification, done once in the
+    // authoritative no-fix pass.
+    assert.equal(calls.length, 2);
     assert.equal(calls[0]![1], "restore");
     assert.equal(calls[1]![1], "format");
-    assert.equal(calls[2]![1], "format");
-    assert.equal(calls[2]![2], "--verify-no-changes");
-    assert.equal(calls[3]![1], "build");
-    assert.equal(calls[4]![1], "test");
+    assert.equal(calls[1]![2], join(baseCtx.repoRoot, "src/MyProj.csproj"));
 });
 
 test("restore failure fails the step before any build", async () => {

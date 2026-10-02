@@ -3,8 +3,8 @@
 // Tools:    shfmt (format), shellcheck (analysis)
 // Config:   severity floor via raiseFloor; per-project ignores travel in
 //           runtime/config/ when needed
-// Fix:      shfmt -w rewrites, then the step re-checks before reporting —
-//           a fix that leaves breakage can never read as success
+// Fix:      shfmt -w only. This is the repair pass (#65): the format check and
+//           shellcheck run once, in the authoritative no-fix verification pass.
 //
 // Detection is sync and data-driven: the orchestrator supplies the tracked
 // file list (lib/git.mts); this module only filters it. The runner is
@@ -96,7 +96,8 @@ export async function runShellStep({
         return skipped({ notice: "shell: no tracked *.sh files" });
     }
 
-    // Format first: in fix mode rewrite, then always verify clean.
+    // Repair (#65): mutate only — shfmt -w. The format check and shellcheck
+    // belong to the single authoritative no-fix verification pass.
     if (ctx.mode === "fix") {
         const fmt = runner({ cmd: "shfmt", args: ["-w", ...scripts] });
         if (fmt.status !== 0) {
@@ -104,6 +105,7 @@ export async function runShellStep({
                 message: `shell: shfmt -w failed: ${fmt.stderr.trim()}`,
             });
         }
+        return passed({ notice: `shell: formatted ${scripts.length} file(s)` });
     }
     // -l lists the files still needing formatting (and exits 0 even when it
     // lists them); treat any listed file as the diff, and a nonzero exit as a

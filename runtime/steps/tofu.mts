@@ -4,8 +4,10 @@
 // Config:   .defined.json "tofu.dirs" (optional) — explicit module directories;
 //           absent means auto-discover the top-most tracked .tf directories.
 //           tflint otherwise picks up the project's .tflint.hcl when present.
-// Fix:      tofu fmt -write and tflint --fix rewrite, then the step re-verifies
-//           — a fix that leaves diffs can never read as success
+// Fix:      tofu fmt -write only. This is the repair pass (#65): the fmt check
+//           and the tflint/init/validate module checks run once, in the
+//           authoritative no-fix verification pass — a fix that leaves diffs
+//           can never read as success.
 // No-fix:   runs in the shared /tmp scratch copy of the git scope: `tofu init`
 //           writes .terraform/ and a lock file, which a read-only verify/CI
 //           mount cannot host (same mechanism as the node/dotnet steps).
@@ -110,32 +112,48 @@ async function runTflintCommand(
 }
 
 /**
- * Lint, init and validate one module directory. Returns a failure notice naming
- * the directory, or null when the directory is clean.
+ * Repair's tflint mutation for one module directory: `--init` (so a project
+ * .tflint.hcl's plugins are present — a prerequisite) then `--fix`. Returns a
+ * failure notice naming the directory, or null when the fixer ran.
+ */
+async function runTflintFixes({
+    runner,
+    cwd,
+    dir,
+}: {
+    runner: Runner;
+    cwd: string;
+    dir: string;
+}): Promise<string | null> {
+    const tflintInit = await runTflintCommand(runner, ["--init"], cwd);
+    if (tflintInit.status !== 0) {
+        return `tofu: tflint --init failed in ${dir}: ${tflintInit.stderr.trim()}`;
+    }
+    const tflintFix = await runTflintCommand(runner, ["--fix"], cwd);
+    if (tflintFix.status === 1) {
+        return `tofu: tflint --fix failed in ${dir}: ${tflintFix.stderr.trim()}`;
+    }
+    return null;
+}
+
+/**
+ * Verify tflint, init and validate for one module directory. Returns a failure
+ * notice naming the directory, or null when the directory is clean.
  */
 async function runModuleChecks({
     runner,
     cwd,
     dir,
-    mode,
 }: {
     runner: Runner;
     cwd: string;
     dir: string;
-    mode: "fix" | "no-fix";
 }): Promise<string | null> {
     // --init first so a project .tflint.hcl's plugins land in the plugin cache;
     // then lint. Exit 0 clean / 1 error / 2 issues found.
     const tflintInit = await runTflintCommand(runner, ["--init"], cwd);
     if (tflintInit.status !== 0) {
         return `tofu: tflint --init failed in ${dir}: ${tflintInit.stderr.trim()}`;
-    }
-
-    if (mode === "fix") {
-        const tflintFix = await runTflintCommand(runner, ["--fix"], cwd);
-        if (tflintFix.status === 1) {
-            return `tofu: tflint --fix failed in ${dir}: ${tflintFix.stderr.trim()}`;
-        }
     }
 
     const tflint = await runTflintCommand(runner, [], cwd);
@@ -157,33 +175,45 @@ async function runModuleChecks({
 }
 
 /**
- * The fmt phase: `-write` over the exact git scope in fix mode, then `-check`
- * always. Returns the failed result, or null when formatting is clean.
+ * Repair's fmt mutation: `-write` over the exact git scope. Returns the failed
+ * result, or null when the write succeeded.
  */
 async function runFmtPhase({
-    ctx,
     runner,
     workingRoot,
     tfFiles,
 }: {
-    ctx: TofuRunContext;
     runner: Runner;
     workingRoot: string;
     tfFiles: string[];
 }): Promise<StepResult | null> {
     // fmt: exact git scope — the tracked .tf files, never a recursive walk.
-    if (ctx.mode === "fix") {
-        const fmtWrite = await runTofuCommand(
-            runner,
-            ["fmt", "-write", ...tfFiles],
-            workingRoot,
-        );
-        if (fmtWrite.status !== 0) {
-            return failed({
-                notice: `tofu: fmt -write failed: ${fmtWrite.stderr.trim()}`,
-            });
-        }
+    const fmtWrite = await runTofuCommand(
+        runner,
+        ["fmt", "-write", ...tfFiles],
+        workingRoot,
+    );
+    if (fmtWrite.status !== 0) {
+        return failed({
+            notice: `tofu: fmt -write failed: ${fmtWrite.stderr.trim()}`,
+        });
     }
+    return null;
+}
+
+/**
+ * Verification's fmt check: `-check` over the exact git scope. Returns the
+ * failed result, or null when formatting is clean.
+ */
+async function runFmtCheck({
+    runner,
+    workingRoot,
+    tfFiles,
+}: {
+    runner: Runner;
+    workingRoot: string;
+    tfFiles: string[];
+}): Promise<StepResult | null> {
     const fmtCheck = await runTofuCommand(
         runner,
         ["fmt", "-check", ...tfFiles],
@@ -196,8 +226,98 @@ async function runFmtPhase({
 }
 
 /**
- * Run tofu fmt, then tflint/init/validate per module directory.
- * Returns skip when no .tf files tracked; fail naming the failing phase/dir.
+ * Repair (fix): the mutations — tofu fmt -write, then tflint --init/--fix per
+ * module directory. The fmt check and tflint/init/validate checks belong to the
+ * single authoritative no-fix verification pass (#65).
+ */
+async function runTofuRepair({
+    ctx,
+    runner,
+    readFileFn,
+    trackedFiles,
+    workingRoot,
+    tfFiles,
+}: {
+    ctx: TofuRunContext;
+    runner: Runner;
+    readFileFn: typeof readFile;
+    trackedFiles: string[];
+    workingRoot: string;
+    tfFiles: string[];
+}): Promise<StepResult> {
+    const fmtFailure = await runFmtPhase({
+        runner,
+        workingRoot,
+        tfFiles,
+    });
+    if (fmtFailure !== null) {
+        return fmtFailure;
+    }
+
+    const config = await loadConfig({ repoRoot: ctx.repoRoot, readFileFn });
+    const dirs = config.tofu?.dirs ?? tfDirectories({ files: trackedFiles });
+    for (const dir of dirs) {
+        const failure = await runTflintFixes({
+            runner,
+            cwd: join(workingRoot, dir),
+            dir,
+        });
+        if (failure) {
+            return failed({ notice: failure });
+        }
+    }
+
+    return passed({
+        notice: `tofu: formatted ${tfFiles.length} file(s); tflint fixes applied in ${dirs.length} module dir(s)`,
+    });
+}
+
+/**
+ * Verification (no-fix): tofu fmt -check, then tflint/init/validate per module
+ * directory. The authoritative judgement.
+ */
+async function runTofuVerify({
+    ctx,
+    runner,
+    readFileFn,
+    trackedFiles,
+    workingRoot,
+    tfFiles,
+}: {
+    ctx: TofuRunContext;
+    runner: Runner;
+    readFileFn: typeof readFile;
+    trackedFiles: string[];
+    workingRoot: string;
+    tfFiles: string[];
+}): Promise<StepResult> {
+    const fmtFailure = await runFmtCheck({ runner, workingRoot, tfFiles });
+    if (fmtFailure !== null) {
+        return fmtFailure;
+    }
+
+    const config = await loadConfig({ repoRoot: ctx.repoRoot, readFileFn });
+    const dirs = config.tofu?.dirs ?? tfDirectories({ files: trackedFiles });
+    for (const dir of dirs) {
+        const failure = await runModuleChecks({
+            runner,
+            cwd: join(workingRoot, dir),
+            dir,
+        });
+        if (failure) {
+            return failed({ notice: failure });
+        }
+    }
+
+    return passed({
+        notice: `tofu: fmt/tflint/init/validate clean (${tfFiles.length} file(s), ${dirs.length} module dir(s))`,
+    });
+}
+
+/**
+ * Run the tofu step over the tracked .tf files: repair mutations only in fix
+ * mode, the full checks in no-fix mode (#65). Returns skip when no .tf files
+ * tracked; fail naming the failing phase/dir.
  */
 export async function runTofuStep({
     ctx,
@@ -222,32 +342,13 @@ export async function runTofuStep({
         files: trackedFiles,
     });
 
-    const fmtFailure = await runFmtPhase({
+    const args = {
         ctx,
         runner,
+        readFileFn,
+        trackedFiles,
         workingRoot,
         tfFiles,
-    });
-    if (fmtFailure !== null) {
-        return fmtFailure;
-    }
-
-    const config = await loadConfig({ repoRoot: ctx.repoRoot, readFileFn });
-    const dirs = config.tofu?.dirs ?? tfDirectories({ files: trackedFiles });
-
-    for (const dir of dirs) {
-        const failure = await runModuleChecks({
-            runner,
-            cwd: join(workingRoot, dir),
-            dir,
-            mode: ctx.mode,
-        });
-        if (failure) {
-            return failed({ notice: failure });
-        }
-    }
-
-    return passed({
-        notice: `tofu: fmt/tflint/init/validate clean (${tfFiles.length} file(s), ${dirs.length} module dir(s))`,
-    });
+    };
+    return ctx.mode === "fix" ? runTofuRepair(args) : runTofuVerify(args);
 }

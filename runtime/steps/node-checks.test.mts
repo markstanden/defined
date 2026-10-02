@@ -51,7 +51,7 @@ test("runNodeChecksStep runs checks with consumer binaries first", async () => {
     });
     const { runner, calls } = recordingRunner();
     const result = await runNodeChecksStep({
-        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
         trackedFiles: ["lib/package.json"],
         runner,
         existsSyncFn: () => true,
@@ -68,6 +68,73 @@ test("runNodeChecksStep runs checks with consumer binaries first", async () => {
     assert.ok(lint.env!.PATH!.includes(`${root}/node_modules/.bin`));
 });
 
+test("runNodeChecksStep skips a check satisfied by the coverage command (#66)", async () => {
+    const root = await makeTempDir("quality-node-checks-");
+    await writeConfig(root, {
+        node: {
+            checks: [
+                { name: "lint", command: "eslint ." },
+                { name: "test", command: "vitest run" },
+            ],
+        },
+        coverage: {
+            node: {
+                command: "vitest run --coverage",
+                satisfies: { package: "", check: "test" },
+            },
+        },
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runNodeChecksStep({
+        ctx: { ...baseCtx, repoRoot: root, mode: "no-fix" },
+        trackedFiles: ["package.json"],
+        runner,
+        existsSyncFn: () => true,
+    });
+    assert.equal(result.status, "pass");
+    // The named check never runs here; the coverage command runs it once.
+    assert.deepEqual(
+        calls.map((c) => c.args[1]),
+        ["eslint ."],
+    );
+    assert.match(result.notice ?? "", /1 check\(s\) passed/u);
+});
+
+test("runNodeChecksStep only skips a satisfied check in the matching package (#66)", async () => {
+    const root = await makeTempDir("quality-node-checks-");
+    await writeConfig(root, {
+        node: {
+            packages: [
+                {
+                    dir: "a",
+                    checks: [{ name: "test", command: "vitest run" }],
+                },
+                {
+                    dir: "b",
+                    checks: [{ name: "test", command: "vitest run" }],
+                },
+            ],
+        },
+        coverage: {
+            node: {
+                command: "vitest run --coverage",
+                satisfies: { package: "a", check: "test" },
+            },
+        },
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runNodeChecksStep({
+        ctx: { ...baseCtx, repoRoot: root, mode: "no-fix" },
+        trackedFiles: ["a/package.json", "b/package.json"],
+        runner,
+        existsSyncFn: () => true,
+    });
+    assert.equal(result.status, "pass");
+    // Only package "b"'s test runs; package "a"'s is satisfied by coverage.
+    assert.equal(calls.length, 1);
+    assert.match(calls[0]!.cwd!, /\/b$/u);
+});
+
 test("a failing check fails the step naming the package and check", async () => {
     const root = await makeTempDir("quality-node-checks-");
     await writeConfig(root, {
@@ -79,7 +146,7 @@ test("a failing check fails the step naming the package and check", async () => 
         "eslint .": { status: 1, stdout: "3 problems" },
     });
     const result = await runNodeChecksStep({
-        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
         trackedFiles: ["package.json"],
         runner,
         existsSyncFn: () => true,
@@ -89,7 +156,7 @@ test("a failing check fails the step naming the package and check", async () => 
     assert.match(result.notice ?? "", /3 problems/u);
 });
 
-test("fix mode runs the autofix before the check; no-fix does not", async () => {
+test("fix mode runs the autofix only; no-fix runs the check only (#65)", async () => {
     const root = await makeTempDir("quality-node-checks-");
     await writeConfig(root, {
         node: {
@@ -107,9 +174,10 @@ test("fix mode runs the autofix before the check; no-fix does not", async () => 
         runner: fixing.runner,
         existsSyncFn: () => true,
     });
+    // Repair mutation only: the autofix, never the check (#65).
     assert.deepEqual(
         fixing.calls.map((c) => c.args[1]),
-        ["eslint --fix .", "eslint ."],
+        ["eslint --fix ."],
     );
 
     const checking = recordingRunner();
@@ -165,7 +233,7 @@ test("a monorepo package list runs each package in its own directory", async () 
     });
     const { runner, calls } = recordingRunner();
     const result = await runNodeChecksStep({
-        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
         trackedFiles: ["packages/a/package.json", "packages/b/package.json"],
         runner,
         existsSyncFn: () => true,

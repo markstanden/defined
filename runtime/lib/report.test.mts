@@ -4,7 +4,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { BOOTSTRAP_CHECK, buildResult, renderResult } from "./report.mts";
+import {
+    BOOTSTRAP_CHECK,
+    buildResult,
+    mergeRepairErrors,
+    renderResult,
+} from "./report.mts";
 import { blocked, errored, failed, passed, skipped } from "./step-result.mts";
 import type { SetupCheck } from "../setup.mts";
 
@@ -222,4 +227,68 @@ test("renderResult_output_isOneLineWithNoTrailingWhitespace", () => {
         assert.equal(line.includes("\n"), false);
         assert.equal(line, line.trim());
     }
+});
+
+test("mergeRepairErrors_preservesARepairErrorVerifyReadsClean", () => {
+    const repair = new Map([
+        ["node", errored({ message: "prettier --write failed" })],
+    ]);
+    const verify = new Map([
+        ["node", passed({ notice: "formatted" })],
+        ["shell", passed({})],
+    ]);
+    const steps = mergeRepairErrors({ repair, verify });
+    const node = steps.find((step) => step.id === "node")!;
+    assert.equal(node.result.status, "error");
+    assert.equal(node.result.notice, "prettier --write failed");
+    // Verification's other steps are untouched.
+    assert.equal(
+        steps.find((step) => step.id === "shell")!.result.status,
+        "pass",
+    );
+});
+
+test("mergeRepairErrors_keepsTheAuthoritativeVerifyResultWhenItAlsoFailed", () => {
+    const repair = new Map([["node", failed({ notice: "fix left diffs" })]]);
+    const verify = new Map([["node", failed({ notice: "still unformatted" })]]);
+    const steps = mergeRepairErrors({ repair, verify });
+    assert.equal(steps.length, 1);
+    assert.equal(steps[0]!.result.notice, "still unformatted");
+});
+
+test("mergeRepairErrors_ignoresPassingAndSkippedRepairSteps", () => {
+    const repair = new Map([
+        ["node", passed({})],
+        ["yaml", skipped({ notice: "deferred to verification" })],
+        ["coverage", skipped({ notice: "deferred" })],
+    ]);
+    const verify = new Map([
+        ["node", passed({})],
+        ["yaml", passed({})],
+        ["coverage", passed({})],
+    ]);
+    const steps = mergeRepairErrors({ repair, verify });
+    assert.deepEqual(
+        steps.map((step) => [step.id, step.result.status]),
+        [
+            ["node", "pass"],
+            ["yaml", "pass"],
+            ["coverage", "pass"],
+        ],
+    );
+});
+
+test("mergeRepairErrors_addsARepairStepVerifyDidNotRun", () => {
+    const repair = new Map([
+        ["shell", errored({ message: "shfmt -w failed" })],
+    ]);
+    const verify = new Map([["node", passed({})]]);
+    const steps = mergeRepairErrors({ repair, verify });
+    assert.deepEqual(
+        steps.map((step) => [step.id, step.result.status]),
+        [
+            ["node", "pass"],
+            ["shell", "error"],
+        ],
+    );
 });

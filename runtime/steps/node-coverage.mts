@@ -2,11 +2,12 @@
 //
 // Tools:    none (runs the consumer's coverage command; parses lcov)
 // Config:   .defined.json "coverage.node" — command + minimums
-// Fix:      runs the consumer's coverage command in the repo (rw mount), then
-//           validates the report
-// No-fix:   runs the consumer's coverage command in a /tmp scratch copy of the
-//           git scope (a read-only verify cannot write a report into the repo)
-//           and validates the scratch report
+// Fix:      none — coverage generation is verification, so repair skips and it
+//           runs once in the no-fix pass (#65)
+// No-fix:   runs the consumer's coverage command and validates the report. A
+//           read-only verify runs it in a /tmp scratch copy of the git scope
+//           (it cannot write into the repo); a write-capable comply keeps the
+//           report in the repo (coverage/lcov.info), where a scanner reads it
 // Skip:     no .defined.json entry for "node", or no coverage/lcov.info found
 //
 // Detection is config-driven: the step only activates when .defined.json
@@ -36,6 +37,8 @@ export interface NodeCoverageRunContext {
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
     scratch?: Scratch;
+    /** Write-capable invocation: no-fix keeps the report in the repo (comply). */
+    repoWritable?: boolean;
 }
 
 type Runner = typeof run;
@@ -284,10 +287,10 @@ function isSummary(value: LcovSummary | StepResult): value is LcovSummary {
 }
 
 /**
- * Run Node.js coverage gate. Skips when no config entry; always runs the
- * consumer's command — in the repo for fix mode, in a /tmp scratch copy of the
- * git scope for no-fix (read-only verify cannot write a report into the repo)
- * — then validates the report against configured minimums.
+ * Run Node.js coverage gate. Skips when no config entry. Repair (fix) skips —
+ * coverage generation is verification (#65). No-fix runs the consumer's command
+ * in a /tmp scratch copy of the git scope (a read-only verify cannot write a
+ * report into the repo), then validates the report against configured minimums.
  */
 export async function runNodeCoverageStep({
     ctx,
@@ -309,9 +312,19 @@ export async function runNodeCoverageStep({
 
     const coverageConfig = config.coverage.node;
 
+    // Repair (#65): coverage generation is verification, not mutation; it runs
+    // once, in the authoritative no-fix pass.
+    if (ctx.mode === "fix") {
+        return skipped({
+            notice: "node-coverage: deferred to verification",
+        });
+    }
+
     // Read-only verify cannot write a report into /repo, so no-fix runs the
     // consumer's command against a scratch copy of the git scope (shared with
-    // the dotnet steps via ctx.scratch) and validates the scratch report.
+    // the dotnet steps via ctx.scratch) and validates the scratch report. A
+    // write-capable comply instead keeps the report in the repo (the artifact
+    // SonarQube reads).
     const { workingRoot, failure } = runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
@@ -319,6 +332,7 @@ export async function runNodeCoverageStep({
         trackedFiles,
         command: coverageConfig.command,
         runner,
+        repoWritable: ctx.repoWritable,
     });
     if (failure !== null) {
         return failed({

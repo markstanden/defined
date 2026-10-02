@@ -7,7 +7,8 @@
 //           yamllint resolves config relative to CWD unless told).
 //           Runs with -s: warnings are failures, so the bar is identical
 //           locally and in CI.
-// Fix:      none; the step is check-only in both modes
+// Fix:      none; the step is check-only, so repair skips it and it runs once
+//           in the authoritative no-fix pass (#65)
 //
 // Detection is data-driven: the orchestrator supplies tracked files. The
 // runner is injected so tests need no host binaries.
@@ -83,6 +84,12 @@ export async function runYamlStep({
     const files = filterYamlFiles({ files: trackedFiles });
     if (files.length === 0) {
         return skipped({ notice: "yaml: no tracked *.yml/*.yaml files" });
+    }
+
+    // Repair (#65): yamllint has no autofix — a check-only task, so it runs
+    // once, in the authoritative no-fix pass.
+    if (ctx.mode === "fix") {
+        return skipped({ notice: "yaml: deferred to verification" });
     }
 
     // -f parsable gives one finding per line, machine-countable.

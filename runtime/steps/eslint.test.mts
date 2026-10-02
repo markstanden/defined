@@ -162,7 +162,7 @@ test("a repo config never receives the complexity override", async () => {
     );
 });
 
-test("house config fix mode --fixes then re-checks in the repo, writing nothing", async () => {
+test("house config fix mode --fixes only and never re-checks (repair-only, #65)", async () => {
     const root = await makeTempDir("quality-eslint-fix-");
     await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
     const { runner, calls } = recordingRunner();
@@ -172,12 +172,27 @@ test("house config fix mode --fixes then re-checks in the repo, writing nothing"
         runner,
     });
     assert.equal(result.status, "pass");
+    // Repair mutation only: one eslint --fix. The lint check runs once in the
+    // authoritative no-fix pass (#65).
     assert.deepEqual(
         calls.map((c) => (c.cmd !== "eslint" ? c.cmd : c.args[0])),
-        ["--fix", "--config"],
+        ["--fix"],
     );
     assert.equal(calls[0]!.cwd, root);
     assert.equal(existsSync(join(root, ESLINT_EXAMPLE_NAME)), false);
+});
+
+test("fix mode passes when --fix leaves unfixable findings (verification decides, #65)", async () => {
+    const root = await makeTempDir("quality-eslint-fix-left-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    // eslint --fix exits 1 when findings it cannot fix remain; that is not a
+    // repair failure — the no-fix check reports it.
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        trackedFiles: ["src/a.ts"],
+        runner: failingRunner("[]"),
+    });
+    assert.equal(result.status, "pass");
 });
 
 test("a repo config runs through the repo's eslint and writes the house example", async () => {
@@ -196,11 +211,13 @@ test("a repo config runs through the repo's eslint and writes the house example"
         notifyFn: (line) => notes.push(line),
     });
     assert.equal(result.status, "pass");
-    // Both passes go through the repo's own ESLint (sh -c), never --config.
-    assert.equal(calls.length, 2);
+    // Repair runs the repo's own ESLint (sh -c) with --fix, never --config, and
+    // no check pass (#65).
+    assert.equal(calls.length, 1);
     assert.equal(calls[0]!.cmd, "sh");
     const command = calls[0]!.args[1]!;
     assert.match(command, /'eslint'/u);
+    assert.match(command, /--fix/u);
     assert.doesNotMatch(command, /--config/u);
     assert.match(command, /'eslint\.config\.mjs'/u);
     // The sidecar is the baked house config, byte-for-byte.
@@ -242,12 +259,12 @@ test("repo config in no-fix writes no sidecar and does not notify", async () => 
     }
 });
 
-test("a fix that leaves findings fails on the re-check and names the rule", async () => {
-    const root = await makeTempDir("quality-eslint-findings-");
-    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+test("check mode reports each finding with its rule (verification pass)", async () => {
+    const dir = await makeTempDir("quality-eslint-findings-");
+    await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const report = JSON.stringify([
         {
-            filePath: join(root, "src/a.ts"),
+            filePath: join(dir, "src/a.ts"),
             messages: [
                 {
                     ruleId: "regexp/no-super-linear-move",
@@ -257,17 +274,10 @@ test("a fix that leaves findings fails on the re-check and names the rule", asyn
             ],
         },
     ]);
-    let call = 0;
-    const runner = (() => {
-        call += 1;
-        return call === 1
-            ? { status: 0, stdout: "", stderr: "" }
-            : { status: 1, stdout: report, stderr: "" };
-    }) as typeof import("../../lib/proc.mts").run;
     const result = await runEslintStep({
-        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
         trackedFiles: ["src/a.ts"],
-        runner,
+        runner: failingRunner(report),
     });
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /1 finding\(s\) \(house config\)/u);
@@ -344,13 +354,13 @@ function failingRunner(
 }
 
 test("a finding without a rule id or line still counts", async () => {
-    const root = await makeTempDir("quality-eslint-nofields-");
-    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const dir = await makeTempDir("quality-eslint-nofields-");
+    await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const report = JSON.stringify([
-        { filePath: join(root, "src/a.ts"), messages: [{ severity: 2 }] },
+        { filePath: join(dir, "src/a.ts"), messages: [{ severity: 2 }] },
     ]);
     const result = await runEslintStep({
-        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
         trackedFiles: ["src/a.ts"],
         runner: failingRunner(report),
     });
@@ -359,18 +369,18 @@ test("a finding without a rule id or line still counts", async () => {
 });
 
 test("every finding is reported without truncation", async () => {
-    const root = await makeTempDir("quality-eslint-many-");
-    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const dir = await makeTempDir("quality-eslint-many-");
+    await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const messages = Array.from({ length: 7 }, (_, i) => ({
         ruleId: "regexp/x",
         severity: 2,
         line: i + 1,
     }));
     const report = JSON.stringify([
-        { filePath: join(root, "src/a.ts"), messages },
+        { filePath: join(dir, "src/a.ts"), messages },
     ]);
     const result = await runEslintStep({
-        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
         trackedFiles: ["src/a.ts"],
         runner: failingRunner(report),
     });
@@ -380,8 +390,8 @@ test("every finding is reported without truncation", async () => {
 });
 
 test("unparseable, empty, malformed and warning-only reports fall back", async () => {
-    const root = await makeTempDir("quality-eslint-fallbacks-");
-    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const dir = await makeTempDir("quality-eslint-fallbacks-");
+    await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const cases = [
         { stdout: "not json", re: /lint failed \(house config\): not json/u },
         { stdout: "", re: /lint failed \(house config\): no output/u },
@@ -407,7 +417,7 @@ test("unparseable, empty, malformed and warning-only reports fall back", async (
     ];
     for (const { stdout, re } of cases) {
         const result = await runEslintStep({
-            ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+            ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
             trackedFiles: ["src/a.ts"],
             runner: failingRunner(stdout),
         });

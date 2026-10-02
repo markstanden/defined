@@ -95,7 +95,7 @@ test("a root-only module runs in the working root", async () => {
     assert.equal(validate.at(-1), "/scratch");
 });
 
-test("fix mode formats each tracked file then re-checks", async () => {
+test("fix mode writes each tracked file and runs tflint --fix only (repair-only, #65)", async () => {
     const { runner, calls } = fakeRunner({}, true);
     const result = await runTofuStep({
         ctx: { mode: "fix", repoRoot: REPO },
@@ -103,12 +103,14 @@ test("fix mode formats each tracked file then re-checks", async () => {
         runner,
     });
     assert.equal(result.status, "pass");
-    const fmtCalls = calls.filter((c) => c[0] === "tofu" && c[1] === "fmt");
+    // Repair mutations only: fmt -write and tflint --fix (the fmt check and
+    // tflint/init/validate run once in the no-fix pass).
     assert.deepEqual(
-        fmtCalls.map((c) => c.slice(0, -1)),
+        calls.map((c) => c.join(" ")),
         [
-            ["tofu", "fmt", "-write", "main.tf"],
-            ["tofu", "fmt", "-check", "main.tf"],
+            "tofu fmt -write main.tf /repo",
+            "tflint --init /repo",
+            "tflint --fix /repo",
         ],
     );
 });
@@ -119,7 +121,7 @@ test("a validate failure names the failing directory", async () => {
         true,
     );
     const result = await runTofuStep({
-        ctx: { mode: "fix", repoRoot: REPO },
+        ctx: { mode: "no-fix", repoRoot: REPO, scratch: { dir: "/scratch" } },
         trackedFiles: ["infrastructure/main.tf"],
         runner,
     });
@@ -135,7 +137,7 @@ test("tofu.dirs restricts the module directories", async () => {
     );
     const { runner, calls } = fakeRunner({}, true);
     const result = await runTofuStep({
-        ctx: { mode: "fix", repoRoot: dir },
+        ctx: { mode: "no-fix", repoRoot: dir, scratch: { dir } },
         trackedFiles: ["main.tf", "modules/net/main.tf"],
         runner,
     });
@@ -154,7 +156,7 @@ type FailureCase = {
 
 const failureCases: FailureCase[] = [
     {
-        name: "fmt failure in fix mode",
+        name: "fmt check failure",
         outcomes: { "tofu fmt": { status: 1, stderr: "fmt error" } },
         notice: "tofu: fmt",
     },
@@ -189,7 +191,11 @@ for (const c of failureCases) {
     test(`${c.name} fails the step`, async () => {
         const { runner } = fakeRunner(c.outcomes, true);
         const result = await runTofuStep({
-            ctx: { mode: "fix", repoRoot: REPO },
+            ctx: {
+                mode: "no-fix",
+                repoRoot: REPO,
+                scratch: { dir: "/scratch" },
+            },
             trackedFiles: ["main.tf"],
             runner,
         });

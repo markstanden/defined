@@ -143,7 +143,7 @@ test("filterFixableFiles drops the gate-managed workflow", () => {
     );
 });
 
-test("fix mode applies zizmor's safe autofixes before the checks", async () => {
+test("fix mode applies zizmor's safe autofixes and nothing else (repair-only, #65)", async () => {
     const { runner, calls } = fakeRunner({}, true);
     const result = await runWorkflowStep({
         ctx: fixCtx,
@@ -151,9 +151,11 @@ test("fix mode applies zizmor's safe autofixes before the checks", async () => {
         runner,
     });
     assert.equal(result.status, "pass");
+    // Repair mutation only: one zizmor --fix. actionlint, zizmor's check and
+    // gitleaks run once in the authoritative no-fix pass (#65).
     assert.deepEqual(
         calls.map((c) => c[0]),
-        ["zizmor", "actionlint", "zizmor", "git", "gitleaks"],
+        ["zizmor"],
     );
     assert.deepEqual(calls[0]!.slice(1, -1), [
         "--fix",
@@ -173,7 +175,7 @@ test("no-fix mode never asks zizmor to fix", async () => {
     assert.ok(!calls.some((call) => call.includes("--fix")));
 });
 
-test("a failed autofix run cannot pass the step; the re-check decides", async () => {
+test("a failed autofix run does not fail repair; verification decides (#65)", async () => {
     const { runner } = fakeRunner(
         { "zizmor --fix": { status: 1, stderr: "fixer blew up" } },
         true,
@@ -186,7 +188,7 @@ test("a failed autofix run cannot pass the step; the re-check decides", async ()
     assert.equal(result.status, "pass");
 });
 
-test("a finding the fixer leaves still fails the step", async () => {
+test("a finding zizmor leaves fails the verification pass", async () => {
     const { runner } = fakeRunner(
         {
             "zizmor --no-progress": {
@@ -197,7 +199,7 @@ test("a finding the fixer leaves still fails the step", async () => {
         true,
     );
     const result = await runWorkflowStep({
-        ctx: fixCtx,
+        ctx: baseCtx,
         trackedFiles: [".github/workflows/ci.yml"],
         runner,
     });

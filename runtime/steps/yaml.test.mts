@@ -97,13 +97,14 @@ test("config travels with the gate and -s makes warnings fail", async () => {
     ]);
 });
 
-test("fix mode does not rewrite: yamllint has no autofix", async () => {
+test("repair skips yamllint entirely (check-only, #65)", async () => {
     const { runner, calls } = fakeRunner({});
     const result = await runYamlStep({
         ctx: { ...baseCtx, mode: "fix" },
         trackedFiles: ["ci.yml"],
         runner,
     });
-    assert.equal(result.status, "pass");
-    assert.equal(calls.filter((c) => c[0] === "yamllint").length, 1);
+    assert.equal(result.status, "skip");
+    assert.match(result.notice ?? "", /deferred to verification/u);
+    assert.equal(calls.length, 0);
 });

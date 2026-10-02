@@ -2,11 +2,12 @@
 //
 // Tools:    none (runs the consumer's coverage command; parses Cobertura)
 // Config:   .defined.json "coverage.dotnet" — command + minimums
-// Fix:      runs the consumer's coverage command in the repo (rw mount), then
-//           validates the report
-// No-fix:   runs the consumer's coverage command in a /tmp scratch copy of the
-//           git scope (a read-only verify cannot write a report into the repo)
-//           and validates the scratch report
+// Fix:      none — coverage generation is verification, so repair skips and it
+//           runs once in the no-fix pass (#65)
+// No-fix:   runs the consumer's coverage command and validates the report. A
+//           read-only verify runs it in a /tmp scratch copy of the git scope
+//           (it cannot write into the repo); a write-capable comply keeps the
+//           report in the repo, where a scanner reads it
 // Skip:     dotnet disabled by .defined.json, no .defined.json entry for
 //           "dotnet", or no Cobertura XML found
 //
@@ -29,13 +30,19 @@ import {
 import { runScopedCommand } from "../lib/coverage.mts";
 import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
-import { loadConfig, type CoverageMinimums } from "../lib/config.mts";
+import {
+    loadConfig,
+    type CoverageConfig,
+    type CoverageMinimums,
+} from "../lib/config.mts";
 
 export interface DotNetCoverageRunContext {
     mode: "fix" | "no-fix";
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
     scratch?: Scratch;
+    /** Write-capable invocation: no-fix keeps the report in the repo (comply). */
+    repoWritable?: boolean;
 }
 
 type Runner = typeof run;
@@ -155,10 +162,10 @@ function findCoberturaFile({ repoRoot }: { repoRoot: string }): string | null {
 }
 
 /**
- * Run dotnet coverage gate. Skips when no config entry; always runs the
- * consumer's command — in the repo for fix mode, in a /tmp scratch copy of the
- * git scope for no-fix (read-only verify cannot write a report into the repo)
- * — then validates the report against configured minimums. Looks for
+ * Run dotnet coverage gate. Skips when no config entry; runs the consumer's
+ * command once in the authoritative no-fix pass, in a /tmp scratch copy of the
+ * git scope (a read-only verify cannot write a report into the repo), then
+ * validates the report against configured minimums. Looks for
  * coverage.cobertura.xml at the working root or TestResults/.
  */
 /**
@@ -216,9 +223,18 @@ export async function runDotNetCoverageStep({
 
     const coverageConfig = config.coverage.dotnet;
 
+    // Repair (#65): coverage generation is verification, not mutation; it runs
+    // once, in the authoritative no-fix pass.
+    if (ctx.mode === "fix") {
+        return skipped({
+            notice: "dotnet-coverage: deferred to verification",
+        });
+    }
+
     // Read-only verify cannot write a report into /repo, so no-fix runs the
     // consumer's command against a scratch copy of the git scope (shared with
-    // the dotnet step via ctx.scratch) and validates the scratch report.
+    // the dotnet step via ctx.scratch) and validates the scratch report. A
+    // write-capable comply instead keeps the report in the repo.
     const { workingRoot, failure } = runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
@@ -226,6 +242,7 @@ export async function runDotNetCoverageStep({
         trackedFiles,
         command: coverageConfig.command,
         runner,
+        repoWritable: ctx.repoWritable,
     });
     if (failure !== null) {
         return failed({
@@ -233,6 +250,23 @@ export async function runDotNetCoverageStep({
         });
     }
 
+    return evaluateCobertura({ workingRoot, coverageConfig, readFileFn });
+}
+
+/**
+ * Validate the generated Cobertura report against the configured minimums:
+ * a missing/empty report or a below-minimum metric is a failure, otherwise a
+ * pass naming the achieved line coverage.
+ */
+async function evaluateCobertura({
+    workingRoot,
+    coverageConfig,
+    readFileFn,
+}: {
+    workingRoot: string;
+    coverageConfig: CoverageConfig;
+    readFileFn: typeof readFile;
+}): Promise<StepResult> {
     const loaded = await loadCoberturaSummary({ workingRoot, readFileFn });
     if (!("summary" in loaded)) {
         return loaded;

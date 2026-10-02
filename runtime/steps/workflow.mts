@@ -6,12 +6,14 @@
 //           fingerprint baseline survives regardless of CWD. zizmor runs at
 //           its own default min-severity (informational): every finding it
 //           reports fails.
-// Fix:      zizmor's *safe* autofixes (--fix) run first in fix mode, then the
-//           step always re-checks: a fix that leaves breakage can never read
-//           as success. Unsafe fixes are deliberately not applied — they encode
-//           design decisions (e.g. syntax a validator may not yet accept), and
-//           the re-check surfaces whatever remains. actionlint and gitleaks
-//           stay check-only. The gate-managed workflow is never rewritten.
+// Fix:      zizmor's *safe* autofixes (--fix) only. This is the repair pass
+//           (#65): actionlint, zizmor's own check and gitleaks run once in the
+//           authoritative no-fix verification pass, so a fix that leaves
+//           breakage can never read as success. Unsafe fixes are deliberately
+//           not applied — they encode design decisions (e.g. syntax a validator
+//           may not yet accept), and the verification pass surfaces whatever
+//           remains. actionlint and gitleaks stay check-only. The gate-managed
+//           workflow is never rewritten.
 //
 // Detection: the workflow tools run only when tracked .github/ YAML exists.
 // actionlint parses workflow *definitions* only (.github/workflows/*.yml|yaml)
@@ -298,10 +300,10 @@ function workflowVerdict({
 
 /**
  * Run actionlint, zizmor on workflow files, and gitleaks on the whole repo.
- * In fix mode, zizmor's safe autofixes are applied first, then the checks
- * below judge the result. Returns pass when all clean; fail naming the
- * offending tool. If no workflow files tracked, skips actionlint/zizmor but
- * still runs gitleaks.
+ * Repair (#65) runs zizmor --fix only; the authoritative no-fix pass runs the
+ * checks (actionlint/zizmor/gitleaks) and judges their result. Returns pass
+ * when clean; fail naming the offending tool. With no workflow files tracked,
+ * verification skips actionlint/zizmor but still runs gitleaks.
  */
 export async function runWorkflowStep({
     ctx,
@@ -318,6 +320,12 @@ export async function runWorkflowStep({
     const actionlintFiles = filterWorkflowFiles({ files: trackedFiles });
 
     runZizmorFixes({ ctx, trackedFiles, runner });
+
+    // Repair: mutation only. The checks belong to the single authoritative
+    // no-fix verification pass (#65).
+    if (ctx.mode === "fix") {
+        return passed({ notice: "workflow: applied zizmor autofixes" });
+    }
 
     const toolFailure = runWorkflowTools({
         ctx,

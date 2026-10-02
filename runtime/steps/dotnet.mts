@@ -105,10 +105,11 @@ async function runDotNetCommand(
 }
 
 /**
- * Restore, then format: restore always first (the container's NuGet cache is
- * shadowed by a named volume, decision #3), format -write in fix mode only and
- * `--verify-no-changes` always. Returns the failed result, or null when both
- * phases are clean.
+ * The repair phase: restore (a prerequisite for formatting) then `dotnet
+ * format` (the mutation). Verification — `format --verify-no-changes`, build,
+ * test — never runs here: the orchestrator's single authoritative no-fix pass
+ * owns it (#65). Returns the failed result, or null when the mutation
+ * succeeded.
  */
 async function runRestoreAndFormat({
     runner,
@@ -133,7 +134,8 @@ async function runRestoreAndFormat({
             notice: `dotnet: restore failed: ${restore.stderr.trim()}`,
         });
     }
-    // Fix mode: format (write) then verify; check mode: verify only.
+    // Fix mode: format writes. No-fix runs no mutation; verification below does
+    // the whole check.
     if (mode === "fix") {
         const formatWrite = await runDotNetCommand(
             runner,
@@ -146,7 +148,23 @@ async function runRestoreAndFormat({
             });
         }
     }
-    // Always verify formatting is clean.
+    return null;
+}
+
+/**
+ * The single verification phase: formatting is clean, then build (no restore),
+ * then test (no build, no restore). Runs once in the authoritative no-fix pass
+ * (#65), never during repair. Returns the failed result, or null when clean.
+ */
+async function runVerifyPhase({
+    runner,
+    workspace,
+    workspaceRoot,
+}: {
+    runner: Runner;
+    workspace: string;
+    workspaceRoot: string;
+}): Promise<StepResult | null> {
     const formatCheck = await runDotNetCommand(
         runner,
         ["format", "--verify-no-changes", workspace],
@@ -157,14 +175,36 @@ async function runRestoreAndFormat({
             notice: "dotnet: format found diffs (run with --fix)",
         });
     }
+
+    const build = await runDotNetCommand(
+        runner,
+        ["build", workspace, "--no-restore"],
+        workspaceRoot,
+    );
+    if (build.status !== 0) {
+        return failed({
+            notice: `dotnet: build failed: ${build.stderr.trim()}`,
+        });
+    }
+
+    const test = await runDotNetCommand(
+        runner,
+        ["test", workspace, "--no-build", "--no-restore"],
+        workspaceRoot,
+    );
+    if (test.status !== 0) {
+        return failed({
+            notice: `dotnet: test failed: ${test.stdout.trim() || test.stderr.trim()}`,
+        });
+    }
     return null;
 }
 
 /**
- * Run dotnet format, build, test over the discovered workspace.
- * Restore always runs first: the container's NuGet cache is shadowed by a
- * named volume (decision #3), so build/test cannot assume a host restore.
- * Returns skip when no .NET files tracked; fail naming the failing phase.
+ * Run the .NET step over the discovered workspace. Repair (fix) mode runs only
+ * restore + format; no-fix mode is the single authoritative verification
+ * (format check, build, test) (#65). Returns skip when no .NET files tracked;
+ * fail naming the failing phase.
  */
 export async function runDotNetStep({
     ctx,
@@ -218,27 +258,20 @@ export async function runDotNetStep({
     if (setupFailure !== null) {
         return setupFailure;
     }
-
-    const build = await runDotNetCommand(
-        runner,
-        ["build", workspace, "--no-restore"],
-        workspaceRoot,
-    );
-    if (build.status !== 0) {
-        return failed({
-            notice: `dotnet: build failed: ${build.stderr.trim()}`,
+    // Repair ended with a clean mutation: report that, do not verify.
+    if (ctx.mode === "fix") {
+        return passed({
+            notice: `dotnet: restored and formatted (${dotnetFiles.length} project(s))`,
         });
     }
 
-    const test = await runDotNetCommand(
+    const verifyFailure = await runVerifyPhase({
         runner,
-        ["test", workspace, "--no-build", "--no-restore"],
+        workspace,
         workspaceRoot,
-    );
-    if (test.status !== 0) {
-        return failed({
-            notice: `dotnet: test failed: ${test.stdout.trim() || test.stderr.trim()}`,
-        });
+    });
+    if (verifyFailure !== null) {
+        return verifyFailure;
     }
 
     return passed({

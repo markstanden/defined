@@ -328,7 +328,7 @@ test("skips when no .defined.json exists", async () => {
     assert.equal(calls.length, 0);
 });
 
-test("fails when fix mode command fails", async () => {
+test("fails when the coverage command fails", async () => {
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -337,7 +337,7 @@ test("fails when fix mode command fails", async () => {
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
-        mode: "fix",
+        scratchDir: dir,
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 1, stderr: "boom" } },
     });
@@ -345,7 +345,7 @@ test("fails when fix mode command fails", async () => {
     assert.match(result.notice ?? "", /coverage command failed/u);
 });
 
-test("fails when no lcov.info after fix mode command", async () => {
+test("fails when the command writes no lcov.info", async () => {
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -357,12 +357,58 @@ test("fails when no lcov.info after fix mode command", async () => {
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
-        mode: "fix",
+        scratchDir: dir,
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /no coverage report/u);
+});
+
+test("repair skips coverage generation entirely (verification-only, #65)", async () => {
+    const dir = await makeTempDir("quality-nc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { node: { command: "npm t" } },
+        },
+        reportPath: "coverage/lcov.info",
+        reportContent: ["LF:100", "LH:90"].join("\n"),
+    });
+    const { result, calls } = await runCoverageScenario({
+        step: runNodeCoverageStep,
+        repoRoot: dir,
+        mode: "fix",
+        trackedFiles: ["package.json"],
+    });
+    assert.equal(result.status, "skip");
+    assert.match(result.notice ?? "", /deferred to verification/u);
+    assert.equal(calls.length, 0);
+});
+
+test("write-capable no-fix runs in the repo so the report survives (#65)", async () => {
+    const dir = await makeTempDir("quality-nc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { node: { command: "npm t" } },
+        },
+        reportPath: "coverage/lcov.info",
+        reportContent: ["LF:100", "LH:90"].join("\n"),
+    });
+    const { result } = await runCoverageScenario({
+        step: runNodeCoverageStep,
+        repoRoot: dir,
+        mode: "no-fix",
+        repoWritable: true,
+        trackedFiles: ["package.json"],
+        runnerOutcomes: { sh: { status: 0 } },
+    });
+    // The report lives only in the repo; a discarded scratch would not find it.
+    assert.equal(result.status, "pass");
+    assert.match(result.notice ?? "", /90\.0%/u);
 });
 
 test("gates line coverage against the effective minimum", async () => {
@@ -409,7 +455,7 @@ test("gates line coverage against the effective minimum", async () => {
         const { result } = await runCoverageScenario({
             step: runNodeCoverageStep,
             repoRoot: dir,
-            mode: "fix",
+            scratchDir: dir,
             trackedFiles: ["package.json"],
         });
         assert.equal(result.status, status, label);
@@ -494,14 +540,14 @@ test("reports a malformed lcov report as an execution error", async () => {
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
-        mode: "fix",
+        scratchDir: dir,
         trackedFiles: ["package.json"],
     });
     assert.equal(result.status, "error");
     assert.match(result.notice ?? "", /invalid lcov report/u);
 });
 
-test("fix mode runs the consumer command", async () => {
+test("no-fix runs the consumer command once", async () => {
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -515,7 +561,7 @@ test("fix mode runs the consumer command", async () => {
     const { calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
-        mode: "fix",
+        scratchDir: dir,
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });

@@ -121,6 +121,44 @@ function stepErrors({ id, result }: ReportedStep): Diagnostic[] {
 }
 
 /**
+ * Fold the repair pass into the authoritative verification steps (#65).
+ *
+ * Verification decides the verdict. But a repair step that did not pass must
+ * not vanish behind a verification pass that reads clean — a fixer that
+ * errored or failed while mutating is preserved, promoting that check to the
+ * repair result. When verification already reports the check as unsuccessful,
+ * its (authoritative) result stands and the repair result is not duplicated.
+ */
+export function mergeRepairErrors({
+    repair,
+    verify,
+}: {
+    repair: Map<string, StepResult>;
+    verify: Map<string, StepResult>;
+}): ReportedStep[] {
+    const steps: ReportedStep[] = [...verify].map(([id, result]) => ({
+        id,
+        result,
+    }));
+    for (const [id, result] of repair) {
+        if (!UNSUCCESSFUL.has(result.status)) {
+            continue;
+        }
+        const verified = verify.get(id);
+        if (verified !== undefined && UNSUCCESSFUL.has(verified.status)) {
+            continue;
+        }
+        const existing = steps.find((step) => step.id === id);
+        if (existing) {
+            existing.result = result;
+        } else {
+            steps.push({ id, result });
+        }
+    }
+    return steps;
+}
+
+/**
  * Assemble the canonical result: every check's status plus actionable
  * diagnostics. `bootstrap` leads the results when a setup check is supplied.
  */
