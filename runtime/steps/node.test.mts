@@ -10,6 +10,7 @@ import { afterEach, test } from "node:test";
 import {
     filterMarkdownFiles,
     filterPrettierFiles,
+    parsePrettierFindings,
     prettierConfigArgs,
     prettierIgnoreArgs,
     runNodeStep,
@@ -193,15 +194,43 @@ test("a fix that leaves diffs can never read as success", async () => {
         trackedFiles: ["package.json"],
         runner,
     });
-    assert.equal(result.status, "fail");
+    // A silent non-zero check is an execution problem, never a pass.
+    assert.equal(result.status, "error");
 });
 
-test("check mode failure names prettier and the file count", async () => {
+test("parsePrettierFindings names each unformatted file and skips the summary", () => {
+    const errors = parsePrettierFindings({
+        stdout: [
+            "Checking formatting...",
+            "[warn] src/a.ts",
+            "[warn] docs/b.md",
+            "[warn] Code style issues found in 2 files. Run Prettier with --write to fix.",
+            "",
+        ].join("\n"),
+    });
+    assert.deepEqual(errors, [
+        {
+            kind: "finding",
+            file: "src/a.ts",
+            message: "unformatted (run prettier --write)",
+        },
+        {
+            kind: "finding",
+            file: "docs/b.md",
+            message: "unformatted (run prettier --write)",
+        },
+    ]);
+});
+
+test("check mode failure reports each unformatted file as a diagnostic", async () => {
     const root = await makeTempDir("quality-node-");
     await writeTree(root, { "package.json": "{}\n" });
     const scratch = { dir: null };
     const { runner } = recordingRunner({
-        prettier: { status: 1, stdout: "a.md\nb.md\nc.md\n" },
+        prettier: {
+            status: 1,
+            stdout: "[warn] a.md\n[warn] b.md\n[warn] Code style issues found in 2 files.\n",
+        },
     });
     try {
         const result = await runNodeStep({
@@ -210,7 +239,11 @@ test("check mode failure names prettier and the file count", async () => {
             runner,
         });
         assert.equal(result.status, "fail");
-        assert.ok((result.notice ?? "").includes("prettier"));
+        assert.match(result.notice ?? "", /prettier found 2 unformatted/u);
+        assert.deepEqual(
+            result.errors?.map((error) => error.file),
+            ["a.md", "b.md"],
+        );
     } finally {
         cleanupScratch(scratch);
     }

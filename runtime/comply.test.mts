@@ -86,6 +86,28 @@ test("runPass forwards the mode to each step", async () => {
     assert.equal(results.get("probe")?.status, "pass");
 });
 
+test("runPass_recordsAThrownStepAsAnErrorAndContinues", async () => {
+    const results = await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        steps: [
+            {
+                id: "broken",
+                run: async () => {
+                    throw new Error("cannot run 'tool': not found");
+                },
+            },
+            fakeStep("after", passed({})),
+        ],
+    });
+    assert.equal(results.get("broken")?.status, "error");
+    assert.deepEqual(results.get("broken")?.errors, [
+        { kind: "execution", message: "cannot run 'tool': not found" },
+    ]);
+    assert.equal(results.get("after")?.status, "pass");
+});
+
 test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
     const printed: string[] = [];
     const exits: number[] = [];

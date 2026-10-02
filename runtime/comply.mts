@@ -47,7 +47,12 @@ import { runShellStep } from "./steps/shell.mts";
 import { runTofuStep } from "./steps/tofu.mts";
 import { runWorkflowStep } from "./steps/workflow.mts";
 import { runYamlStep } from "./steps/yaml.mts";
-import { failed, passed, type StepResult } from "./lib/step-result.mts";
+import {
+    errored,
+    failed,
+    passed,
+    type StepResult,
+} from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
 
 interface StepInput {
@@ -189,8 +194,22 @@ export async function runPass({
     const scratch: Scratch = { dir: null };
     try {
         for (const step of steps) {
-            const result = await step.run({ mode, repoRoot, files, scratch });
-            results.set(step.id, result);
+            try {
+                const result = await step.run({
+                    mode,
+                    repoRoot,
+                    files,
+                    scratch,
+                });
+                results.set(step.id, result);
+            } catch (err) {
+                // A step that throws (missing binary, bad config) must never
+                // abort the run: record it as an execution error and continue,
+                // so the remaining checks still report and stdout stays JSON.
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                results.set(step.id, errored({ message }));
+            }
         }
     } finally {
         cleanupScratch(scratch);

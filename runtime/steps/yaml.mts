@@ -16,6 +16,7 @@ import {
     failed,
     passed,
     skipped,
+    type StepDiagnostic,
     type StepResult,
 } from "../lib/step-result.mts";
 import { run } from "../../lib/proc.mts";
@@ -35,6 +36,35 @@ export function filterYamlFiles({ files }: { files: string[] }): string[] {
             file.endsWith(ext),
         ),
     );
+}
+
+// yamllint's parsable format: `file:line:col: [level] message (rule)`. The
+// level brackets are present in some versions, absent in others.
+const YAMLLINT_LINE =
+    /^(.+?):(\d+):(\d+): \[?([a-z]+)\]? (.*?)(?: \(([^)]+)\))?$/u;
+
+/** Every yamllint finding as a structured diagnostic. */
+export function parseYamllint({
+    stdout,
+}: {
+    stdout: string;
+}): StepDiagnostic[] {
+    const errors: StepDiagnostic[] = [];
+    for (const raw of stdout.split("\n")) {
+        const match = YAMLLINT_LINE.exec(raw.trim());
+        if (match === null) {
+            continue;
+        }
+        errors.push({
+            kind: "finding",
+            file: match[1]!,
+            line: Number(match[2]),
+            column: Number(match[3]),
+            rule: match[6] ?? "yamllint",
+            message: match[5]!,
+        });
+    }
+    return errors;
 }
 
 /**
@@ -71,10 +101,18 @@ export async function runYamlStep({
         ],
     });
     if (result.status !== 0) {
-        const violations = result.stdout
-            .split("\n")
-            .filter((line) => line !== "").length;
-        return failed({ notice: `yaml: ${violations} yamllint finding(s)` });
+        const errors = parseYamllint({ stdout: result.stdout });
+        if (errors.length === 0) {
+            return failed({
+                notice: `yaml: yamllint failed: ${
+                    result.stderr.trim() || result.stdout.trim()
+                }`,
+            });
+        }
+        return failed({
+            notice: `yaml: ${errors.length} yamllint finding(s)`,
+            errors,
+        });
     }
 
     return passed({ notice: `yaml: ${files.length} file(s) clean` });
