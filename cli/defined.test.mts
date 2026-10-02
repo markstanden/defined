@@ -390,6 +390,19 @@ test("resolves the repo root via git and mounts it for comply", async () => {
     });
 });
 
+test("forwards presentation flags through to the runtime", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const r = await runLauncher({ fixture, args: ["verify", "--min"] });
+        assert.equal(r.status, 0);
+        const run = r.log.find((line) => line.startsWith("run --rm"));
+        assert.ok(run, "verify must invoke the engine");
+        assert.ok(
+            run!.endsWith(`${IMAGE_REPO}:abc12345 verify --min`),
+            `presentation flag must reach the container, got: ${run}`,
+        );
+    });
+});
+
 test("mounts the repo read-only for verify", async () => {
     await withFixture("abc12345", async (fixture) => {
         const r = await runLauncher({ fixture, args: ["verify"] });
@@ -949,6 +962,14 @@ test("runs the local runtime for comply and verify in the source repo", async ()
         assert.equal(verify.status, 0);
         assert.equal(verify.stdout.trim(), "shim:--check-only");
         assert.deepEqual(verify.log, [], "no engine runs in the source repo");
+
+        const flagged = await runLauncher({
+            fixture,
+            args: ["comply", "--min"],
+            env: source,
+        });
+        assert.equal(flagged.status, 0);
+        assert.equal(flagged.stdout.trim(), "shim:--min");
     });
 });
 

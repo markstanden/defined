@@ -1,13 +1,28 @@
-// lib/report.mts — the gate's output contract (decision #24).
+// lib/report.mts — the gate's canonical result and JSON output contract (#72).
 //
-// Success is exit 0 + exactly one stable `compliant` line (chatter suppressed).
-// Failure is non-zero + a stable, agent-actionable breakdown: a status line,
-// one `fail` line per failing step, and one per bootstrap finding. The
-// breakdown is deliberately line-stable so agents can parse it; step notices
-// already carry tool/rule/files and distinguish FIX / REPORT / REVIEW in prose.
+// One canonical GateResult is assembled from the bootstrap check and the step
+// results, then rendered for a presentation. Every presentation always carries
+// `status`, and carries `errors` whenever any occurred:
+//
+//   full  { "status": …, "results": { … }, "errors": [ … ] }
+//   min   { "status": … }                      (errors added when present)
+//
+// `full` is the default today; `min` drops the per-check `results` map while
+// keeping every diagnostic. The process exit code derives from `status` — never
+// from the rendered text — so both presentations agree by construction.
 
 import type { SetupCheck } from "../setup.mts";
-import type { StepResult } from "./step-result.mts";
+import type {
+    DiagnosticKind,
+    StepDiagnostic,
+    StepResult,
+    StepStatus,
+} from "./step-result.mts";
+
+/** How much of the canonical result to render. */
+export type Presentation = "min" | "full";
+
+export type ResultStatus = "compliant" | "not_compliant";
 
 export interface ReportedStep {
     id: string;
@@ -15,49 +30,131 @@ export interface ReportedStep {
 }
 
 export interface ReportInput {
-    verb: "comply" | "verify";
     setup?: SetupCheck;
     steps: ReportedStep[];
 }
 
-/** Failing setup artifacts as stable `fail` lines, or [] when clean. */
-function setupFailures(setup: SetupCheck): string[] {
-    const lines: string[] = [];
+/** A diagnostic carrying the check that produced it. */
+export interface Diagnostic {
+    check: string;
+    kind: DiagnosticKind;
+    message: string;
+    file?: string;
+    line?: number;
+    column?: number;
+    rule?: string;
+}
+
+export interface GateResult {
+    status: ResultStatus;
+    results: Record<string, StepStatus>;
+    errors: Diagnostic[];
+}
+
+const UNSUCCESSFUL: ReadonlySet<StepStatus> = new Set([
+    "fail",
+    "error",
+    "blocked",
+]);
+
+/** The synthetic check id for gate-owned bootstrap artefacts. */
+export const BOOTSTRAP_CHECK = "bootstrap";
+
+/** Bootstrap artefacts as diagnostics; [] when every artefact is in line. */
+function bootstrapErrors(setup: SetupCheck): Diagnostic[] {
+    const errors: Diagnostic[] = [];
     for (const c of setup.files) {
         if (c.status === "absent") {
-            lines.push(`fail bootstrap — ${c.name}: absent (run comply)`);
+            errors.push({
+                check: BOOTSTRAP_CHECK,
+                kind: "finding",
+                message: `${c.name}: absent (run comply)`,
+                file: c.name,
+            });
         } else if (c.status === "drift") {
-            lines.push(`fail bootstrap — ${c.name}: differs from gate copy`);
+            errors.push({
+                check: BOOTSTRAP_CHECK,
+                kind: "finding",
+                message: `${c.name}: differs from gate copy`,
+                file: c.name,
+            });
         }
     }
     if (setup.agents === "absent") {
-        lines.push("fail bootstrap — AGENTS.md: defined block absent");
+        errors.push({
+            check: BOOTSTRAP_CHECK,
+            kind: "finding",
+            message: "AGENTS.md: defined block absent",
+            file: "AGENTS.md",
+        });
     } else if (setup.agents === "drift") {
-        lines.push("fail bootstrap — AGENTS.md: defined block drifted");
+        errors.push({
+            check: BOOTSTRAP_CHECK,
+            kind: "finding",
+            message: "AGENTS.md: defined block drifted",
+            file: "AGENTS.md",
+        });
     } else if (setup.agents === "corrupt") {
-        lines.push("fail bootstrap — AGENTS.md: defined block corrupt");
+        errors.push({
+            check: BOOTSTRAP_CHECK,
+            kind: "finding",
+            message: "AGENTS.md: defined block corrupt",
+            file: "AGENTS.md",
+        });
     }
-    return lines;
+    return errors;
+}
+
+/** A failing step's diagnostics: its own, else one synthesised from its notice. */
+function stepErrors({ id, result }: ReportedStep): Diagnostic[] {
+    if (!UNSUCCESSFUL.has(result.status)) {
+        return [];
+    }
+    const fallbackKind: DiagnosticKind =
+        result.status === "blocked" ? "blocked" : "finding";
+    const own: StepDiagnostic[] =
+        result.errors && result.errors.length > 0
+            ? result.errors
+            : [{ kind: fallbackKind, message: result.notice ?? "" }];
+    return own.map((error) => ({ check: id, ...error }));
 }
 
 /**
- * Render the run's output lines. Green runs return exactly `["compliant"]`;
- * anything else returns a stable breakdown with a non-compliant status line
- * first. `comply` marks the status line with `after repair` because it already
- * ran a fix pass.
+ * Assemble the canonical result: every check's status plus actionable
+ * diagnostics. `bootstrap` leads the results when a setup check is supplied.
  */
-export function formatReport({ verb, setup, steps }: ReportInput): string[] {
-    const failures = setup ? setupFailures(setup) : [];
-    for (const s of steps) {
-        if (s.result.status === "fail") {
-            const notice = s.result.notice ?? "";
-            failures.push(`fail ${s.id} — ${notice}`);
-        }
+export function buildResult({ setup, steps }: ReportInput): GateResult {
+    const results: Record<string, StepStatus> = {};
+    const errors: Diagnostic[] = [];
+    if (setup) {
+        const bootstrap = bootstrapErrors(setup);
+        results[BOOTSTRAP_CHECK] = bootstrap.length > 0 ? "fail" : "pass";
+        errors.push(...bootstrap);
     }
-    if (failures.length === 0) {
-        return ["compliant"];
+    for (const step of steps) {
+        results[step.id] = step.result.status;
+        errors.push(...stepErrors(step));
     }
-    const status =
-        verb === "comply" ? "not compliant after repair" : "not compliant";
-    return [status, ...failures];
+    return {
+        status: errors.length > 0 ? "not_compliant" : "compliant",
+        results,
+        errors,
+    };
+}
+
+/** Render the canonical result as one compact JSON line for a presentation. */
+export function renderResult({
+    result,
+    presentation,
+}: {
+    result: GateResult;
+    presentation: Presentation;
+}): string {
+    const { status, results, errors } = result;
+    const withErrors = errors.length > 0 ? { errors } : {};
+    return JSON.stringify(
+        presentation === "full"
+            ? { status, results, ...withErrors }
+            : { status, ...withErrors },
+    );
 }

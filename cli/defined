@@ -55,7 +55,7 @@ UPDATE_WORK=""
 LAUNCHER_REV=""
 
 usage() {
-    echo "usage: ${PROGRAM} comply | ${PROGRAM} verify | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
+    echo "usage: ${PROGRAM} comply [--min|--full] | ${PROGRAM} verify [--min|--full] | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -575,6 +575,11 @@ main() {
         return 2
     fi
 
+    # Presentation flags (--min/--full) travel to the runtime verbatim; the
+    # gate owns their validation and their meaning. Everything after the verb
+    # is forwarded, so the launcher never re-implements the CLI contract.
+    local -a forward=("${@:2}")
+
     local root
     root="$(repo_root)" || return 1
 
@@ -593,10 +598,10 @@ main() {
         fi
         if [[ "${verb}" == "verify" ]]; then
             echo "${PROGRAM}: defined source repo — running the local runtime (${shim} --check-only)" >&2
-            exec "${shim}" --check-only
+            exec "${shim}" --check-only "${forward[@]}"
         fi
         echo "${PROGRAM}: defined source repo — running the local runtime (${shim})" >&2
-        exec "${shim}"
+        exec "${shim}" "${forward[@]}"
     fi
 
     local engine pin image offline
@@ -646,7 +651,7 @@ main() {
         -v "defined-nuget-${repo_hash}:/home/node/.nuget/packages" \
         -e "NUGET_PACKAGES=/home/node/.nuget/packages" \
         --workdir /repo \
-        "${image}" "${verb}"
+        "${image}" "${verb}" "${forward[@]}"
 }
 
 # Execute only when run as a script (BASH_SOURCE matches $0); when sourced,
