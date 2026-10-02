@@ -63,7 +63,7 @@ IMAGE="localhost/defined:${PINHASH}"
 source "${RUNTIME_DIR}/tool-versions.env"
 
 if ! "${ENGINE}" image inspect "${IMAGE}" >/dev/null 2>&1; then
-    echo "Building ${IMAGE} ..."
+    echo "Building ${IMAGE} ..." >&2
     "${ENGINE}" build \
         -f "${RUNTIME_DIR}/Containerfile" \
         --build-arg "NODE_IMAGE_TAG=${NODE_IMAGE_TAG}" \

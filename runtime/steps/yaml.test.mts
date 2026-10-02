@@ -5,7 +5,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { filterYamlFiles, runYamlStep, YAML_EXTENSIONS } from "./yaml.mts";
+import {
+    filterYamlFiles,
+    parseYamllint,
+    runYamlStep,
+    YAML_EXTENSIONS,
+} from "./yaml.mts";
 import { baseCtx, fakeRunner } from "../test-helpers.mts";
 
 test("filterYamlFiles keeps only .yml and .yaml files", () => {
@@ -45,6 +50,32 @@ test("runYamlStep fails naming violation count when yamllint reports", async () 
     });
     assert.equal(result.status, "fail");
     assert.ok((result.notice ?? "").includes("yamllint"));
+    assert.deepEqual(result.errors, [
+        {
+            kind: "finding",
+            file: "ci.yml",
+            line: 3,
+            column: 81,
+            rule: "line-length",
+            message: "line too long",
+        },
+    ]);
+});
+
+test("parseYamllint handles bracket levels and ignores non-finding lines", () => {
+    const errors = parseYamllint({
+        stdout: "a.yml:1:2: [warning] too many spaces (spaces)\nnot a finding\n",
+    });
+    assert.deepEqual(errors, [
+        {
+            kind: "finding",
+            file: "a.yml",
+            line: 1,
+            column: 2,
+            rule: "spaces",
+            message: "too many spaces",
+        },
+    ]);
 });
 
 test("config travels with the gate and -s makes warnings fail", async () => {

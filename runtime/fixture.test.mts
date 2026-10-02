@@ -7,11 +7,11 @@
 //      hash proof that the read-only pass never writes to the checkout).
 //   2. `comply` (the default) bootstraps, repairs the auto-fixable ones
 //      (node/shell/yaml/tofu go green), stays red for the check-only workflow
-//      step, and reports `not compliant after repair`.
+//      step, and reports a `not_compliant` JSON result.
 //   3. A file behind the host .prettierignore is never touched — even by
 //      comply's repair pass.
 //   4. After semantic repair of the workflow file, both `--check-only` and
-//      `comply` exit 0 with the single stable `compliant` line.
+//      `comply` exit 0 with a `compliant` JSON result.
 //
 // Requires a container engine + the gate image (comply.sh builds it on first
 // run). Skips cleanly when no engine is usable so `node --test` stays
@@ -79,6 +79,24 @@ function assertTreeUntouched(root: string, before: Map<string, string>): void {
     );
 }
 
+interface GateResult {
+    status: string;
+    results: Record<string, string>;
+    errors?: Array<{ check: string; kind: string; message: string }>;
+}
+
+/** Parse the single JSON result line the gate prints to stdout. */
+function parseGate(stdout: string): GateResult {
+    const line = stdout.trim().split("\n").filter(Boolean).at(-1);
+    assert.ok(line, "the gate must print a JSON result line");
+    return JSON.parse(line!) as GateResult;
+}
+
+/** True when a check is present and not a clean pass or skip. */
+function isUnsuccessful(result: GateResult, check: string): boolean {
+    return ["fail", "error", "blocked"].includes(result.results[check] ?? "");
+}
+
 test(
     "check-only fails read-only on broken code; comply repairs safe findings and stays red for check-only ones",
     { skip: !hasEngine() },
@@ -99,6 +117,8 @@ test(
                 1,
                 `check-only should fail, got:\n${checkOnly.stdout}`,
             );
+            const checked = parseGate(checkOnly.stdout);
+            assert.equal(checked.status, "not_compliant");
             for (const step of [
                 "node",
                 "eslint",
@@ -107,14 +127,17 @@ test(
                 "workflow",
                 "tofu",
             ]) {
-                assert.match(
-                    checkOnly.stdout,
-                    new RegExp(`^fail ${step} `, "m"),
-                    `${step} should be picked up by the check-only pass`,
+                assert.ok(
+                    isUnsuccessful(checked, step),
+                    `${step} should be picked up by the check-only pass, got ${checked.results[step]}`,
                 );
             }
             // Bootstrap drift is a check-only finding too (fixture has no managed files).
-            assert.match(checkOnly.stdout, /^fail bootstrap /m);
+            assert.equal(checked.results.bootstrap, "fail");
+            assert.ok(
+                checked.errors?.some((error) => error.check === "bootstrap"),
+                "bootstrap drift must appear in errors",
+            );
             assertTreeUntouched(root, before);
 
             // ---- comply (default): bootstraps, repairs, workflow stays red ----
@@ -128,22 +151,23 @@ test(
                 1,
                 "comply still fails (workflow is check-only)",
             );
-            assert.match(comply.stdout, /^not compliant after repair/m);
+            const repaired = parseGate(comply.stdout);
+            assert.equal(repaired.status, "not_compliant");
             for (const step of ["node", "shell", "yaml", "tofu"]) {
-                assert.doesNotMatch(
-                    comply.stdout,
-                    new RegExp(`^fail ${step} `, "m"),
-                    `${step} should be repaired by comply`,
+                assert.equal(
+                    isUnsuccessful(repaired, step),
+                    false,
+                    `${step} should be repaired by comply, got ${repaired.results[step]}`,
                 );
             }
-            assert.match(
-                comply.stdout,
-                /^fail workflow /m,
+            assert.equal(
+                repaired.results.workflow,
+                "fail",
                 "workflow stays red after comply (actionlint is check-only)",
             );
-            assert.match(
-                comply.stdout,
-                /^fail eslint /m,
+            assert.equal(
+                repaired.results.eslint,
+                "fail",
                 "eslint stays red after comply (the regexp rule is not auto-fixable)",
             );
 
@@ -220,10 +244,16 @@ test(
                     0,
                     `${label} should pass after semantic repair, got:\n${result.stdout}`,
                 );
-                assert.deepEqual(
-                    result.stdout.trim().split("\n"),
-                    ["compliant"],
-                    `${label} must print exactly one compliant line`,
+                const gate = parseGate(result.stdout);
+                assert.equal(
+                    gate.status,
+                    "compliant",
+                    `${label} must report a compliant result`,
+                );
+                assert.equal(
+                    "errors" in gate,
+                    false,
+                    `${label} compliant result omits the errors key`,
                 );
             }
         } finally {

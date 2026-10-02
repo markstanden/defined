@@ -26,38 +26,66 @@ async function tempGitTree(): Promise<string> {
     return dir;
 }
 
-test("parseCommand accepts exactly comply and verify", () => {
+test("parseCommand_acceptsExactlyComplyAndVerify_defaultingToFull", () => {
     assert.deepEqual(parseCommand({ argv: ["comply"] }), {
         verb: "comply",
         help: false,
+        presentation: "full",
     });
     assert.deepEqual(parseCommand({ argv: ["verify"] }), {
         verb: "verify",
         help: false,
+        presentation: "full",
     });
 });
 
-test("parseCommand reports help", () => {
+test("parseCommand_acceptsMinAndFullFlags", () => {
+    assert.deepEqual(parseCommand({ argv: ["comply", "--min"] }), {
+        verb: "comply",
+        help: false,
+        presentation: "min",
+    });
+    assert.deepEqual(parseCommand({ argv: ["verify", "--full"] }), {
+        verb: "verify",
+        help: false,
+        presentation: "full",
+    });
+});
+
+test("parseCommand_rejectsConflictingPresentationFlags", () => {
+    assert.throws(
+        () => parseCommand({ argv: ["comply", "--min", "--full"] }),
+        /conflicting presentation flags/u,
+    );
+    assert.throws(
+        () => parseCommand({ argv: ["comply", "--full", "--min"] }),
+        /conflicting presentation flags/u,
+    );
+});
+
+test("parseCommand_reportsHelp", () => {
     assert.deepEqual(parseCommand({ argv: ["-h"] }), {
         verb: "verify",
         help: true,
+        presentation: "full",
     });
     assert.deepEqual(parseCommand({ argv: ["--help"] }), {
         verb: "verify",
         help: true,
+        presentation: "full",
     });
 });
 
-test("parseCommand rejects a missing command", () => {
+test("parseCommand_rejectsAMissingCommand", () => {
     assert.throws(() => parseCommand({ argv: [] }), /missing command/u);
 });
 
-test("parseCommand rejects unknown verbs", () => {
+test("parseCommand_rejectsUnknownVerbs", () => {
     assert.throws(() => parseCommand({ argv: ["wat"] }), /unknown command/u);
     assert.throws(() => parseCommand({ argv: ["setup"] }), /no longer public/u);
 });
 
-test("parseCommand rejects the retired flags", () => {
+test("parseCommand_rejectsTheRetiredFlags", () => {
     assert.throws(() => parseCommand({ argv: ["--fix"] }), /'--fix' is gone/u);
     assert.throws(
         () => parseCommand({ argv: ["--no-fix"] }),
@@ -69,7 +97,7 @@ test("parseCommand rejects the retired flags", () => {
     );
 });
 
-test("parseCommand rejects trailing arguments", () => {
+test("parseCommand_rejectsTrailingArguments", () => {
     assert.throws(
         () => parseCommand({ argv: ["comply", "--silent"] }),
         /unexpected argument/u,
@@ -80,11 +108,16 @@ test("parseCommand rejects trailing arguments", () => {
     );
 });
 
-test("createRunContext derives repoRoot via git marker walk-up", async () => {
+test("createRunContext_derivesRepoRootViaGitMarkerWalkUp", async () => {
     const root = await tempGitTree();
     const nested = join(root, "deep");
     await mkdir(nested);
-    const ctx = await createRunContext({ verb: "verify", startDir: nested });
+    const ctx = await createRunContext({
+        verb: "verify",
+        startDir: nested,
+        presentation: "min",
+    });
     assert.equal(ctx.repoRoot, root);
     assert.equal(ctx.verb, "verify");
+    assert.equal(ctx.presentation, "min");
 });

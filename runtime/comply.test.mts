@@ -8,6 +8,7 @@ import { test } from "node:test";
 
 import { printUsage, runGate, runPass, runSmoke } from "./comply.mts";
 import { failed, passed, type StepResult } from "./lib/step-result.mts";
+import type { GateResult } from "./lib/report.mts";
 import type { SetupCheck } from "./setup.mts";
 
 type PassResult = Map<string, StepResult>;
@@ -41,6 +42,12 @@ function oneFail(): PassResult {
         ["node", passed({})],
         ["workflow", failed({ notice: "actionlint failed" })],
     ]);
+}
+
+/** Parse the single JSON line the gate is contracted to print. */
+function parsePrinted(printed: string[]): GateResult {
+    assert.equal(printed.length, 1, "exactly one JSON line on stdout");
+    return JSON.parse(printed[0]!) as GateResult;
 }
 
 test("runPass initialises then records every step in order", async () => {
@@ -79,7 +86,29 @@ test("runPass forwards the mode to each step", async () => {
     assert.equal(results.get("probe")?.status, "pass");
 });
 
-test("runGate comply exits cleanly on a green pass", async () => {
+test("runPass_recordsAThrownStepAsAnErrorAndContinues", async () => {
+    const results = await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        steps: [
+            {
+                id: "broken",
+                run: async () => {
+                    throw new Error("cannot run 'tool': not found");
+                },
+            },
+            fakeStep("after", passed({})),
+        ],
+    });
+    assert.equal(results.get("broken")?.status, "error");
+    assert.deepEqual(results.get("broken")?.errors, [
+        { kind: "execution", message: "cannot run 'tool': not found" },
+    ]);
+    assert.equal(results.get("after")?.status, "pass");
+});
+
+test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
     const printed: string[] = [];
     const exits: number[] = [];
     await runGate({
@@ -95,11 +124,18 @@ test("runGate comply exits cleanly on a green pass", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
-    assert.deepEqual(printed, ["compliant"]);
+    const result = parsePrinted(printed);
+    assert.equal(result.status, "compliant");
+    assert.deepEqual(result.results, {
+        bootstrap: "pass",
+        node: "pass",
+        shell: "pass",
+    });
+    assert.equal("errors" in result, false, "success omits the errors key");
     assert.deepEqual(exits, [], "green comply must not exit non-zero");
 });
 
-test("runGate comply exits 1 when a finding survives repair", async () => {
+test("runGate_complyFindingSurvivesRepair_reportsFindingAndExits", async () => {
     const printed: string[] = [];
     const exits: number[] = [];
     await runGate({
@@ -115,11 +151,16 @@ test("runGate comply exits 1 when a finding survives repair", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
-    assert.equal(printed[0], "not compliant after repair");
+    const result = parsePrinted(printed);
+    assert.equal(result.status, "not_compliant");
+    assert.equal(result.results.workflow, "fail");
+    assert.deepEqual(result.errors, [
+        { check: "workflow", kind: "finding", message: "actionlint failed" },
+    ]);
     assert.deepEqual(exits, [1]);
 });
 
-test("runGate comply reports bootstrap drift through the contract", async () => {
+test("runGate_complyBootstrapDrift_reportsItThroughTheCanonicalResult", async () => {
     const printed: string[] = [];
     const exits: number[] = [];
     await runGate({
@@ -141,14 +182,20 @@ test("runGate comply reports bootstrap drift through the contract", async () => 
             exitFn: (code) => exits.push(code),
         },
     });
-    assert.deepEqual(printed, [
-        "not compliant after repair",
-        "fail bootstrap — .editorconfig: differs from gate copy",
+    const result = parsePrinted(printed);
+    assert.equal(result.results.bootstrap, "fail");
+    assert.deepEqual(result.errors, [
+        {
+            check: "bootstrap",
+            kind: "finding",
+            message: ".editorconfig: differs from gate copy",
+            file: ".editorconfig",
+        },
     ]);
     assert.deepEqual(exits, [1]);
 });
 
-test("runGate comply re-fetches tracked files after bootstrap", async () => {
+test("runGate_comply_reFetchesTrackedFilesAfterBootstrap", async () => {
     const passedFiles: string[][] = [];
     await runGate({
         verb: "comply",
@@ -170,7 +217,7 @@ test("runGate comply re-fetches tracked files after bootstrap", async () => {
     assert.deepEqual(passedFiles, [["post-setup.txt"], ["post-setup.txt"]]);
 });
 
-test("runGate verify checks setup then runs the no-fix pass", async () => {
+test("runGate_verify_checksSetupThenRunsTheNoFixPass", async () => {
     const printed: string[] = [];
     const exits: number[] = [];
     const setupCalls: string[] = [];
@@ -189,11 +236,11 @@ test("runGate verify checks setup then runs the no-fix pass", async () => {
         },
     });
     assert.deepEqual(setupCalls, ["/repo"]);
-    assert.deepEqual(printed, ["compliant"]);
+    assert.equal(parsePrinted(printed).status, "compliant");
     assert.deepEqual(exits, []);
 });
 
-test("runGate verify exits 1 on a failing step", async () => {
+test("runGate_verifyFailingStep_exitsOne", async () => {
     const exits: number[] = [];
     await runGate({
         verb: "verify",
@@ -209,7 +256,46 @@ test("runGate verify exits 1 on a failing step", async () => {
     assert.deepEqual(exits, [1]);
 });
 
-test("printUsage prints the two-verb usage line", () => {
+test("runGate_minGreen_printsOnlyTheStatus", async () => {
+    const printed: string[] = [];
+    await runGate({
+        verb: "verify",
+        repoRoot: "/repo",
+        files: [],
+        presentation: "min",
+        deps: {
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async () => allGreen(),
+            printFn: (line) => printed.push(line),
+            exitFn: () => undefined,
+        },
+    });
+    assert.deepEqual(printed, ['{"status":"compliant"}']);
+});
+
+test("runGate_minFailure_keepsDiagnosticsButDropsResults", async () => {
+    const printed: string[] = [];
+    await runGate({
+        verb: "verify",
+        repoRoot: "/repo",
+        files: [],
+        presentation: "min",
+        deps: {
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async () => oneFail(),
+            printFn: (line) => printed.push(line),
+            exitFn: () => undefined,
+        },
+    });
+    const result = JSON.parse(printed[0]!);
+    assert.equal(result.status, "not_compliant");
+    assert.equal("results" in result, false);
+    assert.deepEqual(result.errors, [
+        { check: "workflow", kind: "finding", message: "actionlint failed" },
+    ]);
+});
+
+test("printUsage prints the two-verb usage line with flags", () => {
     const lines: string[] = [];
     const original = console.log;
     console.log = (line: string) => lines.push(line);
@@ -218,7 +304,9 @@ test("printUsage prints the two-verb usage line", () => {
     } finally {
         console.log = original;
     }
-    assert.deepEqual(lines, ["usage: defined comply | defined verify"]);
+    assert.deepEqual(lines, [
+        "usage: defined comply [--min|--full] | defined verify [--min|--full]",
+    ]);
 });
 
 test("runSmoke probes /usr/bin/git in the container", async () => {

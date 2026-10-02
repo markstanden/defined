@@ -271,7 +271,16 @@ test("a fix that leaves findings fails on the re-check and names the rule", asyn
     });
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /1 finding\(s\) \(house config\)/u);
-    assert.match(result.notice ?? "", /regexp\/no-super-linear-move/u);
+    assert.deepEqual(result.errors, [
+        {
+            kind: "finding",
+            file: "src/a.ts",
+            line: 3,
+            column: 0,
+            rule: "regexp/no-super-linear-move",
+            message: "",
+        },
+    ]);
 });
 
 test("exit 2 is a config/parse error, distinct from a finding", async () => {
@@ -287,12 +296,18 @@ test("exit 2 is a config/parse error, distinct from a finding", async () => {
             trackedFiles: ["src/a.ts"],
             runner,
         });
-        assert.equal(result.status, "fail");
+        assert.equal(result.status, "error");
         assert.match(
             result.notice ?? "",
             /config\/parse error \(house config\)/u,
         );
         assert.doesNotMatch(result.notice ?? "", /finding\(s\)/u);
+        assert.deepEqual(result.errors, [
+            {
+                kind: "execution",
+                message: "eslint: config/parse error (house config): boom",
+            },
+        ]);
     } finally {
         cleanupScratch(scratch);
     }
@@ -340,10 +355,10 @@ test("a finding without a rule id or line still counts", async () => {
         runner: failingRunner(report),
     });
     assert.equal(result.status, "fail");
-    assert.match(result.notice ?? "", /parse error/u);
+    assert.equal(result.errors?.[0]?.rule, "parse error");
 });
 
-test("findings beyond the shown limit are truncated", async () => {
+test("every finding is reported without truncation", async () => {
     const root = await makeTempDir("quality-eslint-many-");
     await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
     const messages = Array.from({ length: 7 }, (_, i) => ({
@@ -361,7 +376,7 @@ test("findings beyond the shown limit are truncated", async () => {
     });
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /7 finding\(s\)/u);
-    assert.match(result.notice ?? "", /\(\+2 more\)/u);
+    assert.equal(result.errors?.length, 7);
 });
 
 test("unparseable, empty, malformed and warning-only reports fall back", async () => {

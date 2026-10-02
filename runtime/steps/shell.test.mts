@@ -7,6 +7,8 @@ import { test } from "node:test";
 
 import {
     filterShellScripts,
+    parseShellcheck,
+    parseShfmtFiles,
     runShellStep,
     SHELLCHECK_DEFAULT_FLOOR,
 } from "./shell.mts";
@@ -31,9 +33,9 @@ test("runShellStep skips cleanly when no shell scripts are tracked", async () =>
     assert.equal(result.status, "skip");
 });
 
-test("check mode fails when shfmt reports formatting diffs", async () => {
+test("check mode fails when shfmt lists an unformatted file", async () => {
     const { runner } = fakeRunner({
-        shfmt: { status: 1 },
+        shfmt: { status: 0, stdout: "broken.sh\n" },
         shellcheck: { status: 0 },
     });
     const result = await runShellStep({
@@ -43,6 +45,54 @@ test("check mode fails when shfmt reports formatting diffs", async () => {
     });
     assert.equal(result.status, "fail");
     assert.ok((result.notice ?? "").includes("shfmt"));
+    assert.deepEqual(result.errors, [
+        {
+            kind: "finding",
+            file: "broken.sh",
+            message: "not shfmt-formatted (run shfmt -w)",
+        },
+    ]);
+});
+
+test("a nonzero shfmt exit is an execution error, not a finding", async () => {
+    const { runner } = fakeRunner({
+        shfmt: { status: 2, stderr: "cannot parse broken.sh" },
+    });
+    const result = await runShellStep({
+        ctx: baseCtx,
+        trackedFiles: ["broken.sh"],
+        runner,
+    });
+    assert.equal(result.status, "error");
+    assert.match(result.notice ?? "", /shfmt failed/u);
+});
+
+test("parseShfmtFiles ignores blank lines and parseShellcheck reads gcc format", () => {
+    assert.deepEqual(parseShfmtFiles({ stdout: "a.sh\n\nb.sh\n" }), [
+        {
+            kind: "finding",
+            file: "a.sh",
+            message: "not shfmt-formatted (run shfmt -w)",
+        },
+        {
+            kind: "finding",
+            file: "b.sh",
+            message: "not shfmt-formatted (run shfmt -w)",
+        },
+    ]);
+    assert.deepEqual(
+        parseShellcheck({ text: "a.sh:2:5: warning: quote it [SC2086]\n" }),
+        [
+            {
+                kind: "finding",
+                file: "a.sh",
+                line: 2,
+                column: 5,
+                rule: "SC2086",
+                message: "quote it",
+            },
+        ],
+    );
 });
 
 test("fix mode rewrites then re-checks before reporting pass", async () => {
@@ -65,7 +115,10 @@ test("fix mode rewrites then re-checks before reporting pass", async () => {
 test("shellcheck violations at or above the floor fail the step", async () => {
     const { runner } = fakeRunner({
         shfmt: { status: 0 },
-        shellcheck: { status: 1, stderr: "bad.sh:1:1: error: note (SC1234)" },
+        shellcheck: {
+            status: 1,
+            stdout: "bad.sh:1:1: error: note [SC1234]\n",
+        },
     });
     const result = await runShellStep({
         ctx: baseCtx,
@@ -74,6 +127,16 @@ test("shellcheck violations at or above the floor fail the step", async () => {
     });
     assert.equal(result.status, "fail");
     assert.ok((result.notice ?? "").includes("shellcheck"));
+    assert.deepEqual(result.errors, [
+        {
+            kind: "finding",
+            file: "bad.sh",
+            line: 1,
+            column: 1,
+            rule: "SC1234",
+            message: "note",
+        },
+    ]);
 });
 
 test("default floor is style; a raised project floor is honoured via -S", async () => {

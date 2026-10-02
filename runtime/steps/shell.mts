@@ -11,9 +11,11 @@
 // injected so tests need no host binaries.
 
 import {
+    errored,
     failed,
     passed,
     skipped,
+    type StepDiagnostic,
     type StepResult,
 } from "../lib/step-result.mts";
 import { run } from "../../lib/proc.mts";
@@ -32,6 +34,46 @@ type Runner = typeof run;
 
 export function filterShellScripts({ files }: { files: string[] }): string[] {
     return files.filter((file) => file.endsWith(".sh"));
+}
+
+/** `shfmt -l` lists one differing file per line. */
+export function parseShfmtFiles({
+    stdout,
+}: {
+    stdout: string;
+}): StepDiagnostic[] {
+    return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((file) => file !== "")
+        .map((file) => ({
+            kind: "finding" as const,
+            file,
+            message: "not shfmt-formatted (run shfmt -w)",
+        }));
+}
+
+// shellcheck's gcc format: `file:line:col: level: message [SCxxxx]`.
+const SHELLCHECK_LINE = /^(.+?):(\d+):(\d+): ([a-z]+): (.*?) \[(SC\d+)\]$/u;
+
+/** Every shellcheck finding as a structured diagnostic. */
+export function parseShellcheck({ text }: { text: string }): StepDiagnostic[] {
+    const errors: StepDiagnostic[] = [];
+    for (const raw of text.split("\n")) {
+        const match = SHELLCHECK_LINE.exec(raw.trim());
+        if (match === null) {
+            continue;
+        }
+        errors.push({
+            kind: "finding",
+            file: match[1]!,
+            line: Number(match[2]),
+            column: Number(match[3]),
+            rule: match[6]!,
+            message: match[5]!,
+        });
+    }
+    return errors;
 }
 
 /**
@@ -55,31 +97,47 @@ export async function runShellStep({
     }
 
     // Format first: in fix mode rewrite, then always verify clean.
-    const formatArgs =
-        ctx.mode === "fix" ? ["-w", ...scripts] : ["-d", ...scripts];
-    const fmt = runner({ cmd: "shfmt", args: formatArgs });
-    if (ctx.mode === "fix" && fmt.status !== 0) {
-        return failed({
-            notice: `shell: shfmt -w failed: ${fmt.stderr.trim()}`,
+    if (ctx.mode === "fix") {
+        const fmt = runner({ cmd: "shfmt", args: ["-w", ...scripts] });
+        if (fmt.status !== 0) {
+            return errored({
+                message: `shell: shfmt -w failed: ${fmt.stderr.trim()}`,
+            });
+        }
+    }
+    // -l lists the files still needing formatting (and exits 0 even when it
+    // lists them); treat any listed file as the diff, and a nonzero exit as a
+    // genuine shfmt execution failure.
+    const check = runner({ cmd: "shfmt", args: ["-l", ...scripts] });
+    if (check.status !== 0) {
+        return errored({
+            message: `shell: shfmt failed: ${check.stderr.trim()}`,
         });
     }
-    const check =
-        ctx.mode === "fix"
-            ? runner({ cmd: "shfmt", args: ["-d", ...scripts] })
-            : fmt;
-    if (check.status !== 0) {
+    const errors = parseShfmtFiles({ stdout: check.stdout });
+    if (errors.length > 0) {
         return failed({
-            notice: `shell: shfmt found formatting diffs (${scripts.length} files)`,
+            notice: `shell: shfmt found formatting diffs (${errors.length} files)`,
+            errors,
         });
     }
 
     const lint = runner({
         cmd: "shellcheck",
-        args: ["-x", "-S", floor, ...scripts],
+        args: ["-x", "-S", floor, "-f", "gcc", ...scripts],
     });
     if (lint.status !== 0) {
+        const errors = parseShellcheck({
+            text: `${lint.stdout}\n${lint.stderr}`,
+        });
+        if (errors.length === 0) {
+            return failed({
+                notice: `shell: shellcheck violations at or above '${floor}'`,
+            });
+        }
         return failed({
-            notice: `shell: shellcheck violations at or above '${floor}'`,
+            notice: `shell: ${errors.length} shellcheck finding(s) at or above '${floor}'`,
+            errors,
         });
     }
 

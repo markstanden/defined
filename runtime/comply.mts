@@ -2,18 +2,22 @@
 // comply.mts — quality gate orchestrator (two-verb contract, decision #23).
 //
 // Public surface:
-//   defined comply   bootstrap → repair (fix) pass → fresh verify (no-fix)
-//                    pass → exit 0 only when the final pass is green.
-//   defined verify   managed-artifact check (never writes) → complete no-fix
-//                    pass → non-zero for any drift, finding or failure.
+//   defined comply [--min|--full]   bootstrap → repair (fix) pass → fresh
+//                                   verify (no-fix) pass → JSON result.
+//   defined verify [--min|--full]   managed-artifact check (never writes) →
+//                                   complete no-fix pass → JSON result.
+//
+// Exit is 0 only when the canonical result is `compliant`, 1 otherwise; the
+// exit code derives from the result, never from the rendered text. Output is a
+// single JSON line (lib/report.mts): `--full` (default) includes the per-check
+// `results`, `--min` drops them; both always carry `status` and include
+// `errors` whenever any occurred.
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
 // `verify` shares the orchestrator. Steps run in fixed order (naming →
 // node-deps → node → eslint → node-checks → node-coverage → dotnet →
 // dotnet-coverage → shell → smoke → yaml → workflow → tofu), strictly
-// sequentially. Output
-// follows the report contract (decision #24): green runs print exactly one
-// `compliant` line; anything else prints a stable, agent-actionable breakdown.
+// sequentially.
 
 import { spawnSync } from "node:child_process";
 
@@ -25,7 +29,12 @@ import {
 } from "./lib/ctx.mts";
 import { trackedFiles } from "../lib/git.mts";
 import { checkSetup, runSetup } from "./setup.mts";
-import { formatReport } from "./lib/report.mts";
+import {
+    buildResult,
+    renderResult,
+    type GateResult,
+    type Presentation,
+} from "./lib/report.mts";
 import { runDotNetStep } from "./steps/dotnet.mts";
 import { runDotNetCoverageStep } from "./steps/dotnet-coverage.mts";
 import { runEslintStep } from "./steps/eslint.mts";
@@ -38,7 +47,12 @@ import { runShellStep } from "./steps/shell.mts";
 import { runTofuStep } from "./steps/tofu.mts";
 import { runWorkflowStep } from "./steps/workflow.mts";
 import { runYamlStep } from "./steps/yaml.mts";
-import { failed, passed, type StepResult } from "./lib/step-result.mts";
+import {
+    errored,
+    failed,
+    passed,
+    type StepResult,
+} from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
 
 interface StepInput {
@@ -180,8 +194,22 @@ export async function runPass({
     const scratch: Scratch = { dir: null };
     try {
         for (const step of steps) {
-            const result = await step.run({ mode, repoRoot, files, scratch });
-            results.set(step.id, result);
+            try {
+                const result = await step.run({
+                    mode,
+                    repoRoot,
+                    files,
+                    scratch,
+                });
+                results.set(step.id, result);
+            } catch (err) {
+                // A step that throws (missing binary, bad config) must never
+                // abort the run: record it as an execution error and continue,
+                // so the remaining checks still report and stdout stays JSON.
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                results.set(step.id, errored({ message }));
+            }
         }
     } finally {
         cleanupScratch(scratch);
@@ -189,8 +217,11 @@ export async function runPass({
     return results;
 }
 
+/** Report the two verbs and their presentation flags. */
 export function printUsage(): void {
-    console.log("usage: defined comply | defined verify");
+    console.log(
+        "usage: defined comply [--min|--full] | defined verify [--min|--full]",
+    );
 }
 
 export interface RunGateDeps {
@@ -202,15 +233,13 @@ export interface RunGateDeps {
     runPassFn?: typeof runPass;
     /** Re-fetch git-tracked files after bootstrap (comply creates files). */
     trackedFilesFn?: typeof trackedFiles;
-    /** Report renderer. */
-    reportFn?: typeof formatReport;
     /** Output sink. */
     printFn?: (line: string) => void;
     /** Process exit; injected so tests observe the exit code. */
     exitFn?: (code: number) => void;
 }
 
-/** The comply flow: bootstrap → repair (fix) pass → fresh no-fix pass → report. */
+/** The comply flow: bootstrap → repair (fix) pass → fresh no-fix pass → result. */
 async function runComply({
     repoRoot,
     files,
@@ -218,7 +247,6 @@ async function runComply({
     checkSetupFn,
     runPassFn,
     trackedFilesFn,
-    reportFn,
 }: {
     repoRoot: string;
     files: string[];
@@ -226,8 +254,7 @@ async function runComply({
     checkSetupFn: typeof checkSetup;
     runPassFn: typeof runPass;
     trackedFilesFn: typeof trackedFiles;
-    reportFn: typeof formatReport;
-}): Promise<string[]> {
+}): Promise<GateResult> {
     await runSetupFn({ startDir: repoRoot });
     // Bootstrap writes .editorconfig, Directory.Build.props, .gitattributes,
     // AGENTS.md and a pinned .defined.json — files the pre-bootstrap
@@ -241,36 +268,32 @@ async function runComply({
         repoRoot,
         files: filesAfterSetup,
     });
-    // Report any gate-owned bootstrap artifact still out of line after
-    // setup (the managed workflow and AGENTS block are brought to the gate
-    // copy; a seeded default the repo owns is never gated) through the same
-    // contract as the step findings — never a raw stack.
+    // Report any gate-owned bootstrap artifact still out of line after setup
+    // (the managed workflow and AGENTS block are brought to the gate copy; a
+    // seeded default the repo owns is never gated) through the same canonical
+    // result as the step findings — never a raw stack.
     const setup = await checkSetupFn({ startDir: repoRoot });
-    return reportFn({
-        verb: "comply",
+    return buildResult({
         setup,
         steps: [...verify].map(([id, result]) => ({ id, result })),
     });
 }
 
-/** The verify flow: read-only bootstrap check → complete no-fix pass → report. */
+/** The verify flow: read-only bootstrap check → complete no-fix pass → result. */
 async function runVerify({
     repoRoot,
     files,
     checkSetupFn,
     runPassFn,
-    reportFn,
 }: {
     repoRoot: string;
     files: string[];
     checkSetupFn: typeof checkSetup;
     runPassFn: typeof runPass;
-    reportFn: typeof formatReport;
-}): Promise<string[]> {
+}): Promise<GateResult> {
     const setup = await checkSetupFn({ startDir: repoRoot });
     const results = await runPassFn({ mode: "no-fix", repoRoot, files });
-    return reportFn({
-        verb: "verify",
+    return buildResult({
         setup,
         steps: [...results].map(([id, result]) => ({ id, result })),
     });
@@ -283,7 +306,6 @@ function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
         checkSetupFn = checkSetup,
         runPassFn = runPass,
         trackedFilesFn = trackedFiles,
-        reportFn = formatReport,
         printFn = (line) => console.log(line),
         exitFn = (code) => process.exit(code),
     } = deps;
@@ -292,45 +314,50 @@ function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
         checkSetupFn,
         runPassFn,
         trackedFilesFn,
-        reportFn,
         printFn,
         exitFn,
     };
 }
 
 /**
- * Run the full two-verb flow against a repo. `comply` bootstraps → repair
- * (fix) pass → fresh verify (no-fix) pass, then reports bootstrap state
- * alongside the step findings; `verify` checks bootstrap state then a complete
- * no-fix pass. Green = report's first line is `compliant`, anything else exits
- * 1. All deps are injectable for tests.
+ * Run the full two-verb flow against a repo and print one JSON result line.
+ * `comply` bootstraps → repair (fix) pass → fresh verify (no-fix) pass, then
+ * reports bootstrap state alongside the step findings; `verify` checks
+ * bootstrap state then a complete no-fix pass. Exit 1 unless the result is
+ * `compliant`. All deps are injectable for tests.
  */
 export async function runGate({
     verb,
     repoRoot,
     files,
+    presentation = "full",
     deps = {},
 }: {
     verb: Verb;
     repoRoot: string;
     files: string[];
+    presentation?: Presentation;
     deps?: RunGateDeps;
 }): Promise<void> {
     const resolved = resolveDeps(deps);
-    const lines =
+    const result =
         verb === "comply"
-            ? await runComply({ repoRoot, files, ...resolved })
+            ? await runComply({
+                  repoRoot,
+                  files,
+                  runSetupFn: resolved.runSetupFn,
+                  checkSetupFn: resolved.checkSetupFn,
+                  runPassFn: resolved.runPassFn,
+                  trackedFilesFn: resolved.trackedFilesFn,
+              })
             : await runVerify({
                   repoRoot,
                   files,
                   checkSetupFn: resolved.checkSetupFn,
                   runPassFn: resolved.runPassFn,
-                  reportFn: resolved.reportFn,
               });
-    for (const line of lines) {
-        resolved.printFn(line);
-    }
-    if (lines[0] !== "compliant") {
+    resolved.printFn(renderResult({ result, presentation }));
+    if (result.status !== "compliant") {
         resolved.exitFn(1);
     }
 }
@@ -354,9 +381,15 @@ async function main(): Promise<void> {
     const ctx = await createRunContext({
         verb: parsed!.verb,
         startDir: process.cwd(),
+        presentation: parsed!.presentation,
     });
     const files = trackedFiles({ repoRoot: ctx.repoRoot });
-    await runGate({ verb: ctx.verb, repoRoot: ctx.repoRoot, files });
+    await runGate({
+        verb: ctx.verb,
+        repoRoot: ctx.repoRoot,
+        files,
+        presentation: ctx.presentation,
+    });
 }
 
 if (import.meta.main) {

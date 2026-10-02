@@ -31,7 +31,7 @@ set -euo pipefail
 # must update this constant in the same commit; cli/install.test.mts fails the
 # gate if the two drift apart. The constant is the installed-byte guarantee:
 # only the launcher committed with this installer is ever written.
-LAUNCHER_SHA256="3ac2364183d661e2452654f4933677abb13a667b3e2f2b72d1c5ebff5b3c957c"
+LAUNCHER_SHA256="a516dfa4b9f5672a221fd49e73972863181f8e0a3fcb8ba8a94f2630353d4091"
 
 # The public repository, used for revision resolution and downloads.
 REPO_SLUG="markstanden/defined"

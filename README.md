@@ -42,14 +42,50 @@ image: the image is built _from_ this code, so gating against it would test the
 last release rather than the change in hand. Both verbs delegate to
 `runtime/comply.sh`, which builds an image from the working tree and mounts
 `runtime/`, `lib/` and `standards/` over the baked copies — `verify` runs its
-read-only `--check-only` pass. A one-line note on stderr says so, keeping the
-stdout report contract (exactly one `compliant` line when green) intact.
+read-only `--check-only` pass. A one-line note on stderr says so, keeping stdout
+to the gate's single JSON result line (see **Output** below).
 
 **Always use `comply` for local and agent work.** It bootstraps the managed
 files, repairs safe findings, then re-verifies — one command, exit 0 only when
 the checkout is green. `verify` exists solely for the pipeline: it is the
 read-only check the installed `defined--verify.yml` runs in CI (never writes),
 and is not the command for a developer to reach for.
+
+## Output: one JSON result line
+
+Both verbs print exactly one compact JSON object (plus a newline) to stdout, and
+exit non-zero unless it reports `"status":"compliant"`:
+
+```json
+{
+    "status": "compliant",
+    "results": {
+        "bootstrap": "pass",
+        "prettier": "pass",
+        "eslint": "skip",
+        "tests": "skip"
+    }
+}
+```
+
+- **`status`** — `compliant` or `not_compliant`; always present, and always
+  agrees with the exit code.
+- **`results`** — every check in the run plan, including skipped ones, keyed by
+  stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Included by default
+  and with `--full`.
+- **`errors`** — actionable diagnostics for failing checks and bootstrap drift
+  (`check`, `kind`, `message`, and `file`/`line`/`column`/`rule` where known).
+  Present whenever there is at least one; omitted on success.
+
+```bash
+defined comply --full   # status + per-check results + errors (the default)
+defined comply --min    # status (+ errors when present), no results map
+```
+
+`--min` success is exactly `{"status":"compliant"}`. Both presentations describe
+the identical run — same checks, same diagnostics, same exit code — so the flag
+changes presentation only, never scope. Parsers should treat a missing `errors`
+key as empty (`jq -r '.errors // []'`).
 
 The launcher is a bash script needing git + podman/docker (plus the standard
 coreutils any bash environment has); it prefers podman, mounts the repo
@@ -65,8 +101,8 @@ and offline mode avoids podman's pasta backend, which fails on hosts without the
 the image must already be present locally.
 
 The gate detects the stack (steps run in order `naming → node-deps → node →
-node-checks → node-coverage → dotnet → dotnet-coverage → shell → smoke → yaml →
-workflow → tofu`), skips cleanly when an ecosystem is absent, and fails loudly
+eslint → node-checks → node-coverage → dotnet → dotnet-coverage → shell →
+smoke → yaml → workflow → tofu`), skips cleanly when an ecosystem is absent, and fails loudly
 when a pinned tool is missing. Because `verify` never writes to the repo, the
 steps that must write — `node-deps`, `node`, `node-checks`, `node-coverage`, the
 `dotnet` family and `tofu` — work in a scratch copy of the git scope under the

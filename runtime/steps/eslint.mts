@@ -30,9 +30,11 @@ import { readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 
 import {
+    errored,
     failed,
     passed,
     skipped,
+    type StepDiagnostic,
     type StepResult,
 } from "../lib/step-result.mts";
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
@@ -74,11 +76,11 @@ const KIND_LABEL: Record<ConfigKind, string> = {
     repo: "repo config",
 };
 
-/** How many findings the notice names before it stops listing. */
-const MAX_SHOWN = 5;
-
-/** Keep only the tracked files ESLint can parse (the house config's set). */
-export function filterEslintFiles({ files }: { files: string[] }): string[] {
+/** Keep only the tracked files ESLint can parse (the house config's set). */ export function filterEslintFiles({
+    files,
+}: {
+    files: string[];
+}): string[] {
     return files.filter((file) => {
         const dot = file.lastIndexOf(".");
         if (dot === -1) {
@@ -176,6 +178,8 @@ interface EslintMessage {
     severity?: unknown;
     ruleId?: unknown;
     line?: unknown;
+    column?: unknown;
+    message?: unknown;
 }
 
 interface EslintFileResult {
@@ -183,10 +187,13 @@ interface EslintFileResult {
     messages?: unknown;
 }
 
+/** One ESLint finding, carrying the location and text a consumer can act on. */
 interface Finding {
     file: string;
     line: number;
+    column: number;
     rule: string;
+    message: string;
 }
 
 function toFinding({
@@ -199,8 +206,10 @@ function toFinding({
     return {
         file,
         line: typeof message.line === "number" ? message.line : 0,
+        column: typeof message.column === "number" ? message.column : 0,
         rule:
             typeof message.ruleId === "string" ? message.ruleId : "parse error",
+        message: typeof message.message === "string" ? message.message : "",
     };
 }
 
@@ -232,6 +241,24 @@ function parseFindings({ stdout }: { stdout: string }): Finding[] {
     );
 }
 
+/** Every finding as a repo-relative diagnostic (complete, never truncated). */
+function findingsToDiagnostics({
+    findings,
+    workingRoot,
+}: {
+    findings: Finding[];
+    workingRoot: string;
+}): StepDiagnostic[] {
+    return findings.map((finding) => ({
+        kind: "finding",
+        file: relative(workingRoot, finding.file),
+        line: finding.line,
+        column: finding.column,
+        rule: finding.rule,
+        message: finding.message,
+    }));
+}
+
 /** First non-empty line of a result's output, for a one-line notice. */
 function firstLine({ result }: { result: CommandResult }): string {
     const text =
@@ -239,36 +266,6 @@ function firstLine({ result }: { result: CommandResult }): string {
             .map((stream) => stream.trim())
             .find((stream) => stream !== "") ?? "no output";
     return text.split("\n")[0] ?? "";
-}
-
-function failureNotice({
-    kind,
-    result,
-    workingRoot,
-}: {
-    kind: ConfigKind;
-    result: CommandResult;
-    workingRoot: string;
-}): string {
-    const label = KIND_LABEL[kind];
-    // Exit 2 is ESLint's fatal/config error; 1 is a lint finding. Both fail,
-    // but the agent needs to know which.
-    if (result.status !== 1) {
-        return `eslint: config/parse error (${label}): ${firstLine({ result })}`;
-    }
-    const findings = parseFindings({ stdout: result.stdout });
-    if (findings.length === 0) {
-        return `eslint: lint failed (${label}): ${firstLine({ result })}`;
-    }
-    const shown = findings
-        .slice(0, MAX_SHOWN)
-        .map((f) => `${relative(workingRoot, f.file)}:${f.line} ${f.rule}`)
-        .join("; ");
-    const extra =
-        findings.length > MAX_SHOWN
-            ? ` (+${findings.length - MAX_SHOWN} more)`
-            : "";
-    return `eslint: ${findings.length} finding(s) (${label}): ${shown}${extra}`;
 }
 
 function excludeFilePath({ repoRoot }: { repoRoot: string }): string {
@@ -466,7 +463,37 @@ export async function runEslintStep({
             notice: `eslint: ${files.length} file(s) clean (${KIND_LABEL[kind]})`,
         });
     }
+    return lintFailure({ check, kind, workingRoot });
+}
+
+/**
+ * Turn a non-zero ESLint run into a result: a config/parse error (exit ≠ 1) is
+ * an execution problem, a lint run with findings is a fail carrying one
+ * diagnostic per finding, and anything else is a fail naming the output.
+ */
+function lintFailure({
+    check,
+    kind,
+    workingRoot,
+}: {
+    check: CommandResult;
+    kind: ConfigKind;
+    workingRoot: string;
+}): StepResult {
+    const label = KIND_LABEL[kind];
+    if (check.status !== 1) {
+        return errored({
+            message: `eslint: config/parse error (${label}): ${firstLine({ result: check })}`,
+        });
+    }
+    const findings = parseFindings({ stdout: check.stdout });
+    if (findings.length === 0) {
+        return failed({
+            notice: `eslint: lint failed (${label}): ${firstLine({ result: check })}`,
+        });
+    }
     return failed({
-        notice: failureNotice({ kind, result: check, workingRoot }),
+        notice: `eslint: ${findings.length} finding(s) (${label})`,
+        errors: findingsToDiagnostics({ findings, workingRoot }),
     });
 }

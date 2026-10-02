@@ -45,9 +45,11 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import {
+    errored,
     failed,
     passed,
     skipped,
+    type StepDiagnostic,
     type StepResult,
 } from "../lib/step-result.mts";
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
@@ -169,6 +171,35 @@ export async function prettierConfigArgs({
     return ["--config", await gateConfigPath({ name: "prettier.config.mjs" })];
 }
 
+// prettier --check prints `[warn] <file>` per unformatted file, then a summary
+// line ("[warn] Code style issues found in N files...") which is not a file.
+const PRETTIER_WARN = /^\[warn\] (.+)$/u;
+
+/** Every unformatted file prettier named, as a structured diagnostic. */
+export function parsePrettierFindings({
+    stdout,
+}: {
+    stdout: string;
+}): StepDiagnostic[] {
+    const errors: StepDiagnostic[] = [];
+    for (const raw of stdout.split("\n")) {
+        const match = PRETTIER_WARN.exec(raw.trim());
+        if (match === null) {
+            continue;
+        }
+        const file = match[1]!;
+        if (file.startsWith("Code style issues")) {
+            continue;
+        }
+        errors.push({
+            kind: "finding",
+            file,
+            message: "unformatted (run prettier --write)",
+        });
+    }
+    return errors;
+}
+
 /**
  * Run prettier over the git-scoped tracked files prettier can parse when the
  * project is a Node project or has markdown. Returns skip with a notice when
@@ -223,8 +254,8 @@ export async function runNodeStep({
             cwd: workingRoot,
         });
         if (write.status !== 0) {
-            return failed({
-                notice: `node: prettier --write failed: ${write.stderr.trim()}`,
+            return errored({
+                message: `node: prettier --write failed: ${write.stderr.trim()}`,
             });
         }
     }
@@ -236,11 +267,17 @@ export async function runNodeStep({
         cwd: workingRoot,
     });
     if (check.status !== 0) {
-        const unformatted = check.stdout
-            .split("\n")
-            .filter((line) => line.trim() !== "").length;
+        const errors = parsePrettierFindings({ stdout: check.stdout });
+        if (errors.length === 0) {
+            return errored({
+                message: `node: prettier --check failed: ${
+                    check.stderr.trim() || check.stdout.trim()
+                }`,
+            });
+        }
         return failed({
-            notice: `node: prettier found ${unformatted} unformatted file(s)`,
+            notice: `node: prettier found ${errors.length} unformatted file(s)`,
+            errors,
         });
     }
 
