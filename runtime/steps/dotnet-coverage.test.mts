@@ -261,6 +261,31 @@ test("repair skips coverage generation entirely (verification-only, #65)", async
     assert.equal(calls.length, 0);
 });
 
+test("write-capable no-fix runs in the repo so the report survives (#65)", async () => {
+    const dir = await makeTempDir("quality-dc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { dotnet: { command: "dotnet test" } },
+        },
+        reportPath: "TestResults/coverage.cobertura.xml",
+        reportContent:
+            '<coverage line-rate="0.9" branch-rate="0.8"></coverage>',
+    });
+    const { result } = await runCoverageScenario({
+        step: runDotNetCoverageStep,
+        repoRoot: dir,
+        mode: "no-fix",
+        repoWritable: true,
+        trackedFiles: ["App.csproj"],
+        runnerOutcomes: { sh: { status: 0 } },
+    });
+    // The report lives only in the repo; a discarded scratch would not find it.
+    assert.equal(result.status, "pass");
+    assert.match(result.notice ?? "", /90\.0%/u);
+});
+
 test("passes when coverage meets default 80% minimum", async () => {
     for (const location of [
         "coverage.cobertura.xml",

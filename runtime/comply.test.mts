@@ -275,6 +275,49 @@ test("runGate_comply_reFetchesTrackedFilesAfterRepair", async () => {
     assert.equal(fetches, 2, "setup refresh + a fresh fetch after repair");
 });
 
+test("runGate_comply_marksBothPassesRepoWritable", async () => {
+    const flags: Array<boolean | undefined> = [];
+    await runGate({
+        verb: "comply",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            runSetupFn: async () => undefined,
+            checkSetupFn: async () => cleanSetup(),
+            trackedFilesFn: () => [],
+            runPassFn: async ({ repoWritable }) => {
+                flags.push(repoWritable);
+                return allGreen();
+            },
+            printFn: () => undefined,
+            exitFn: () => undefined,
+        },
+    });
+    // Comply is write-capable: both passes run report steps in the repo, so the
+    // coverage artifact a scanner reads survives the run (#65).
+    assert.deepEqual(flags, [true, true]);
+});
+
+test("runGate_verify_leavesPassesReadOnly", async () => {
+    const flags: Array<boolean | undefined> = [];
+    await runGate({
+        verb: "verify",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async ({ repoWritable }) => {
+                flags.push(repoWritable);
+                return allGreen();
+            },
+            printFn: () => undefined,
+            exitFn: () => undefined,
+        },
+    });
+    // A read-only verify never opts into writing the repo mount.
+    assert.deepEqual(flags, [undefined]);
+});
+
 test("runGate_comply_reRenameLeavesNoStaleVerificationPath", async () => {
     const verifyFiles: string[][] = [];
     const snapshots = [

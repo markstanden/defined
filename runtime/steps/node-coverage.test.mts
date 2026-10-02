@@ -387,6 +387,30 @@ test("repair skips coverage generation entirely (verification-only, #65)", async
     assert.equal(calls.length, 0);
 });
 
+test("write-capable no-fix runs in the repo so the report survives (#65)", async () => {
+    const dir = await makeTempDir("quality-nc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { node: { command: "npm t" } },
+        },
+        reportPath: "coverage/lcov.info",
+        reportContent: ["LF:100", "LH:90"].join("\n"),
+    });
+    const { result } = await runCoverageScenario({
+        step: runNodeCoverageStep,
+        repoRoot: dir,
+        mode: "no-fix",
+        repoWritable: true,
+        trackedFiles: ["package.json"],
+        runnerOutcomes: { sh: { status: 0 } },
+    });
+    // The report lives only in the repo; a discarded scratch would not find it.
+    assert.equal(result.status, "pass");
+    assert.match(result.notice ?? "", /90\.0%/u);
+});
+
 test("gates line coverage against the effective minimum", async () => {
     const SCENARIOS = [
         {

@@ -61,21 +61,29 @@ export function ensureScratch({
  * working tree (formatting, checks, coverage, dotnet builds) calls this, so a
  * pass has exactly one working root and dependency restore lands where the
  * commands that need it will look (issue #40).
+ *
+ * `repoWritable` overrides the no-fix scratch for a write-capable invocation
+ * (`comply`): a report the consumer must keep — the coverage artifact SonarQube
+ * reads — is written into the repo, not a scratch that is discarded. A
+ * read-only `verify` leaves it false, so the repo mount is never written.
  */
 export function resolveWorkingRoot({
     mode,
     repoRoot,
     scratch,
     files,
+    repoWritable = false,
 }: {
     mode: "fix" | "no-fix";
     repoRoot: string;
     scratch?: Scratch;
     files: string[];
+    /** Work in the repo even in no-fix (a write-capable invocation). */
+    repoWritable?: boolean;
 }): string {
-    return mode === "no-fix"
-        ? ensureScratch({ scratch, repoRoot, files })
-        : repoRoot;
+    return mode === "fix" || repoWritable
+        ? repoRoot
+        : ensureScratch({ scratch, repoRoot, files });
 }
 
 /** Remove a scratch dir created by ensureScratch. No-op when none exists. */

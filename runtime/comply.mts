@@ -67,6 +67,13 @@ interface StepInput {
     files: string[];
     /** Shared scratch box: the write-capable steps (node/dotnet families, tofu) work in /tmp for no-fix (findings #10, #20; issue #43). */
     scratch?: Scratch;
+    /**
+     * True for a write-capable invocation (`comply`): a no-fix step that
+     * produces a report the consumer keeps (coverage, for SonarQube/CI) works
+     * in the repo rather than a scratch that is discarded. Read-only `verify`
+     * leaves it false, so the repo mount is never written.
+     */
+    repoWritable?: boolean;
 }
 
 interface Step {
@@ -136,9 +143,9 @@ const STEPS: Step[] = [
     },
     {
         id: "node-coverage",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        run: ({ mode, repoRoot, files, scratch, repoWritable }) =>
             runNodeCoverageStep({
-                ctx: { mode, repoRoot, scratch },
+                ctx: { mode, repoRoot, scratch, repoWritable },
                 trackedFiles: files,
             }),
     },
@@ -152,9 +159,9 @@ const STEPS: Step[] = [
     },
     {
         id: "dotnet-coverage",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        run: ({ mode, repoRoot, files, scratch, repoWritable }) =>
             runDotNetCoverageStep({
-                ctx: { mode, repoRoot, scratch },
+                ctx: { mode, repoRoot, scratch, repoWritable },
                 trackedFiles: files,
             }),
     },
@@ -194,6 +201,7 @@ export async function runPass({
     files,
     steps = STEPS,
     timings,
+    repoWritable = false,
 }: {
     mode: StepMode;
     repoRoot: string;
@@ -201,6 +209,8 @@ export async function runPass({
     steps?: readonly Step[];
     /** Opt-in per-step durations, reported under `<mode>/<step>` (#71). */
     timings?: Timings;
+    /** Write-capable invocation (`comply`): no-fix report steps work in the repo. */
+    repoWritable?: boolean;
 }): Promise<Map<string, StepResult>> {
     const results = new Map<string, StepResult>();
     for (const step of steps) {
@@ -216,6 +226,7 @@ export async function runPass({
                     repoRoot,
                     files,
                     scratch,
+                    repoWritable,
                 });
                 results.set(step.id, result);
             } catch (err) {
@@ -286,7 +297,13 @@ async function runComply({
     // prettier file list never sees the gate's own seeded files.
     const filesAfterSetup = trackedFilesFn({ repoRoot });
     const repair = await measure(timings, "fix pass", () =>
-        runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup, timings }),
+        runPassFn({
+            mode: "fix",
+            repoRoot,
+            files: filesAfterSetup,
+            timings,
+            repoWritable: true,
+        }),
     );
     // Repairs mutate the tree: a fixer or a consumer command can create,
     // delete or rename files. Re-fetch so verification judges what is actually
@@ -299,6 +316,7 @@ async function runComply({
             repoRoot,
             files: filesAfterRepair,
             timings,
+            repoWritable: true,
         }),
     );
     // Report any gate-owned bootstrap artifact still out of line after setup

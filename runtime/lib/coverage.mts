@@ -21,9 +21,11 @@ export interface ScopedCommandOutcome {
 
 /**
  * Run a consumer command in the right working root: the repo for fix mode, a
- * shared /tmp scratch copy of the git scope for no-fix. Returns the working
- * root (so the caller reads generated artifacts from the same place) and the
- * failure detail when the command exits non-zero.
+ * shared /tmp scratch copy of the git scope for no-fix — unless the invocation
+ * is write-capable (`repoWritable`, comply), in which case no-fix also runs in
+ * the repo so a report it must keep survives. Returns the working root (so the
+ * caller reads generated artifacts from the same place) and the failure detail
+ * when the command exits non-zero.
  */
 export function runScopedCommand({
     mode,
@@ -32,6 +34,7 @@ export function runScopedCommand({
     trackedFiles,
     command,
     runner,
+    repoWritable = false,
 }: {
     mode: "fix" | "no-fix";
     repoRoot: string;
@@ -39,12 +42,15 @@ export function runScopedCommand({
     trackedFiles: string[];
     command: string;
     runner: Runner;
+    /** Work in the repo even in no-fix (a write-capable invocation). */
+    repoWritable?: boolean;
 }): ScopedCommandOutcome {
     const workingRoot = resolveWorkingRoot({
         mode,
         repoRoot,
         scratch,
         files: trackedFiles,
+        repoWritable,
     });
 
     const result = runner({

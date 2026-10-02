@@ -54,6 +54,7 @@ type StepArgs = {
         mode: "fix" | "no-fix";
         repoRoot: string;
         scratch?: { dir: string | null };
+        repoWritable?: boolean;
     };
     trackedFiles: string[];
     runner: typeof import("../lib/proc.mts").run;
@@ -122,6 +123,7 @@ export async function runCoverageScenario<T>({
     trackedFiles,
     runnerOutcomes = {},
     scratchDir,
+    repoWritable = false,
 }: {
     step: StepFn<T>;
     repoRoot: string;
@@ -130,12 +132,14 @@ export async function runCoverageScenario<T>({
     runnerOutcomes?: Record<string, RunResult>;
     /** Fix the no-fix working root (e.g. to the repo) instead of a fresh /tmp. */
     scratchDir?: string;
+    /** Write-capable invocation: no-fix keeps reports in the repo. */
+    repoWritable?: boolean;
 }): Promise<{ result: T; calls: string[][] }> {
     const { runner, calls } = fakeRunner(runnerOutcomes);
     const scratch = { dir: scratchDir ?? null };
     try {
         const result = await step({
-            ctx: { mode, repoRoot, scratch },
+            ctx: { mode, repoRoot, scratch, repoWritable },
             trackedFiles,
             runner,
             readFileFn: readFile,
