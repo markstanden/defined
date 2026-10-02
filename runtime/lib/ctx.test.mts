@@ -31,11 +31,13 @@ test("parseCommand_acceptsExactlyComplyAndVerify_defaultingToMin", () => {
         verb: "comply",
         help: false,
         presentation: "min",
+        timings: false,
     });
     assert.deepEqual(parseCommand({ argv: ["verify"] }), {
         verb: "verify",
         help: false,
         presentation: "min",
+        timings: false,
     });
 });
 
@@ -44,12 +46,32 @@ test("parseCommand_acceptsMinAndFullFlags", () => {
         verb: "comply",
         help: false,
         presentation: "min",
+        timings: false,
     });
     assert.deepEqual(parseCommand({ argv: ["verify", "--full"] }), {
         verb: "verify",
         help: false,
         presentation: "full",
+        timings: false,
     });
+});
+
+test("parseCommand_acceptsTimingsAloneAndAlongsidePresentation", () => {
+    assert.deepEqual(parseCommand({ argv: ["comply", "--timings"] }), {
+        verb: "comply",
+        help: false,
+        presentation: "min",
+        timings: true,
+    });
+    assert.deepEqual(
+        parseCommand({ argv: ["verify", "--full", "--timings"] }),
+        {
+            verb: "verify",
+            help: false,
+            presentation: "full",
+            timings: true,
+        },
+    );
 });
 
 test("parseCommand_rejectsConflictingPresentationFlags", () => {
@@ -68,12 +90,14 @@ test("parseCommand_acceptsExplainWithATopic", () => {
         verb: "explain",
         help: false,
         presentation: "min",
+        timings: false,
         topic: "shell",
     });
     assert.deepEqual(parseCommand({ argv: ["explain", "SC2086"] }), {
         verb: "explain",
         help: false,
         presentation: "min",
+        timings: false,
         topic: "SC2086",
     });
 });
@@ -98,11 +122,13 @@ test("parseCommand_reportsHelp", () => {
         verb: "verify",
         help: true,
         presentation: "min",
+        timings: false,
     });
     assert.deepEqual(parseCommand({ argv: ["--help"] }), {
         verb: "verify",
         help: true,
         presentation: "min",
+        timings: false,
     });
 });
 
@@ -146,8 +172,10 @@ test("createRunContext_derivesRepoRootViaGitMarkerWalkUp", async () => {
         verb: "verify",
         startDir: nested,
         presentation: "min",
+        timings: true,
     });
     assert.equal(ctx.repoRoot, root);
     assert.equal(ctx.verb, "verify");
     assert.equal(ctx.presentation, "min");
+    assert.equal(ctx.timings, true);
 });

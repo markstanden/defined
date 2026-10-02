@@ -109,13 +109,24 @@ test(
             const before = hashTree(root);
             const checkOnly = run({
                 cmd: gateShim(),
-                args: ["--check-only", "--full"],
+                args: ["--check-only", "--full", "--timings"],
                 cwd: root,
             });
             assert.equal(
                 checkOnly.status,
                 1,
                 `check-only should fail, got:\n${checkOnly.stdout}`,
+            );
+            // --timings is instrumentation only: stdout stays one JSON result
+            // line, and the phase/step durations land on stderr.
+            assert.match(
+                checkOnly.stderr,
+                /defined: timing no-fix\/naming \d+ms/u,
+                "check-only must report step timings on stderr with --timings",
+            );
+            assert.match(
+                checkOnly.stderr,
+                /defined: timing verify total \d+ms/u,
             );
             const checked = parseGate(checkOnly.stdout);
             assert.equal(checked.status, "not_compliant");
