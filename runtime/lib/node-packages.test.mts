@@ -4,6 +4,7 @@
 // Run: node --test lib/node-packages.test.mts
 
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -176,7 +177,7 @@ test("restoreNodePackages restores each distinct directory once", async () => {
         packages: [{ dir: "" }, { dir: "" }],
         runner,
     });
-    assert.deepEqual(result, { failures: [], restored: 1 });
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
     assert.equal(calls.length, 1);
     assert.equal(calls[0]!.at(-1), root);
 });
@@ -192,5 +193,168 @@ test("restoreNodePackages reports a missing manifest and installs nothing", asyn
     });
     assert.deepEqual(result.failures, ["no package.json at ."]);
     assert.equal(result.restored, 0);
+    assert.equal(calls.length, 0);
+});
+
+// --- Warm-tree reuse in the no-fix scratch (#67) -----------------------------
+// A frozen-lockfile install is deterministic: identical manifest + lockfile
+// bytes must produce the identical tree, so the repo's warm tree can be
+// copied into the scratch instead of reinstalling it. Arbitrary install
+// commands and the no-lockfile `npm install` fallback are nondeterministic
+// and never reuse.
+
+const MANIFEST = '{"name":"bench","private":true}\n';
+const LOCKFILE = '{"lockfileVersion":3,"packages":{}}\n';
+
+async function warmFixture({
+    repoTree = true,
+    lockfile = LOCKFILE,
+}: {
+    repoTree?: boolean;
+    lockfile?: string;
+} = {}): Promise<{ repo: string; scratch: string }> {
+    const repo = await makeTempDir("quality-node-packages-");
+    const scratch = await makeTempDir("quality-node-packages-");
+    const repoFiles: Record<string, string> = {
+        "package.json": MANIFEST,
+        "package-lock.json": lockfile,
+    };
+    if (repoTree) {
+        repoFiles["node_modules/.warm"] = "warm tree\n";
+    }
+    await writeTree(repo, repoFiles);
+    await writeTree(scratch, {
+        "package.json": MANIFEST,
+        "package-lock.json": LOCKFILE,
+    });
+    return { repo, scratch };
+}
+
+test("restoreNodePackages copies a matching warm tree instead of installing", async () => {
+    const { repo, scratch } = await warmFixture();
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
+    });
+    assert.deepEqual(result, { failures: [], restored: 0, reused: 1 });
+    assert.equal(calls.length, 0);
+    assert.equal(existsSync(join(scratch, "node_modules/.warm")), true);
+});
+
+test("restoreNodePackages reinstalls when the warm lockfile differs", async () => {
+    const { repo, scratch } = await warmFixture({
+        lockfile: '{"lockfileVersion":3,"packages":{"stale":{}}}\n',
+    });
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
+    });
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+});
+
+test("restoreNodePackages reinstalls when no warm tree exists", async () => {
+    const { repo, scratch } = await warmFixture({ repoTree: false });
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
+    });
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+});
+
+test("restoreNodePackages falls back to an install when the copy fails", async () => {
+    const { repo, scratch } = await warmFixture();
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
+        copyFn: () => {
+            throw new Error("source vanished mid-copy");
+        },
+    });
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+});
+
+test("restoreNodePackages never reuses a declared install command", async () => {
+    const { repo, scratch } = await warmFixture();
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "", install: "npm ci" }],
+        runner,
+        warmRoot: repo,
+    });
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+});
+
+test("restoreNodePackages does not reuse the no-lockfile npm install fallback", async () => {
+    const repo = await makeTempDir("quality-node-packages-");
+    const scratch = await makeTempDir("quality-node-packages-");
+    await writeTree(repo, {
+        "package.json": MANIFEST,
+        "node_modules/.warm": "warm tree\n",
+    });
+    await writeTree(scratch, { "package.json": MANIFEST });
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
+    });
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+});
+
+test("restoreNodePackages skips the install when the working root is the warm root", async () => {
+    const repo = await makeTempDir("quality-node-packages-");
+    await writeTree(repo, {
+        "package.json": MANIFEST,
+        "package-lock.json": LOCKFILE,
+        "node_modules/.warm": "warm tree\n",
+    });
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: repo,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
+    });
+    assert.deepEqual(result, { failures: [], restored: 0, reused: 1 });
+    assert.equal(calls.length, 0);
+});
+
+test("restoreNodePackages counts install:false as neither restored nor reused", async () => {
+    const { repo, scratch } = await warmFixture();
+    const { runner, calls } = fakeRunner({}, true);
+    const result = restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "", install: false }],
+        runner,
+        warmRoot: repo,
+    });
+    assert.deepEqual(result, { failures: [], restored: 0, reused: 0 });
     assert.equal(calls.length, 0);
 });

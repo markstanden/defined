@@ -12,6 +12,10 @@
 //           `node`, `node-checks` and `node-coverage` via ctx.scratch, so a
 //           read-only verify never writes node_modules into the checkout.
 // Skip:     nothing to restore (no declared packages and no consumer config).
+// Reuse:    in no-fix the repo tree from the fix pass is reused when the
+//           manifest + lockfile bytes still match (a frozen-lockfile install
+//           is deterministic), so a warm volume means a copy instead of a
+//           reinstall — see restoreNodePackages (#67).
 //
 // Restore is owned here so it happens once per pass, before formatting and
 // checks. `node-checks` no longer installs; it runs the consumer's checks
@@ -47,6 +51,34 @@ export interface NodeDepsRunContext {
 type Runner = typeof run;
 type Exists = typeof existsSync;
 
+type RestoreSummary = {
+    failures: string[];
+    restored: number;
+    reused: number;
+};
+
+/**
+ * Present a restore summary: failures name every package; a pass distinguishes
+ * warm reuse from fresh installs so cache hits are visible in the report (#67).
+ */
+function toStepResult({
+    failures,
+    restored,
+    reused,
+}: RestoreSummary): StepResult {
+    if (failures.length > 0) {
+        return failed({ notice: `node-deps: ${failures.join("; ")}` });
+    }
+    if (restored === 0 && reused === 0) {
+        return skipped({ notice: "node-deps: no dependencies to restore" });
+    }
+    const counts = [
+        ...(reused > 0 ? [`reused ${reused} warm tree(s)`] : []),
+        ...(restored > 0 ? [`restored ${restored} package(s)`] : []),
+    ];
+    return passed({ notice: `node-deps: ${counts.join("; ")}` });
+}
+
 /**
  * Restore the consumer's Node dependencies for the pass. Skips cleanly when
  * there is nothing to restore; otherwise fails naming every package whose
@@ -81,19 +113,14 @@ export async function runNodeDepsStep({
         scratch: ctx.scratch,
         files: trackedFiles,
     });
-    const { failures, restored } = restoreNodePackages({
-        workingRoot,
-        trackedFiles,
-        packages,
-        runner,
-        existsSyncFn,
-    });
-
-    if (failures.length > 0) {
-        return failed({ notice: `node-deps: ${failures.join("; ")}` });
-    }
-    if (restored === 0) {
-        return skipped({ notice: "node-deps: no dependencies to restore" });
-    }
-    return passed({ notice: `node-deps: restored ${restored} package(s)` });
+    return toStepResult(
+        restoreNodePackages({
+            workingRoot,
+            trackedFiles,
+            packages,
+            runner,
+            existsSyncFn,
+            warmRoot: ctx.mode === "no-fix" ? ctx.repoRoot : undefined,
+        }),
+    );
 }

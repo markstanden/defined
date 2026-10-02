@@ -19,7 +19,7 @@
 // without an explicit `dir` fail loudly rather than guessing.
 // The runner and existsSync are injected so tests need no host binaries.
 
-import { existsSync } from "node:fs";
+import { cpSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { run, type CommandResult } from "../../lib/proc.mts";
@@ -76,6 +76,24 @@ export function resolvePackageDir({
     return { dir: manifests[0]!.split("/").slice(0, -1).join("/") };
 }
 
+/** The tracked lockfile a package's default install freezes, if any. */
+export type DetectedLockfile = (typeof LOCKFILE_INSTALLS)[number];
+
+function detectedLockfile({
+    packageDir,
+    exists,
+}: {
+    packageDir: string;
+    exists?: Exists;
+}): DetectedLockfile | undefined {
+    for (const entry of LOCKFILE_INSTALLS) {
+        if (exists(join(packageDir, entry[0]))) {
+            return entry;
+        }
+    }
+    return undefined;
+}
+
 /** Default restore command from the package's lockfile (npm fallback). */
 export function defaultInstall({
     packageDir,
@@ -84,12 +102,7 @@ export function defaultInstall({
     packageDir: string;
     exists?: Exists;
 }): string {
-    for (const [lockfile, command] of LOCKFILE_INSTALLS) {
-        if (exists(join(packageDir, lockfile))) {
-            return command;
-        }
-    }
-    return "npm install";
+    return detectedLockfile({ packageDir, exists })?.[1] ?? "npm install";
 }
 
 /** Human label for a resolved package directory (`""` is the repo root). */
@@ -202,11 +215,161 @@ function dedupeByResolvedDir({
 }
 
 /**
+ * Do the manifest and lockfile bytes match between the warm tree's root and
+ * the working root? A frozen-lockfile install is deterministic, so byte-equal
+ * inputs mean the warm tree is what an install would produce (#67).
+ */
+function manifestsMatch({
+    warmDir,
+    workDir,
+    lockfile,
+}: {
+    warmDir: string;
+    workDir: string;
+    lockfile: string;
+}): boolean {
+    for (const name of ["package.json", lockfile]) {
+        try {
+            if (
+                !readFileSync(join(warmDir, name)).equals(
+                    readFileSync(join(workDir, name)),
+                )
+            ) {
+                return false;
+            }
+        } catch {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Try to satisfy one package from the warm tree instead of reinstalling it:
+ * only an auto-detected frozen-lockfile install qualifies (a declared install
+ * command and the no-lockfile npm fallback are nondeterministic), and the
+ * manifest + lockfile bytes must match between the two roots. Reuse is a copy
+ * into the working root — or nothing at all when the working root *is* the
+ * warm root. A failed copy (the source can vanish mid-copy under a concurrent
+ * rebuild) reports false and the caller reinstalls (#67).
+ */
+function reuseWarmTree({
+    warmRoot,
+    workingRoot,
+    dir,
+    install,
+    existsSyncFn,
+    copyFn,
+}: {
+    warmRoot: string | undefined;
+    workingRoot: string;
+    dir: string;
+    install: string | false | undefined;
+    existsSyncFn: Exists;
+    copyFn: typeof cpSync;
+}): boolean {
+    if (warmRoot === undefined || install !== undefined) {
+        return false;
+    }
+    const lock = detectedLockfile({
+        packageDir: join(warmRoot, dir),
+        exists: existsSyncFn,
+    });
+    if (
+        lock === undefined ||
+        !manifestsMatch({
+            warmDir: join(warmRoot, dir),
+            workDir: join(workingRoot, dir),
+            lockfile: lock[0],
+        })
+    ) {
+        return false;
+    }
+    if (workingRoot === warmRoot) {
+        return true;
+    }
+    try {
+        copyFn(
+            join(warmRoot, dir, "node_modules"),
+            join(workingRoot, dir, "node_modules"),
+            { recursive: true },
+        );
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/** What became of one restore target. */
+type RestoreVerdict = "restored" | "reused" | "skipped";
+
+/**
+ * Restore one resolved package: warm reuse first (see reuseWarmTree), then the
+ * install command with local binaries ahead of PATH. A `failure` string is a
+ * finding; `skipped` without one is a legitimate no-op (install: false).
+ */
+function restoreOnePackage({
+    pkg,
+    dir,
+    workingRoot,
+    runner,
+    existsSyncFn,
+    warmRoot,
+    copyFn,
+}: {
+    pkg: RestoreTarget;
+    dir: string;
+    workingRoot: string;
+    runner: Runner;
+    existsSyncFn: Exists;
+    warmRoot: string | undefined;
+    copyFn: typeof cpSync;
+}): { verdict: RestoreVerdict; failure?: string } {
+    const label = packageLabel(dir);
+    const packageDir = join(workingRoot, dir);
+    if (!existsSyncFn(join(packageDir, "package.json"))) {
+        return { verdict: "skipped", failure: `no package.json at ${label}` };
+    }
+    if (pkg.install === false) {
+        return { verdict: "skipped" };
+    }
+    if (
+        reuseWarmTree({
+            warmRoot,
+            workingRoot,
+            dir,
+            install: pkg.install,
+            existsSyncFn,
+            copyFn,
+        })
+    ) {
+        return { verdict: "reused" };
+    }
+    const command =
+        pkg.install ?? defaultInstall({ packageDir, exists: existsSyncFn });
+    const result = runWithLocalBin({
+        runner,
+        packageDir,
+        workingRoot,
+        command,
+    });
+    if (result.status !== 0) {
+        return {
+            verdict: "skipped",
+            failure: `${label}: install failed: ${detail(result)}`,
+        };
+    }
+    return { verdict: "restored" };
+}
+
+/**
  * Restore every package's dependencies in `workingRoot`. Each package is
  * resolved from the tracked list, its manifest checked, and its install
  * command (declared, or auto-detected from the lockfile) run with local
- * binaries first. Returns the failure details and the number of packages
- * actually restored (a declared `install: false` is skipped, not a failure).
+ * binaries first. Returns the failure details, the number of packages
+ * actually restored (a declared `install: false` is skipped, not a failure)
+ * and the number satisfied from the warm tree instead (`warmRoot`, #67 —
+ * see reuseWarmTree).
  */
 export function restoreNodePackages({
     workingRoot,
@@ -214,16 +377,22 @@ export function restoreNodePackages({
     packages,
     runner,
     existsSyncFn = existsSync,
+    warmRoot,
+    copyFn = cpSync,
 }: {
     workingRoot: string;
     trackedFiles: string[];
     packages: RestoreTarget[];
     runner: Runner;
     existsSyncFn?: Exists;
-}): { failures: string[]; restored: number } {
+    /** The root a previous pass restored into; enables warm reuse (#67). */
+    warmRoot?: string;
+    copyFn?: typeof cpSync;
+}): { failures: string[]; restored: number; reused: number } {
     const failures: string[] = [];
     const seen = new Set<string>();
     let restored = 0;
+    let reused = 0;
 
     for (const pkg of packages) {
         const resolved = resolvePackageDir({
@@ -238,31 +407,25 @@ export function restoreNodePackages({
             continue;
         }
         seen.add(resolved.dir);
-
-        const label = packageLabel(resolved.dir);
-        const packageDir = join(workingRoot, resolved.dir);
-        if (!existsSyncFn(join(packageDir, "package.json"))) {
-            failures.push(`no package.json at ${label}`);
-            continue;
-        }
-        if (pkg.install === false) {
-            continue;
-        }
-
-        const command =
-            pkg.install ?? defaultInstall({ packageDir, exists: existsSyncFn });
-        const result = runWithLocalBin({
-            runner,
-            packageDir,
+        const { verdict, failure } = restoreOnePackage({
+            pkg,
+            dir: resolved.dir,
             workingRoot,
-            command,
+            runner,
+            existsSyncFn,
+            warmRoot,
+            copyFn,
         });
-        if (result.status !== 0) {
-            failures.push(`${label}: install failed: ${detail(result)}`);
-            continue;
+        if (failure !== undefined) {
+            failures.push(failure);
         }
-        restored += 1;
+        if (verdict === "reused") {
+            reused += 1;
+        }
+        if (verdict === "restored") {
+            restored += 1;
+        }
     }
 
-    return { failures, restored };
+    return { failures, restored, reused };
 }
