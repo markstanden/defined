@@ -136,12 +136,13 @@ the image must already be present locally.
 The gate detects the stack (steps run in order `naming → node-deps → node →
 eslint → node-checks → node-coverage → dotnet → dotnet-coverage → shell →
 smoke → yaml → workflow → tofu`), skips cleanly when an ecosystem is absent, and fails loudly
-when a pinned tool is missing. Because `verify` never writes to the repo, the
-steps that must write — `node-deps`, `node`, `node-checks`, `node-coverage`, the
+when a pinned tool is missing. `verify` never writes to the repo, so its
+write-capable steps — `node-deps`, `node`, `node-checks`, `node-coverage`, the
 `dotnet` family and `tofu` — work in a scratch copy of the git scope under the
-container's `/tmp` (a read-only mount cannot host `node_modules/`,
-`coverage/lcov.info`, `obj/`/`bin/` or `.terraform/`); the repo checkout itself
-is never touched. Tool versions are pinned in
+container's `/tmp` (a read-only mount cannot host `node_modules/`, `obj/`/`bin/`
+or `.terraform/`), and the repo checkout is never touched. `comply` is
+write-capable, so its coverage step instead generates the report in the repo
+(`coverage/lcov.info`), where a scanner such as SonarQube reads it. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 

@@ -4,9 +4,10 @@
 // Config:   .defined.json "coverage.dotnet" — command + minimums
 // Fix:      none — coverage generation is verification, so repair skips and it
 //           runs once in the no-fix pass (#65)
-// No-fix:   runs the consumer's coverage command in a /tmp scratch copy of the
-//           git scope (a read-only verify cannot write a report into the repo)
-//           and validates the scratch report
+// No-fix:   runs the consumer's coverage command and validates the report. A
+//           read-only verify runs it in a /tmp scratch copy of the git scope
+//           (it cannot write into the repo); a write-capable comply keeps the
+//           report in the repo, where a scanner reads it
 // Skip:     dotnet disabled by .defined.json, no .defined.json entry for
 //           "dotnet", or no Cobertura XML found
 //

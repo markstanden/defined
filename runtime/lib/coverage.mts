@@ -3,9 +3,11 @@
 // Coverage steps and the naming step all run a consumer-supplied command, then
 // act on its exit code. A read-only `verify` cannot write into the repo, so
 // no-fix runs the command against a scratch copy of the git scope under /tmp
-// (shared across steps via ctx.scratch); fix mode runs in the repo. This module
-// owns that shared command step so callers differ only in config key and what
-// they do with the result.
+// (shared across steps via ctx.scratch); fix mode runs in the repo. A
+// write-capable comply sets `repoWritable`, so no-fix runs report-producing
+// steps in the repo and the artifact survives for a scanner. This module owns
+// that shared command step so callers differ only in config key and what they
+// do with the result.
 
 import { resolveWorkingRoot, type Scratch } from "./scratch.mts";
 import { run } from "../../lib/proc.mts";
