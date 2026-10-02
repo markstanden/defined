@@ -266,10 +266,15 @@ async function runComply({
     // prettier file list never sees the gate's own seeded files.
     const filesAfterSetup = trackedFilesFn({ repoRoot });
     await runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup });
+    // Repairs mutate the tree: a fixer or a consumer command can create,
+    // delete or rename files. Re-fetch so verification judges what is actually
+    // on disk — a new file is checked, and a deleted path never reaches the
+    // no-fix scratch copy, where copying a missing file would abort the pass.
+    const filesAfterRepair = trackedFilesFn({ repoRoot });
     const verify = await runPassFn({
         mode: "no-fix",
         repoRoot,
-        files: filesAfterSetup,
+        files: filesAfterRepair,
     });
     // Report any gate-owned bootstrap artifact still out of line after setup
     // (the managed workflow and AGENTS block are brought to the gate copy; a
