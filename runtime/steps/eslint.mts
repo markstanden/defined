@@ -88,9 +88,13 @@ const KIND_LABEL: Record<ConfigKind, string> = {
     });
 }
 
-/** Single-quote an argument for `sh -c` (the repo-config branch only). */
-function shellQuote(arg: string): string {
-    return `'${arg.replaceAll("'", "'\\''")}'`;
+/**
+ * Single-quote an argument for `sh -c` (the repo-config branch only): embed
+ * each `'` as the classic close-escape-reopen sequence `'\''`. Exported for
+ * tests — quoting is exactly where a silent character goes missing.
+ */
+export function shellQuote({ arg }: { arg: string }): string {
+    return `'${arg.replaceAll("'", String.raw`'\''`)}'`;
 }
 
 function houseArgs({
@@ -128,7 +132,7 @@ function repoCommand({
         "--no-warn-ignored",
         ...files,
     ]
-        .map(shellQuote)
+        .map((file) => shellQuote({ arg: file }))
         .join(" ");
 }
 
@@ -287,7 +291,7 @@ async function manageExample({
     }
     if (kind === "repo") {
         const desired = await readFile(
-            await gateConfigPath({ name: "eslint.config.mjs" }),
+            gateConfigPath({ name: "eslint.config.mjs" }),
             "utf8",
         );
         await writeExample({ workingRoot, desired, notify: notifyFn });
@@ -391,7 +395,7 @@ export async function runEslintStep({
 
     await manageExample({ mode: ctx.mode, kind, workingRoot, notifyFn });
 
-    const configPath = await gateConfigPath({ name: "eslint.config.mjs" });
+    const configPath = gateConfigPath({ name: "eslint.config.mjs" });
     const env = kind === "house" ? complexityEnv(config) : undefined;
     // Repair (#65): mutate only — eslint --fix. The lint check is the single
     // authoritative no-fix pass; a fix that leaves findings is caught there.

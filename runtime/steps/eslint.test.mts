@@ -8,7 +8,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
 
-import { filterEslintFiles, runEslintStep } from "./eslint.mts";
+import { filterEslintFiles, runEslintStep, shellQuote } from "./eslint.mts";
 import { ESLINT_EXAMPLE_NAME } from "../lib/eslint-config.mts";
 import { cleanupScratch } from "../lib/scratch.mts";
 import {
@@ -49,6 +49,13 @@ test("filterEslintFiles keeps lintable extensions and drops the rest", () => {
         }),
         ["src/a.ts", "b.mts", "c.jsx"],
     );
+});
+
+test("shellQuote wraps the argument and escapes embedded quotes for sh -c", () => {
+    assert.equal(shellQuote({ arg: "plain.ts" }), "'plain.ts'");
+    // Each ' becomes close-quote, \' and reopen: the classic sed dance.
+    assert.equal(shellQuote({ arg: "it's.ts" }), `'it'\\''s.ts'`);
+    assert.equal(shellQuote({ arg: "a'b'c.ts" }), `'a'\\''b'\\''c.ts'`);
 });
 
 test("runEslintStep skips when nothing is lintable", async () => {

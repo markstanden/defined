@@ -100,7 +100,7 @@ export async function runYamlStep({
         cmd: "yamllint",
         args: [
             "-c",
-            await gateConfigPath({ name: "yamllint.yml" }),
+            gateConfigPath({ name: "yamllint.yml" }),
             "-s",
             "-f",
             "parsable",

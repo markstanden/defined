@@ -14,7 +14,7 @@ function fakeDeps({
     doc = "# Fake doc\nbody\n",
 } = {}) {
     return {
-        standardsDirFn: async () => "/gate/standards",
+        standardsDirFn: () => "/gate/standards",
         readFileFn: async () => doc,
         loadConfigFn: async () => config,
         existsFn: (path: string) =>

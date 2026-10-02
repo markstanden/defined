@@ -27,7 +27,7 @@ import {
     type StepResult,
 } from "../lib/step-result.mts";
 import { ensureScratch, type Scratch } from "../lib/scratch.mts";
-import { run } from "../../lib/proc.mts";
+import { run, type CommandResult } from "../../lib/proc.mts";
 import { loadConfig } from "../lib/config.mts";
 
 export interface DotNetRunContext {
@@ -96,11 +96,11 @@ export function discoverWorkspace({
     return repoRoot;
 }
 
-async function runDotNetCommand(
+function runDotNetCommand(
     runner: Runner,
     args: string[],
     cwd: string,
-): Promise<{ status: number; stdout: string; stderr: string }> {
+): CommandResult {
     return runner({ cmd: "dotnet", args, cwd });
 }
 
@@ -124,7 +124,7 @@ async function runRestoreAndFormat({
 }): Promise<StepResult | null> {
     // Restore inside the container into the shadowed NuGet cache; later
     // --no-restore phases assume this succeeded.
-    const restore = await runDotNetCommand(
+    const restore = runDotNetCommand(
         runner,
         ["restore", workspace],
         workspaceRoot,
@@ -137,7 +137,7 @@ async function runRestoreAndFormat({
     // Fix mode: format writes. No-fix runs no mutation; verification below does
     // the whole check.
     if (mode === "fix") {
-        const formatWrite = await runDotNetCommand(
+        const formatWrite = runDotNetCommand(
             runner,
             ["format", workspace],
             workspaceRoot,
@@ -165,7 +165,7 @@ async function runVerifyPhase({
     workspace: string;
     workspaceRoot: string;
 }): Promise<StepResult | null> {
-    const formatCheck = await runDotNetCommand(
+    const formatCheck = runDotNetCommand(
         runner,
         ["format", "--verify-no-changes", workspace],
         workspaceRoot,
@@ -176,7 +176,7 @@ async function runVerifyPhase({
         });
     }
 
-    const build = await runDotNetCommand(
+    const build = runDotNetCommand(
         runner,
         ["build", workspace, "--no-restore"],
         workspaceRoot,
@@ -187,7 +187,7 @@ async function runVerifyPhase({
         });
     }
 
-    const test = await runDotNetCommand(
+    const test = runDotNetCommand(
         runner,
         ["test", workspace, "--no-build", "--no-restore"],
         workspaceRoot,

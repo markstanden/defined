@@ -16,11 +16,7 @@ import { fileURLToPath } from "node:url";
  * run from a host checkout, and keeps configs travelling with the gate code.
  * (`standardsDir` below resolves the managed-file sources the same way.)
  */
-export async function gateConfigPath({
-    name,
-}: {
-    name: string;
-}): Promise<string> {
+export function gateConfigPath({ name }: { name: string }): string {
     const gateRoot = dirname(dirname(fileURLToPath(import.meta.url)));
     return join(gateRoot, "config", name);
 }
@@ -31,7 +27,7 @@ export async function gateConfigPath({
  * module's location like gateConfigPath: works baked at /opt/defined/standards
  * in the container or from a host checkout.
  */
-export async function standardsDir(): Promise<string> {
+export function standardsDir(): string {
     const gateRoot = dirname(dirname(fileURLToPath(import.meta.url)));
     return join(dirname(gateRoot), "standards");
 }

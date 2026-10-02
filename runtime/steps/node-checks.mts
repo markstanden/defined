@@ -142,9 +142,7 @@ function runPackage({
     }
 
     const skipCheck =
-        satisfied !== undefined && satisfied.dir === resolved.dir
-            ? satisfied.check
-            : undefined;
+        satisfied?.dir === resolved.dir ? satisfied.check : undefined;
 
     const failures: string[] = [];
     let ran = 0;

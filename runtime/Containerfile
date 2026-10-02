@@ -17,7 +17,11 @@
 ARG NODE_IMAGE_TAG=26.10.0-slim
 ARG NODE_IMAGE_DIGEST=sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1
 
-FROM docker.io/library/node:${NODE_IMAGE_TAG}@${NODE_IMAGE_DIGEST}
+# The digest alone identifies the image: when both are given, Docker ignores
+# the tag (docker:S8431). FROM therefore pins the digest only, and the tag
+# travels as a build arg — asserted against `node --version` in the first RUN
+# below, so tag/digest drift fails the build instead of misleading anyone.
+FROM docker.io/library/node@${NODE_IMAGE_DIGEST}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -26,13 +30,13 @@ COPY runtime/tool-versions.env /usr/local/share/defined/tool-versions.env
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
         git \
         shellcheck \
         shfmt \
-        yamllint \
-        curl \
-        ca-certificates \
         unzip \
+        yamllint \
     ; \
     rm -rf /var/lib/apt/lists/*; \
     . /usr/local/share/defined/tool-versions.env; \
