@@ -4,8 +4,9 @@
 //           consumer-supplied rules command (`.defined.json` "naming") runs
 //           over the repo's git scope.
 // Config:   .defined.json at repo root, "naming" key — raises-only
-// Fix:      an optional "naming.fix" command runs first in fix mode, then the
-//           rules command always re-runs before reporting.
+// Fix:      the optional "naming.fix" command only. This is the repair pass
+//           (#65): the workflow-filename grammar and the rules command run once
+//           in the authoritative no-fix verification pass.
 // No-fix:   a declared rules command runs against a /tmp scratch copy of the
 //           git scope (a read-only verify cannot write there), shared with the
 //           coverage steps via ctx.scratch.
@@ -71,8 +72,41 @@ export function workflowNameViolations({
 }
 
 /**
- * Run the consumer's rules command over the git scope — its optional fix
- * first in fix mode — appending a failure line per broken phase.
+ * Repair (fix, #65): the only mutation is the consumer's autofix command. The
+ * filename grammar and the rules command are verification, run once in the
+ * authoritative no-fix pass. Returns skip when the consumer declared no autofix.
+ */
+function runNamingRepair({
+    ctx,
+    naming,
+    trackedFiles,
+    runner,
+}: {
+    ctx: NamingRunContext;
+    naming: NamingConfig | undefined;
+    trackedFiles: string[];
+    runner: Runner;
+}): StepResult {
+    if (naming?.fix === undefined) {
+        return skipped({ notice: "naming: no consumer autofix declared" });
+    }
+    const fix = runScopedCommand({
+        mode: ctx.mode,
+        repoRoot: ctx.repoRoot,
+        scratch: ctx.scratch,
+        trackedFiles,
+        command: naming.fix,
+        runner,
+    });
+    if (fix.failure !== null) {
+        return failed({ notice: `naming: autofix failed: ${fix.failure}` });
+    }
+    return passed({ notice: "naming: applied consumer autofix" });
+}
+
+/**
+ * Run the consumer's rules check over the git scope, appending a failure line
+ * when it breaks. Verification only.
  */
 function runConsumerRules({
     ctx,
@@ -87,19 +121,6 @@ function runConsumerRules({
     runner: Runner;
     failures: string[];
 }): void {
-    if (ctx.mode === "fix" && naming.fix !== undefined) {
-        const fix = runScopedCommand({
-            mode: ctx.mode,
-            repoRoot: ctx.repoRoot,
-            scratch: ctx.scratch,
-            trackedFiles,
-            command: naming.fix,
-            runner,
-        });
-        if (fix.failure !== null) {
-            failures.push(`autofix failed: ${fix.failure}`);
-        }
-    }
     const check = runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
@@ -150,6 +171,12 @@ export async function runNamingStep({
 }): Promise<StepResult> {
     const config = await loadConfig({ repoRoot: ctx.repoRoot, readFileFn });
     const naming = config.naming;
+
+    // Repair (#65): mutate only — the consumer autofix. The filename grammar
+    // and the rules check are verification.
+    if (ctx.mode === "fix") {
+        return runNamingRepair({ ctx, naming, trackedFiles, runner });
+    }
 
     const violations = workflowNameViolations({ files: trackedFiles });
     const checked = filterWorkflowFiles({ files: trackedFiles }).length;

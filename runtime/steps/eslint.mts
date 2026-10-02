@@ -10,10 +10,10 @@
 //           `.defined.json` "eslint": { "disable": true } switches the step off;
 //           "eslint": { "complexityMax": N | false } tunes the house config's
 //           cyclomatic-complexity ceiling (forwarded as an env var).
-// Fix:      --fix first, then always re-run without --fix and report on the
-//           re-run — a fix that leaves findings can never read as success.
-//           --fix rewrites repo code (that is what `comply` is for); the
-//           read-only `verify` pass never writes.
+// Fix:      --fix only. This is the repair pass (#65): the check runs once in
+//           the authoritative no-fix verification pass, where a fix that leaves
+//           findings can never read as success. --fix rewrites repo code (that
+//           is what `comply` is for); the read-only `verify` pass never writes.
 // No-fix:   runs against the shared /tmp scratch copy of the git scope, like
 //           the node family, so a read-only verify cannot write into the repo.
 // Skip:     no lintable tracked file, or the step is disabled by config.
@@ -315,6 +315,45 @@ function complexityEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
 }
 
 /**
+ * The repair pass: run `eslint --fix` and report only a real execution error.
+ * Exit 1 means findings were left unfixed — verification reports them — so it
+ * is not a failure here; any other non-zero is a config/parse crash and is.
+ */
+function repairEslint({
+    kind,
+    configPath,
+    files,
+    workingRoot,
+    runner,
+    env,
+}: {
+    kind: ConfigKind;
+    configPath: string;
+    files: string[];
+    workingRoot: string;
+    runner: Runner;
+    env?: NodeJS.ProcessEnv;
+}): StepResult {
+    const fix = invokeEslint({
+        kind,
+        configPath,
+        files,
+        fix: true,
+        workingRoot,
+        runner,
+        env,
+    });
+    if (fix.status !== 0 && fix.status !== 1) {
+        return errored({
+            message: `eslint: fix failed (${KIND_LABEL[kind]}): ${firstLine({ result: fix })}`,
+        });
+    }
+    return passed({
+        notice: `eslint: fixed ${files.length} file(s) (${KIND_LABEL[kind]})`,
+    });
+}
+
+/**
  * Lint the repo's git-scoped JS/TS. Skips when the step is disabled or nothing
  * is lintable; otherwise runs the repo's config when present, else the baked
  * house config, and reports on a final no-fix pass.
@@ -354,12 +393,13 @@ export async function runEslintStep({
 
     const configPath = await gateConfigPath({ name: "eslint.config.mjs" });
     const env = kind === "house" ? complexityEnv(config) : undefined;
+    // Repair (#65): mutate only — eslint --fix. The lint check is the single
+    // authoritative no-fix pass; a fix that leaves findings is caught there.
     if (ctx.mode === "fix") {
-        invokeEslint({
+        return repairEslint({
             kind,
             configPath,
             files,
-            fix: true,
             workingRoot,
             runner,
             env,

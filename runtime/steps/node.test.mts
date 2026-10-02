@@ -23,7 +23,6 @@ import {
     makeTempDir,
     recordingRunner,
 } from "../test-helpers.mts";
-import type { CommandResult } from "../../lib/proc.mts";
 
 afterEach(cleanupTempDirs);
 
@@ -162,7 +161,7 @@ test("check mode runs prettier --check in the scratch working root with the git-
     }
 });
 
-test("fix mode writes then re-checks before reporting success", async () => {
+test("fix mode runs the write only and never re-checks (repair-only, #65)", async () => {
     const root = await makeTempDir("quality-node-");
     await writeTree(root, { "package.json": "{}\n" });
     const { runner, calls } = recordingRunner();
@@ -172,29 +171,27 @@ test("fix mode writes then re-checks before reporting success", async () => {
         runner,
     });
     assert.equal(result.status, "pass");
+    // Repair mutation only: one prettier --write. The check runs once in the
+    // authoritative no-fix pass, never here (#65).
     assert.deepEqual(
-        calls.map((c) => (c.cmd !== "prettier" ? c.cmd : c.args[0])),
-        ["--write", "--check"],
+        calls.map((c) => c.args[0]),
+        ["--write"],
     );
     // Fix mode works in the repo itself.
     assert.equal(calls[0]!.cwd, root);
 });
 
-test("a fix that leaves diffs can never read as success", async () => {
+test("a prettier --write that fails is an execution error", async () => {
     const root = await makeTempDir("quality-node-");
     await writeTree(root, { "package.json": "{}\n" });
-    let calls = 0;
-    const runner = (({ cmd, args }: { cmd: string; args: string[] }) => {
-        calls += 1;
-        const status = calls === 1 ? 0 : 1;
-        return { status, stdout: "", stderr: "" } satisfies CommandResult;
-    }) as typeof import("../../lib/proc.mts").run;
+    const { runner } = recordingRunner({
+        prettier: { status: 1, stderr: "write barfed" },
+    });
     const result = await runNodeStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["package.json"],
         runner,
     });
-    // A silent non-zero check is an execution problem, never a pass.
     assert.equal(result.status, "error");
 });
 

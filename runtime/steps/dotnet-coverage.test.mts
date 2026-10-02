@@ -201,7 +201,7 @@ test("skips when dotnet is disabled by .defined.json", async () => {
     assert.equal(calls.length, 0);
 });
 
-test("fails when fix mode command fails", async () => {
+test("fails when the coverage command fails", async () => {
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({
         root: dir,
@@ -213,7 +213,7 @@ test("fails when fix mode command fails", async () => {
     const { result } = await runCoverageScenario({
         step: runDotNetCoverageStep,
         repoRoot: dir,
-        mode: "fix",
+        scratchDir: dir,
         trackedFiles: ["App.csproj"],
         runnerOutcomes: { sh: { status: 1, stderr: "boom" } },
     });
@@ -221,7 +221,7 @@ test("fails when fix mode command fails", async () => {
     assert.match(result.notice ?? "", /coverage command failed/u);
 });
 
-test("fails when no cobertura report after fix mode command", async () => {
+test("fails when the command writes no cobertura report", async () => {
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({
         root: dir,
@@ -233,12 +233,32 @@ test("fails when no cobertura report after fix mode command", async () => {
     const { result } = await runCoverageScenario({
         step: runDotNetCoverageStep,
         repoRoot: dir,
-        mode: "fix",
+        scratchDir: dir,
         trackedFiles: ["App.csproj"],
         runnerOutcomes: { sh: { status: 0 } },
     });
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /no coverage report/u);
+});
+
+test("repair skips coverage generation entirely (verification-only, #65)", async () => {
+    const dir = await makeTempDir("quality-dc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { dotnet: { command: "dotnet test" } },
+        },
+    });
+    const { result, calls } = await runCoverageScenario({
+        step: runDotNetCoverageStep,
+        repoRoot: dir,
+        mode: "fix",
+        trackedFiles: ["App.csproj"],
+    });
+    assert.equal(result.status, "skip");
+    assert.match(result.notice ?? "", /deferred to verification/u);
+    assert.equal(calls.length, 0);
 });
 
 test("passes when coverage meets default 80% minimum", async () => {
@@ -256,22 +276,18 @@ test("passes when coverage meets default 80% minimum", async () => {
         });
         await writeFile(join(dir, "App.csproj"), "<Project/>");
         const calls: string[][] = [];
-        const scratch = { dir: null as string | null };
-        try {
-            const result = await runDotNetCoverageStep({
-                ctx: { mode: "fix", repoRoot: dir, scratch },
-                trackedFiles: ["App.csproj"],
-                runner: reportWriterRunner({
-                    calls,
-                    xml: SAMPLE_XML,
-                    location,
-                }),
-            });
-            assert.equal(result.status, "pass", location);
-            assert.match(result.notice ?? "", /85\.0%/, location);
-        } finally {
-            cleanupScratch(scratch);
-        }
+        const scratch = { dir: dir as string | null };
+        const result = await runDotNetCoverageStep({
+            ctx: { mode: "no-fix", repoRoot: dir, scratch },
+            trackedFiles: ["App.csproj"],
+            runner: reportWriterRunner({
+                calls,
+                xml: SAMPLE_XML,
+                location,
+            }),
+        });
+        assert.equal(result.status, "pass", location);
+        assert.match(result.notice ?? "", /85\.0%/, location);
     }
 });
 
@@ -306,22 +322,18 @@ test("gates line and branch coverage against the minimum", async () => {
         await setupCoverageRepo({ root: dir, config });
         await writeFile(join(dir, "App.csproj"), "<Project/>");
         const calls: string[][] = [];
-        const scratch = { dir: null as string | null };
-        try {
-            const result = await runDotNetCoverageStep({
-                ctx: { mode: "fix", repoRoot: dir, scratch },
-                trackedFiles: ["App.csproj"],
-                runner: reportWriterRunner({
-                    calls,
-                    xml,
-                    location: "TestResults/coverage.cobertura.xml",
-                }),
-            });
-            assert.equal(result.status, status, label);
-            assert.match(result.notice ?? "", re, label);
-        } finally {
-            cleanupScratch(scratch);
-        }
+        const scratch = { dir: dir as string | null };
+        const result = await runDotNetCoverageStep({
+            ctx: { mode: "no-fix", repoRoot: dir, scratch },
+            trackedFiles: ["App.csproj"],
+            runner: reportWriterRunner({
+                calls,
+                xml,
+                location: "TestResults/coverage.cobertura.xml",
+            }),
+        });
+        assert.equal(result.status, status, label);
+        assert.match(result.notice ?? "", re, label);
     }
 });
 
@@ -398,7 +410,7 @@ test("no-fix validates the report the command writes into the scratch", async ()
     }
 });
 
-test("fix mode runs the consumer command", async () => {
+test("no-fix runs the consumer command once", async () => {
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({
         root: dir,
@@ -412,7 +424,7 @@ test("fix mode runs the consumer command", async () => {
     const { calls } = await runCoverageScenario({
         step: runDotNetCoverageStep,
         repoRoot: dir,
-        mode: "fix",
+        scratchDir: dir,
         trackedFiles: ["App.csproj"],
         runnerOutcomes: { sh: { status: 0 } },
     });

@@ -125,7 +125,7 @@ test("runNamingStep passes when workflow names follow the grammar", async () => 
     assert.equal(result.status, "pass");
 });
 
-test("runNamingStep runs the consumer rules command in the repo (fix mode)", async () => {
+test("fix mode without an autofix skips (nothing to repair, #65)", async () => {
     const root = await makeTempDir("quality-naming-");
     await writeFile(
         `${root}/.defined.json`,
@@ -137,14 +137,12 @@ test("runNamingStep runs the consumer rules command in the repo (fix mode)", asy
         trackedFiles: [],
         runner,
     });
-    assert.equal(result.status, "pass");
-    assert.deepEqual(
-        calls.map((c) => [c.args[1], c.cwd]),
-        [["check-names.sh", root]],
-    );
+    // A rules command is verification, not a mutation: repair runs no commands.
+    assert.equal(result.status, "skip");
+    assert.equal(calls.length, 0);
 });
 
-test("runNamingStep runs fix then the rules command in fix mode", async () => {
+test("fix mode runs the autofix only, never the rules command (repair-only, #65)", async () => {
     const root = await makeTempDir("quality-naming-");
     await writeFile(
         `${root}/.defined.json`,
@@ -161,7 +159,7 @@ test("runNamingStep runs fix then the rules command in fix mode", async () => {
     assert.equal(result.status, "pass");
     assert.deepEqual(
         calls.map((c) => c.args[1]),
-        ["fix-names.sh", "check-names.sh"],
+        ["fix-names.sh"],
     );
 });
 
@@ -175,7 +173,7 @@ test("a failing consumer rules command fails the step", async () => {
         "check-names.sh": { status: 1, out: "bad name: fooBar" },
     });
     const result = await runNamingStep({
-        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
         trackedFiles: [],
         runner,
     });

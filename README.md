@@ -344,6 +344,25 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
       Don't duplicate them in XML (e.g. a coverlet `Threshold`): the gate is
       the single authority.
 
+    When the coverage command also runs your test task, tell the gate so it is
+    not run twice: `satisfies` names the `node.checks` entry the coverage
+    command executes, and `node-checks` then skips it. This is explicit — the
+    gate never infers equivalence from command text, because two superficially
+    similar commands may cover different suites:
+
+    ```jsonc
+    "coverage": {
+        "node": {
+            "command": "vitest run --coverage",
+            "satisfies": { "check": "test" },   // "package" defaults to the root
+        },
+    },
+    "node": { "checks": [{ "name": "test", "command": "vitest run" }] },
+    ```
+
+    The coverage command runs once and its report is fresh; a test-execution
+    failure and a coverage-threshold failure stay distinct diagnostics.
+
 3. **Gate locally** — run `defined comply`. It bootstraps `.editorconfig`,
    `Directory.Build.props`, `.gitattributes` and the gate workflow
    (`.github/workflows/defined--verify.yml`) into the repo and seeds the

@@ -6,8 +6,8 @@
 //           root's) prepended to PATH, so consumer-installed binaries win.
 // Config:   .defined.json "node" — either "packages": [...] or the flat
 //           "dir"/"install"/"checks" form. Absent/empty = step skips.
-// Fix:      an optional per-check "fix" command runs first in fix mode only,
-//           then the check always re-runs before reporting.
+// Fix:      an optional per-check "fix" command only. This is the repair pass
+//           (#65); the checks run once, in the authoritative no-fix pass.
 // No-fix:   runs against the /tmp scratch copy of the git scope (a read-only
 //           verify cannot write node_modules into the repo) that `node-deps`
 //           restored into, shared via ctx.scratch.
@@ -54,7 +54,7 @@ export interface NodeChecksRunContext {
 type Runner = typeof run;
 type Exists = typeof existsSync;
 
-/** Run one check (with its fix in fix mode); null when it passes. */
+/** Run one check (or, in repair, only its fix); null when nothing failed. */
 function runCheck({
     mode,
     check,
@@ -70,16 +70,21 @@ function runCheck({
     runner: Runner;
     label: string;
 }): string | null {
-    if (mode === "fix" && check.fix !== undefined) {
+    // Repair (#65): run the per-check fix mutation only. The check itself runs
+    // once in the authoritative no-fix verification pass.
+    if (mode === "fix") {
+        if (check.fix === undefined) {
+            return null;
+        }
         const fixed = runWithLocalBin({
             runner,
             packageDir,
             workingRoot,
             command: check.fix,
         });
-        if (fixed.status !== 0) {
-            return `${label}: fix "${check.name}" failed: ${detail(fixed)}`;
-        }
+        return fixed.status === 0
+            ? null
+            : `${label}: fix "${check.name}" failed: ${detail(fixed)}`;
     }
     const result = runWithLocalBin({
         runner,
@@ -92,6 +97,19 @@ function runCheck({
         : `${label}: ${check.name} failed: ${detail(result)}`;
 }
 
+/** The `coverage.node.satisfies` relationship, or undefined when unset (#66). */
+function satisfiedCheck({
+    config,
+}: {
+    config: Awaited<ReturnType<typeof loadConfig>>;
+}): { dir: string; check: string } | undefined {
+    const satisfies = config.coverage?.node?.satisfies;
+    if (!satisfies) {
+        return undefined;
+    }
+    return { dir: satisfies.package, check: satisfies.check };
+}
+
 /** Resolve and check one package; returns its failures and pass count. */
 function runPackage({
     mode,
@@ -100,6 +118,7 @@ function runPackage({
     trackedFiles,
     runner,
     existsSyncFn,
+    satisfied,
 }: {
     mode: "fix" | "no-fix";
     pkg: NodePackageConfig;
@@ -107,6 +126,8 @@ function runPackage({
     trackedFiles: string[];
     runner: Runner;
     existsSyncFn: Exists;
+    /** A `coverage.satisfies` entry whose check this package must skip. */
+    satisfied?: { dir: string; check: string };
 }): { failures: string[]; ran: number } {
     const resolved = resolvePackageDir({ files: trackedFiles, dir: pkg.dir });
     if ("error" in resolved) {
@@ -120,9 +141,19 @@ function runPackage({
         return { failures: [`no package.json at ${label}`], ran: 0 };
     }
 
+    const skipCheck =
+        satisfied !== undefined && satisfied.dir === resolved.dir
+            ? satisfied.check
+            : undefined;
+
     const failures: string[] = [];
     let ran = 0;
     for (const check of pkg.checks) {
+        // The coverage command runs this check and produces its report, so it
+        // must not run again here (#66). Explicit config, never inferred.
+        if (check.name === skipCheck) {
+            continue;
+        }
         const failure = runCheck({
             mode,
             check,
@@ -165,6 +196,7 @@ export async function runNodeChecksStep({
             notice: "node-checks: no checks declared in .defined.json",
         });
     }
+    const satisfied = satisfiedCheck({ config });
 
     // Same working root as node-deps: repo for fix, shared scratch for no-fix.
     const workingRoot = resolveWorkingRoot({
@@ -184,6 +216,7 @@ export async function runNodeChecksStep({
             trackedFiles,
             runner,
             existsSyncFn,
+            satisfied,
         });
         failures.push(...outcome.failures);
         ran += outcome.ran;
@@ -192,7 +225,10 @@ export async function runNodeChecksStep({
     if (failures.length > 0) {
         return failed({ notice: `node-checks: ${failures.join("; ")}` });
     }
+    // Repair reports the fixes it applied; verification reports the checks it
+    // ran. Either way, every declared package was visited (#65).
+    const verb = ctx.mode === "fix" ? "autofix(es) applied" : "check(s) passed";
     return passed({
-        notice: `node-checks: ${ran} check(s) passed across ${packages.length} package(s)`,
+        notice: `node-checks: ${ran} ${verb} across ${packages.length} package(s)`,
     });
 }

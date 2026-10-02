@@ -95,21 +95,17 @@ test("parseShfmtFiles ignores blank lines and parseShellcheck reads gcc format",
     );
 });
 
-test("fix mode rewrites then re-checks before reporting pass", async () => {
-    const { runner, calls } = fakeRunner({
-        // first shfmt (-w) "succeeds"; the re-check also passes
-        shellcheck: { status: 0 },
-    });
+test("fix mode runs shfmt -w only, never the check (repair-only, #65)", async () => {
+    const { runner, calls } = fakeRunner({});
     const result = await runShellStep({
         ctx: { ...baseCtx, mode: "fix" },
         trackedFiles: ["fixable.sh"],
         runner,
     });
     assert.equal(result.status, "pass");
-    assert.deepEqual(calls.filter((c) => c[0] === "shfmt")[0].slice(0, 2), [
-        "shfmt",
-        "-w",
-    ]);
+    // Repair mutation only: one shfmt -w. No shfmt -l and no shellcheck — those
+    // run once in the authoritative no-fix pass (#65).
+    assert.deepEqual(calls, [["shfmt", "-w", "fixable.sh"]]);
 });
 
 test("shellcheck violations at or above the floor fail the step", async () => {

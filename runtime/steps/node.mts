@@ -13,8 +13,10 @@
 //           the ignore FILE, not CWD (getRelativePath(file, ignoreFile)) — a
 //           travelling/temp ignore must live at the repo root for
 //           repo-relative directory patterns to match.
-// Fix:      prettier --write rewrites, then the step re-checks before
-//           reporting — a fix that leaves diffs can never read as success
+// Fix:      prettier --write only. This is the repair pass (#65): check-only
+//           work runs once, in the authoritative no-fix verification pass — a
+//           fix that leaves diffs is caught there, never read as success here.
+//           (A read-only verify cannot write, so it checks the scratch copy.)
 //
 // Scope is git's (decision: "gate scope = git scope"). Prettier runs over the
 // gate's tracked list (git ls-files -co --exclude-standard — tracked plus
@@ -247,6 +249,8 @@ export async function runNodeStep({
         ...(await prettierIgnoreArgs({ repoRoot: workingRoot })),
     ];
 
+    // Repair (#65): mutate only. prettier --write rewrites the tree; the check
+    // belongs to the single authoritative no-fix pass, never here.
     if (ctx.mode === "fix") {
         const write = runner({
             cmd: "prettier",
@@ -258,9 +262,12 @@ export async function runNodeStep({
                 message: `node: prettier --write failed: ${write.stderr.trim()}`,
             });
         }
+        return passed({
+            notice: `node: formatted ${prettierFiles.length} file(s)`,
+        });
     }
 
-    // Always verify clean — in fix mode this proves the rewrite left nothing.
+    // Verification: prettier --check decides.
     const check = runner({
         cmd: "prettier",
         args: ["--check", ...sharedArgs, ...prettierFiles],

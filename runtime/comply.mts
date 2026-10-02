@@ -32,6 +32,7 @@ import { trackedFiles } from "../lib/git.mts";
 import { checkSetup, runSetup } from "./setup.mts";
 import {
     buildResult,
+    mergeRepairErrors,
     renderResult,
     type GateResult,
     type Presentation,
@@ -52,6 +53,7 @@ import {
     errored,
     failed,
     passed,
+    skipped,
     type StepResult,
 } from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
@@ -76,8 +78,12 @@ interface Step {
  * Prove end-to-end container execution by probing git's version. Uses a
  * fixed absolute path (/usr/bin/git — the image installs git via apt on
  * Debian slim), so no PATH lookup is involved and the probe is deterministic.
+ * Verification-only: repair skips it (#65).
  */
-export async function runSmoke(_input: StepInput): Promise<StepResult> {
+export async function runSmoke({ mode }: StepInput): Promise<StepResult> {
+    if (mode === "fix") {
+        return skipped({ notice: "smoke: deferred to verification" });
+    }
     const probe = spawnSync("/usr/bin/git", ["--version"], {
         encoding: "utf8",
     });
@@ -279,7 +285,7 @@ async function runComply({
     // judge the repo as it exists after setup; otherwise the node step's
     // prettier file list never sees the gate's own seeded files.
     const filesAfterSetup = trackedFilesFn({ repoRoot });
-    await measure(timings, "fix pass", () =>
+    const repair = await measure(timings, "fix pass", () =>
         runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup, timings }),
     );
     // Repairs mutate the tree: a fixer or a consumer command can create,
@@ -298,11 +304,12 @@ async function runComply({
     // Report any gate-owned bootstrap artifact still out of line after setup
     // (the managed workflow and AGENTS block are brought to the gate copy; a
     // seeded default the repo owns is never gated) through the same canonical
-    // result as the step findings — never a raw stack.
+    // result as the step findings — never a raw stack. A repair that failed
+    // while mutating is folded in so it cannot hide behind green verification.
     const setup = await checkSetupFn({ startDir: repoRoot });
     return buildResult({
         setup,
-        steps: [...verify].map(([id, result]) => ({ id, result })),
+        steps: mergeRepairErrors({ repair, verify }),
     });
 }
 

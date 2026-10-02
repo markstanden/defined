@@ -196,6 +196,63 @@ test("loadConfig treats a node key without checks as absent", async () => {
     assert.equal(config.node, undefined);
 });
 
+test("loadConfig parses a coverage.satisfies relationship", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({
+            node: { checks: [{ name: "test", command: "vitest run" }] },
+            coverage: {
+                node: {
+                    command: "vitest run --coverage",
+                    satisfies: { package: "", check: "test" },
+                },
+            },
+        }),
+    );
+    const config = await loadConfig({ repoRoot: dir });
+    assert.deepEqual(config.coverage?.node?.satisfies, {
+        package: "",
+        check: "test",
+    });
+});
+
+test("loadConfig defaults satisfies.package to the repo root", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({
+            coverage: {
+                node: { command: "c", satisfies: { check: "test" } },
+            },
+        }),
+    );
+    const config = await loadConfig({ repoRoot: dir });
+    assert.deepEqual(config.coverage?.node?.satisfies, {
+        package: "",
+        check: "test",
+    });
+});
+
+test("loadConfig rejects a malformed satisfies relationship", async () => {
+    const dir = await makeTempDir("quality-config-");
+    const bad: unknown[] = ["test", { check: "" }, { package: 1 }, {}];
+    for (const satisfies of bad) {
+        await writeConfig(
+            dir,
+            JSON.stringify({ coverage: { node: { command: "c", satisfies } } }),
+        );
+        await assert.rejects(() => loadConfig({ repoRoot: dir }), /satisfies/u);
+    }
+});
+
+test("loadConfig treats a node key without checks as absent", async () => {
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ node: {} }));
+    const config = await loadConfig({ repoRoot: dir });
+    assert.equal(config.node, undefined);
+});
+
 test("loadConfig rejects malformed node configs", async () => {
     const cases: Array<{ config: unknown; re: RegExp }> = [
         { config: { node: "lint" }, re: /"node" must be an object/u },
