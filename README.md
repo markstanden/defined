@@ -54,7 +54,15 @@ and is not the command for a developer to reach for.
 ## Output: one JSON result line
 
 Both verbs print exactly one compact JSON object (plus a newline) to stdout, and
-exit non-zero unless it reports `"status":"compliant"`:
+exit non-zero unless it reports `"status":"compliant"`. The default is concise —
+`status` plus any `errors` — so a passing run is one short line:
+
+```json
+{ "status": "compliant" }
+```
+
+Add `--full` for the per-check `results` map, worth one contextual run to see
+the plan and noise on every run after that:
 
 ```json
 {
@@ -70,22 +78,22 @@ exit non-zero unless it reports `"status":"compliant"`:
 
 - **`status`** — `compliant` or `not_compliant`; always present, and always
   agrees with the exit code.
-- **`results`** — every check in the run plan, including skipped ones, keyed by
-  stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Included by default
-  and with `--full`.
 - **`errors`** — actionable diagnostics for failing checks and bootstrap drift
   (`check`, `kind`, `message`, and `file`/`line`/`column`/`rule` where known).
-  Present whenever there is at least one; omitted on success.
+  Present whenever there is at least one; omitted on success, in both modes.
+- **`results`** — every check in the run plan, including skipped ones, keyed by
+  stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Present with `--full`
+  only.
 
 ```bash
-defined comply --full   # status + per-check results + errors (the default)
-defined comply --min    # status (+ errors when present), no results map
+defined comply          # concise: status (+ errors when present)  [default]
+defined comply --full   # adds the per-check results map
 ```
 
-`--min` success is exactly `{"status":"compliant"}`. Both presentations describe
-the identical run — same checks, same diagnostics, same exit code — so the flag
-changes presentation only, never scope. Parsers should treat a missing `errors`
-key as empty (`jq -r '.errors // []'`).
+The two presentations describe the identical run — same checks, same
+diagnostics, same exit code — so the flag changes presentation only, never
+scope. Parsers should treat a missing `errors` key as empty
+(`jq -r '.errors // []'`).
 
 The launcher is a bash script needing git + podman/docker (plus the standard
 coreutils any bash environment has); it prefers podman, mounts the repo

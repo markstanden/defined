@@ -109,7 +109,7 @@ test(
             const before = hashTree(root);
             const checkOnly = run({
                 cmd: gateShim(),
-                args: ["--check-only"],
+                args: ["--check-only", "--full"],
                 cwd: root,
             });
             assert.equal(
@@ -140,10 +140,10 @@ test(
             );
             assertTreeUntouched(root, before);
 
-            // ---- comply (default): bootstraps, repairs, workflow stays red ----
+            // ---- comply: bootstraps, repairs, workflow stays red ----
             const comply = run({
                 cmd: gateShim(),
-                args: [],
+                args: ["--full"],
                 cwd: root,
             });
             assert.equal(
@@ -194,11 +194,11 @@ test(
         try {
             await createBrokenFixture({ root });
 
-            // comply (default) bootstraps managed files + repairs safe findings;
-            // workflow stays red until a human/agent fixes the check-only finding.
+            // comply bootstraps managed files + repairs safe findings; workflow
+            // stays red until a human/agent fixes the check-only finding.
             const comply = run({
                 cmd: gateShim(),
-                args: [],
+                args: ["--full"],
                 cwd: root,
             });
             assert.equal(comply.status, 1, "workflow is still check-only-red");
@@ -232,8 +232,10 @@ test(
                 "export const MARKDOWN_LINK = /\\[[^\\[\\]]*\\]\\(([^)]*)\\)/g;\n",
             );
 
-            for (const args of [["--check-only"], []]) {
-                const label = args.length === 0 ? "comply" : args[0];
+            for (const args of [["--check-only", "--full"], ["--full"]]) {
+                const label = args.includes("--check-only")
+                    ? "--check-only"
+                    : "comply";
                 const result = run({
                     cmd: gateShim(),
                     args,

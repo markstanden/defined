@@ -9,10 +9,10 @@ tool fails loudly.
 handing work back. `comply` repairs what it can and re-verifies, so one run
 after a batch of changes beats a run per file.
 
-**Reading the result.** Both verbs print one JSON line: `status`, per-check
-`results`, and actionable `errors` (file/line/rule where the tool gives them).
-Read the errors instead of re-running tools by hand. `--min` drops the
-`results` map but never the errors.
+**Reading the result.** Both verbs print one compact JSON line: `status` and
+actionable `errors` (file/line/rule where the tool gives them). Read the errors
+instead of re-running tools by hand. Add `--full` on a first, contextual run for
+the per-check `results` map; it is noise once you know the plan.
 
 **After a run.** Inspect what the gate changed (`git diff`) — repairs are real
 edits to your tree. Fix remaining findings, then rerun; the rerun is worth it

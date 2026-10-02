@@ -61,13 +61,11 @@ test("the block distinguishes seeded (project-owned) from managed artifacts", as
     assert.match(text, /never fork them locally/u);
 });
 
-test("the block points at the JSON result surface and --min", async () => {
+test("the block states concise output by default and --full for context", async () => {
     const text = await block();
-    assert.match(text, /one JSON line/u);
-    assert.match(
-        text,
-        /`--min` drops the\s+`results` map but never the errors/u,
-    );
+    assert.match(text, /one compact JSON line/u);
+    assert.match(text, /`--full`/u);
+    assert.match(text, /results/u);
 });
 
 test("the block points at the offline explain surface for lookups", async () => {
