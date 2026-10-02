@@ -7,9 +7,10 @@
 //   full  { "status": …, "results": { … }, "errors": [ … ] }
 //   min   { "status": … }                      (errors added when present)
 //
-// `full` is the default today; `min` drops the per-check `results` map while
-// keeping every diagnostic. The process exit code derives from `status` — never
-// from the rendered text — so both presentations agree by construction.
+// `min` is the default: it drops the per-check `results` map while keeping every
+// diagnostic. `full` opts into the map — useful for one contextual run, noise
+// thereafter. The process exit code derives from `status` — never from the
+// rendered text — so both presentations agree by construction.
 
 import type { SetupCheck } from "../setup.mts";
 import type {

@@ -3,9 +3,10 @@
 // The public contract is two result verbs (decision #23) plus a read-only
 // guidance verb: `comply` (bootstrap + repair + verify), `verify` (read-only
 // check) and `explain <step-or-rule>` (offline house guidance, #74). Each result
-// verb accepts an optional presentation flag: `--full` (default) keeps the
-// per-check results map; `--min` drops it while keeping every diagnostic.
-// `explain` takes exactly one topic and no flags. Everything else — no verb,
+// verb accepts an optional presentation flag: `--min` (default) keeps `status`
+// and every diagnostic; `--full` adds the per-check results map, worth one
+// contextual run and noise thereafter. `explain` takes exactly one topic and no
+// flags. Everything else — no verb,
 // unknown verbs, the old public `setup`, and the retired `--fix` / `--no-fix` /
 // `--silent` flags — is a concise usage error with a non-zero exit. Never
 // imports steps.
@@ -15,6 +16,9 @@ import type { Presentation } from "./report.mts";
 
 export type Verb = "comply" | "verify" | "explain";
 export type StepMode = "fix" | "no-fix";
+
+/** Concise output is the default; `--full` opts into the results map. */
+const DEFAULT_PRESENTATION: Presentation = "min";
 
 export interface ParsedCommand {
     verb: Verb;
@@ -47,22 +51,27 @@ function parseExplain({ argv }: { argv: string[] }): ParsedCommand {
     if (argv.length > 2) {
         throw new Error(`unexpected argument: ${argv[2]}`);
     }
-    return { verb: "explain", help: false, presentation: "full", topic };
+    return {
+        verb: "explain",
+        help: false,
+        presentation: DEFAULT_PRESENTATION,
+        topic,
+    };
 }
 
 function parseHelp({ argv }: { argv: string[] }): ParsedCommand {
     if (argv.length > 1) {
         throw new Error(`unexpected argument: ${argv[1]}`);
     }
-    return { verb: "verify", help: true, presentation: "full" };
+    return { verb: "verify", help: true, presentation: DEFAULT_PRESENTATION };
 }
 
 /**
  * Parse the trailing presentation flags: `--min` or `--full`, at most one of
- * them. Absent means `--full`.
+ * them. Absent means `--min` (concise); `--full` opts into the results map.
  */
 function parsePresentation({ argv }: { argv: string[] }): Presentation {
-    let presentation: Presentation = "full";
+    let presentation: Presentation = DEFAULT_PRESENTATION;
     let chosen: "--min" | "--full" | undefined;
     for (const arg of argv) {
         if (arg === "--min" || arg === "--full") {

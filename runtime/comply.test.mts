@@ -123,6 +123,7 @@ test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
         verb: "comply",
         repoRoot: "/repo",
         files: [],
+        presentation: "full",
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
@@ -150,6 +151,7 @@ test("runGate_complyFindingSurvivesRepair_reportsFindingAndExits", async () => {
         verb: "comply",
         repoRoot: "/repo",
         files: [],
+        presentation: "full",
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
@@ -175,6 +177,7 @@ test("runGate_complyBootstrapDrift_reportsItThroughTheCanonicalResult", async ()
         verb: "comply",
         repoRoot: "/repo",
         files: [],
+        presentation: "full",
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => ({
@@ -262,6 +265,23 @@ test("runGate_verifyFailingStep_exitsOne", async () => {
         },
     });
     assert.deepEqual(exits, [1]);
+});
+
+test("runGate_defaultsToMinPresentation", async () => {
+    const printed: string[] = [];
+    await runGate({
+        verb: "verify",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async () => allGreen(),
+            printFn: (line) => printed.push(line),
+            exitFn: () => undefined,
+        },
+    });
+    // The default is min: no results map, just the verdict.
+    assert.deepEqual(printed, ['{"status":"compliant"}']);
 });
 
 test("runGate_minGreen_printsOnlyTheStatus", async () => {

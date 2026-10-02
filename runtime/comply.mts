@@ -9,9 +9,8 @@
 //
 // Exit is 0 only when the canonical result is `compliant`, 1 otherwise; the
 // exit code derives from the result, never from the rendered text. Output is a
-// single JSON line (lib/report.mts): `--full` (default) includes the per-check
-// `results`, `--min` drops them; both always carry `status` and include
-// `errors` whenever any occurred.
+// single JSON line (lib/report.mts): `--min` (default) carries `status` and
+// `errors` whenever any occurred; `--full` adds the per-check `results`.
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
 // `verify` shares the orchestrator. Steps run in fixed order (naming →
@@ -334,7 +333,7 @@ export async function runGate({
     verb,
     repoRoot,
     files,
-    presentation = "full",
+    presentation = "min",
     deps = {},
 }: {
     verb: Verb;

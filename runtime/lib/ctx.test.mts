@@ -26,16 +26,16 @@ async function tempGitTree(): Promise<string> {
     return dir;
 }
 
-test("parseCommand_acceptsExactlyComplyAndVerify_defaultingToFull", () => {
+test("parseCommand_acceptsExactlyComplyAndVerify_defaultingToMin", () => {
     assert.deepEqual(parseCommand({ argv: ["comply"] }), {
         verb: "comply",
         help: false,
-        presentation: "full",
+        presentation: "min",
     });
     assert.deepEqual(parseCommand({ argv: ["verify"] }), {
         verb: "verify",
         help: false,
-        presentation: "full",
+        presentation: "min",
     });
 });
 
@@ -67,13 +67,13 @@ test("parseCommand_acceptsExplainWithATopic", () => {
     assert.deepEqual(parseCommand({ argv: ["explain", "shell"] }), {
         verb: "explain",
         help: false,
-        presentation: "full",
+        presentation: "min",
         topic: "shell",
     });
     assert.deepEqual(parseCommand({ argv: ["explain", "SC2086"] }), {
         verb: "explain",
         help: false,
-        presentation: "full",
+        presentation: "min",
         topic: "SC2086",
     });
 });
@@ -97,12 +97,12 @@ test("parseCommand_reportsHelp", () => {
     assert.deepEqual(parseCommand({ argv: ["-h"] }), {
         verb: "verify",
         help: true,
-        presentation: "full",
+        presentation: "min",
     });
     assert.deepEqual(parseCommand({ argv: ["--help"] }), {
         verb: "verify",
         help: true,
-        presentation: "full",
+        presentation: "min",
     });
 });
 
