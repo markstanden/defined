@@ -345,7 +345,7 @@ export async function explainTopic({
     if (entry.docRel !== null) {
         doc = `standards/${entry.docRel}`;
         guidance = await readFileFn(
-            join(await standardsDirFn(), entry.docRel),
+            join(standardsDirFn(), entry.docRel),
             "utf8",
         );
     }

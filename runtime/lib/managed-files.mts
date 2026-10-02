@@ -71,25 +71,28 @@ export async function installManagedFiles({
     files: ManagedFile[];
     repoRoot: string;
 }): Promise<InstalledFile[]> {
-    const results: InstalledFile[] = [];
-    for (const { source, target, mode } of files) {
-        const desired = await readFile(join(sourceDir, source), "utf8");
-        const destination = join(repoRoot, target);
-        const existing = await readContentsOrEmpty({ filePath: destination });
-        if (existing === "") {
-            await mkdir(dirname(destination), { recursive: true });
-            await writeFile(destination, desired);
-            results.push({ name: target, status: "installed" });
-        } else if (existing === desired) {
-            results.push({ name: target, status: "unchanged" });
-        } else if (mode === "managed") {
-            await writeFile(destination, desired);
-            results.push({ name: target, status: "updated" });
-        } else {
-            results.push({ name: target, status: "kept" });
-        }
-    }
-    return results;
+    return Promise.all(
+        files.map(async ({ source, target, mode }): Promise<InstalledFile> => {
+            const desired = await readFile(join(sourceDir, source), "utf8");
+            const destination = join(repoRoot, target);
+            const existing = await readContentsOrEmpty({
+                filePath: destination,
+            });
+            if (existing === "") {
+                await mkdir(dirname(destination), { recursive: true });
+                await writeFile(destination, desired);
+                return { name: target, status: "installed" };
+            }
+            if (existing === desired) {
+                return { name: target, status: "unchanged" };
+            }
+            if (mode === "managed") {
+                await writeFile(destination, desired);
+                return { name: target, status: "updated" };
+            }
+            return { name: target, status: "kept" };
+        }),
+    );
 }
 
 /**
@@ -108,22 +111,21 @@ export async function checkManagedFiles({
     files: ManagedFile[];
     repoRoot: string;
 }): Promise<CheckedFile[]> {
-    const results: CheckedFile[] = [];
-    for (const { source, target, mode } of files) {
-        if (mode === "seeded") {
-            continue;
-        }
-        const desired = await readFile(join(sourceDir, source), "utf8");
-        const existing = await readContentsOrEmpty({
-            filePath: join(repoRoot, target),
-        });
-        if (existing === "") {
-            results.push({ name: target, status: "absent" });
-        } else if (existing === desired) {
-            results.push({ name: target, status: "present" });
-        } else {
-            results.push({ name: target, status: "drift" });
-        }
-    }
-    return results;
+    return Promise.all(
+        files
+            .filter(({ mode }) => mode !== "seeded")
+            .map(async ({ source, target }): Promise<CheckedFile> => {
+                const desired = await readFile(join(sourceDir, source), "utf8");
+                const existing = await readContentsOrEmpty({
+                    filePath: join(repoRoot, target),
+                });
+                if (existing === "") {
+                    return { name: target, status: "absent" };
+                }
+                if (existing === desired) {
+                    return { name: target, status: "present" };
+                }
+                return { name: target, status: "drift" };
+            }),
+    );
 }

@@ -29,7 +29,7 @@ import {
     type StepResult,
 } from "../lib/step-result.mts";
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
-import { run } from "../../lib/proc.mts";
+import { run, type CommandResult } from "../../lib/proc.mts";
 import { loadConfig } from "../lib/config.mts";
 
 export interface TofuRunContext {
@@ -95,19 +95,19 @@ function hasModuleAncestor({
     return false;
 }
 
-async function runTofuCommand(
+function runTofuCommand(
     runner: Runner,
     args: string[],
     cwd: string,
-): Promise<{ status: number; stdout: string; stderr: string }> {
+): CommandResult {
     return runner({ cmd: "tofu", args, cwd });
 }
 
-async function runTflintCommand(
+function runTflintCommand(
     runner: Runner,
     args: string[],
     cwd: string,
-): Promise<{ status: number; stdout: string; stderr: string }> {
+): CommandResult {
     return runner({ cmd: "tflint", args, cwd });
 }
 
@@ -125,11 +125,11 @@ async function runTflintFixes({
     cwd: string;
     dir: string;
 }): Promise<string | null> {
-    const tflintInit = await runTflintCommand(runner, ["--init"], cwd);
+    const tflintInit = runTflintCommand(runner, ["--init"], cwd);
     if (tflintInit.status !== 0) {
         return `tofu: tflint --init failed in ${dir}: ${tflintInit.stderr.trim()}`;
     }
-    const tflintFix = await runTflintCommand(runner, ["--fix"], cwd);
+    const tflintFix = runTflintCommand(runner, ["--fix"], cwd);
     if (tflintFix.status === 1) {
         return `tofu: tflint --fix failed in ${dir}: ${tflintFix.stderr.trim()}`;
     }
@@ -151,23 +151,23 @@ async function runModuleChecks({
 }): Promise<string | null> {
     // --init first so a project .tflint.hcl's plugins land in the plugin cache;
     // then lint. Exit 0 clean / 1 error / 2 issues found.
-    const tflintInit = await runTflintCommand(runner, ["--init"], cwd);
+    const tflintInit = runTflintCommand(runner, ["--init"], cwd);
     if (tflintInit.status !== 0) {
         return `tofu: tflint --init failed in ${dir}: ${tflintInit.stderr.trim()}`;
     }
 
-    const tflint = await runTflintCommand(runner, [], cwd);
+    const tflint = runTflintCommand(runner, [], cwd);
     if (tflint.status !== 0) {
         return `tofu: tflint found issues in ${dir}:\n${tflint.stdout.trim()}`;
     }
 
     // -backend=false skips backend init (still fetches providers).
-    const init = await runTofuCommand(runner, ["init", "-backend=false"], cwd);
+    const init = runTofuCommand(runner, ["init", "-backend=false"], cwd);
     if (init.status !== 0) {
         return `tofu: init failed in ${dir}: ${init.stderr.trim()}`;
     }
 
-    const validate = await runTofuCommand(runner, ["validate"], cwd);
+    const validate = runTofuCommand(runner, ["validate"], cwd);
     if (validate.status !== 0) {
         return `tofu: validate failed in ${dir}: ${validate.stdout.trim() || validate.stderr.trim()}`;
     }
@@ -188,7 +188,7 @@ async function runFmtPhase({
     tfFiles: string[];
 }): Promise<StepResult | null> {
     // fmt: exact git scope — the tracked .tf files, never a recursive walk.
-    const fmtWrite = await runTofuCommand(
+    const fmtWrite = runTofuCommand(
         runner,
         ["fmt", "-write", ...tfFiles],
         workingRoot,
@@ -214,7 +214,7 @@ async function runFmtCheck({
     workingRoot: string;
     tfFiles: string[];
 }): Promise<StepResult | null> {
-    const fmtCheck = await runTofuCommand(
+    const fmtCheck = runTofuCommand(
         runner,
         ["fmt", "-check", ...tfFiles],
         workingRoot,

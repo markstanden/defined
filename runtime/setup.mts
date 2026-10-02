@@ -107,13 +107,13 @@ function bootstrapFiles(
  * disk: comply never deletes a possibly-committed file, so the contributor is
  * told it is deliberate rather than silently left wondering.
  */
-async function warnWorkflowDisabled({
+function warnWorkflowDisabled({
     repoRoot,
     notify,
 }: {
     repoRoot: string;
     notify: (line: string) => void;
-}): Promise<void> {
+}): void {
     if (existsSync(join(repoRoot, MANAGED_WORKFLOW_FILE))) {
         notify(
             `defined: workflow disabled in .defined.json; left ${MANAGED_WORKFLOW_FILE} in place (git rm it if unwanted)`,
@@ -174,7 +174,7 @@ export async function runSetup({
     const config = await loadConfig({ repoRoot });
     const tracked = trackedFiles({ repoRoot });
     await installManagedFiles({
-        sourceDir: await standardsDir(),
+        sourceDir: standardsDir(),
         files: bootstrapFiles(config, tracked),
         repoRoot,
     });
@@ -186,12 +186,12 @@ export async function runSetup({
         await removeExample({ workingRoot: repoRoot });
     }
     if (config.workflow?.disable === true) {
-        await warnWorkflowDisabled({ repoRoot, notify: notifyFn });
+        warnWorkflowDisabled({ repoRoot, notify: notifyFn });
     }
     await ensureConfigFile(repoRoot);
 
     const block = await readMarkedBlock({
-        templatePath: await gateConfigPath({ name: "agents-block.md" }),
+        templatePath: gateConfigPath({ name: "agents-block.md" }),
     });
     await writeMarkedBlock({ filePath: join(repoRoot, "AGENTS.md"), block });
 }
@@ -217,12 +217,12 @@ export async function checkSetup({
     const repoRoot = await deriveRepoRoot({ startDir });
     const config = await loadConfig({ repoRoot });
     const files = await checkManagedFiles({
-        sourceDir: await standardsDir(),
+        sourceDir: standardsDir(),
         files: bootstrapFiles(config, trackedFiles({ repoRoot })),
         repoRoot,
     });
     const block = await readMarkedBlock({
-        templatePath: await gateConfigPath({ name: "agents-block.md" }),
+        templatePath: gateConfigPath({ name: "agents-block.md" }),
     });
     const agents = await checkMarkedBlock({
         filePath: join(repoRoot, "AGENTS.md"),

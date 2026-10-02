@@ -11,11 +11,7 @@ import { realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 /** Resolve symlinks in a path, returning the real filesystem location. */
-export async function resolveRealPath({
-    path,
-}: {
-    path: string;
-}): Promise<string> {
+export function resolveRealPath({ path }: { path: string }): Promise<string> {
     return realpath(path);
 }
 

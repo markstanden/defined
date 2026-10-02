@@ -139,7 +139,7 @@ export async function prettierIgnoreArgs({
 }: {
     repoRoot: string;
 }): Promise<string[]> {
-    const basePath = await gateConfigPath({ name: "prettierignore" });
+    const basePath = gateConfigPath({ name: "prettierignore" });
     const args = ["--ignore-path", basePath];
     if (existsSync(join(repoRoot, ".prettierignore"))) {
         args.push("--ignore-path", join(repoRoot, ".prettierignore"));
@@ -170,7 +170,7 @@ export async function prettierConfigArgs({
             return ["--config", candidate];
         }
     }
-    return ["--config", await gateConfigPath({ name: "prettier.config.mjs" })];
+    return ["--config", gateConfigPath({ name: "prettier.config.mjs" })];
 }
 
 // prettier --check prints `[warn] <file>` per unformatted file, then a summary
