@@ -55,7 +55,7 @@ UPDATE_WORK=""
 LAUNCHER_REV=""
 
 usage() {
-    echo "usage: ${PROGRAM} comply [--min|--full] | ${PROGRAM} verify [--min|--full] | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
+    echo "usage: ${PROGRAM} comply [--min|--full] | ${PROGRAM} verify [--min|--full] | ${PROGRAM} explain <step-or-rule> | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -570,7 +570,7 @@ main() {
         run_update "${2:-latest}"
         return 0
     fi
-    if [[ "${verb}" != "comply" && "${verb}" != "verify" ]]; then
+    if [[ "${verb}" != "comply" && "${verb}" != "verify" && "${verb}" != "explain" ]]; then
         usage
         return 2
     fi
@@ -600,6 +600,10 @@ main() {
             echo "${PROGRAM}: defined source repo — running the local runtime (${shim} --check-only)" >&2
             exec "${shim}" --check-only "${forward[@]}"
         fi
+        if [[ "${verb}" == "explain" ]]; then
+            echo "${PROGRAM}: defined source repo — running the local runtime (${shim} explain)" >&2
+            exec "${shim}" explain "${forward[@]}"
+        fi
         echo "${PROGRAM}: defined source repo — running the local runtime (${shim})" >&2
         exec "${shim}" "${forward[@]}"
     fi
@@ -616,9 +620,20 @@ main() {
     # and a pin change gets a fresh dependency cache.
     local repo_hash mount_arg
     repo_hash="$(printf '%s' "${root}" | sha256sum | cut -c1-12)"
+    # `explain` only reads the pinned image and the repo's .defined.json, so it
+    # mounts read-only and needs no dependency caches (unlike comply/verify).
     mount_arg="-v ${root}:/repo"
-    if [[ "${verb}" == "verify" ]]; then
+    if [[ "${verb}" == "verify" || "${verb}" == "explain" ]]; then
         mount_arg="-v ${root}:/repo:ro"
+    fi
+    local -a cache_args=()
+    if [[ "${verb}" != "explain" ]]; then
+        cache_args=(
+            -v "defined-node-${pin}-${repo_hash}:/repo/node_modules"
+            -v "defined-npm-${repo_hash}:/home/node/.npm"
+            -v "defined-nuget-${repo_hash}:/home/node/.nuget/packages"
+            -e "NUGET_PACKAGES=/home/node/.nuget/packages"
+        )
     fi
 
     # The image runs as non-root (uid 1000): map the invoking host user onto
@@ -646,10 +661,7 @@ main() {
         "${user_args[@]}" \
         "${net_args[@]}" \
         ${mount_arg} \
-        -v "defined-node-${pin}-${repo_hash}:/repo/node_modules" \
-        -v "defined-npm-${repo_hash}:/home/node/.npm" \
-        -v "defined-nuget-${repo_hash}:/home/node/.nuget/packages" \
-        -e "NUGET_PACKAGES=/home/node/.nuget/packages" \
+        "${cache_args[@]}" \
         --workdir /repo \
         "${image}" "${verb}" "${forward[@]}"
 }

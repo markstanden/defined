@@ -75,6 +75,12 @@ manages plumbing (the CI workflow and this block), which is brought back in
 line on each run. Edit the seeded defaults here as you wish; raise changes to
 the managed files and the house standards upstream — never fork them locally.
 
+**Looking things up.** For what a step or rule means, run `defined explain
+<step-or-rule>`. It serves the house guidance straight from the pinned image —
+offline, no repo writes — and names whether the configuration is house-owned or
+overridden by this repo. Prefer it over reading the upstream repository, which
+may be newer than the revision actually gating you.
+
 House standards live in the defined repo
 (<https://github.com/markstanden/defined>): `standards/` covers tests, naming,
 shell and YAML; `practices/architecture.md` covers delivery, structure and

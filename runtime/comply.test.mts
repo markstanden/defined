@@ -6,7 +6,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { printUsage, runGate, runPass, runSmoke } from "./comply.mts";
+import {
+    printUsage,
+    runExplain,
+    runGate,
+    runPass,
+    runSmoke,
+    STEP_IDS,
+} from "./comply.mts";
+import { STEP_IDS as EXPLAIN_STEP_IDS } from "./lib/explain.mts";
 import { failed, passed, type StepResult } from "./lib/step-result.mts";
 import type { GateResult } from "./lib/report.mts";
 import type { SetupCheck } from "./setup.mts";
@@ -295,7 +303,58 @@ test("runGate_minFailure_keepsDiagnosticsButDropsResults", async () => {
     ]);
 });
 
-test("printUsage prints the two-verb usage line with flags", () => {
+test("runExplain_printsOneJsonObjectAndDoesNotExit", async () => {
+    const printed: string[] = [];
+    const exits: number[] = [];
+    await runExplain({
+        topic: "shell",
+        repoRoot: "/repo",
+        deps: {
+            explainFn: async ({ topic }) => ({
+                topic,
+                kind: "step",
+                owner: { side: "house", detail: "x" },
+                doc: null,
+                guidance: null,
+                notice: "n",
+            }),
+            printFn: (line) => printed.push(line),
+            errorFn: () => undefined,
+            exitFn: (code) => exits.push(code),
+        },
+    });
+    assert.equal(printed.length, 1, "exactly one JSON line on stdout");
+    assert.equal(JSON.parse(printed[0]!).topic, "shell");
+    assert.deepEqual(exits, []);
+});
+
+test("runExplain_unknownTopic_reportsToStderrAndExitsTwo", async () => {
+    const errors: string[] = [];
+    const exits: number[] = [];
+    await runExplain({
+        topic: "wat",
+        repoRoot: "/repo",
+        deps: {
+            explainFn: async () => {
+                throw new Error("unknown topic 'wat'");
+            },
+            printFn: () => undefined,
+            errorFn: (line) => errors.push(line),
+            exitFn: (code) => exits.push(code),
+        },
+    });
+    assert.match(errors[0]!, /unknown topic 'wat'/u);
+    assert.deepEqual(exits, [2]);
+});
+
+test("explainStepIds_coverEveryOrchestratorStep", () => {
+    assert.deepEqual(
+        EXPLAIN_STEP_IDS.filter((id) => id !== "bootstrap"),
+        STEP_IDS,
+    );
+});
+
+test("printUsage prints the three-verb usage line with flags", () => {
     const lines: string[] = [];
     const original = console.log;
     console.log = (line: string) => lines.push(line);
@@ -305,7 +364,7 @@ test("printUsage prints the two-verb usage line with flags", () => {
         console.log = original;
     }
     assert.deepEqual(lines, [
-        "usage: defined comply [--min|--full] | defined verify [--min|--full]",
+        "usage: defined comply [--min|--full] | defined verify [--min|--full] | defined explain <step-or-rule>",
     ]);
 });
 

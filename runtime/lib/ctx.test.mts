@@ -63,6 +63,36 @@ test("parseCommand_rejectsConflictingPresentationFlags", () => {
     );
 });
 
+test("parseCommand_acceptsExplainWithATopic", () => {
+    assert.deepEqual(parseCommand({ argv: ["explain", "shell"] }), {
+        verb: "explain",
+        help: false,
+        presentation: "full",
+        topic: "shell",
+    });
+    assert.deepEqual(parseCommand({ argv: ["explain", "SC2086"] }), {
+        verb: "explain",
+        help: false,
+        presentation: "full",
+        topic: "SC2086",
+    });
+});
+
+test("parseCommand_rejectsExplainWithoutATopic", () => {
+    assert.throws(() => parseCommand({ argv: ["explain"] }), /needs a topic/u);
+    assert.throws(
+        () => parseCommand({ argv: ["explain", "--min"] }),
+        /needs a topic/u,
+    );
+});
+
+test("parseCommand_rejectsExtraExplainArguments", () => {
+    assert.throws(
+        () => parseCommand({ argv: ["explain", "shell", "extra"] }),
+        /unexpected argument/u,
+    );
+});
+
 test("parseCommand_reportsHelp", () => {
     assert.deepEqual(parseCommand({ argv: ["-h"] }), {
         verb: "verify",

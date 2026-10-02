@@ -1,23 +1,27 @@
 // lib/ctx.mts — command parsing and run-context assembly for the gate.
 //
-// The public contract is exactly two verbs (decision #23): `comply` (bootstrap
-// + repair + verify) and `verify` (read-only check). Each verb accepts an
-// optional presentation flag: `--full` (default) keeps the per-check results
-// map; `--min` drops it while keeping every diagnostic. Everything else — no
-// verb, unknown verbs, the old public `setup`, and the retired `--fix` /
-// `--no-fix` / `--silent` flags — is a concise usage error with a non-zero
-// exit. Never imports steps.
+// The public contract is two result verbs (decision #23) plus a read-only
+// guidance verb: `comply` (bootstrap + repair + verify), `verify` (read-only
+// check) and `explain <step-or-rule>` (offline house guidance, #74). Each result
+// verb accepts an optional presentation flag: `--full` (default) keeps the
+// per-check results map; `--min` drops it while keeping every diagnostic.
+// `explain` takes exactly one topic and no flags. Everything else — no verb,
+// unknown verbs, the old public `setup`, and the retired `--fix` / `--no-fix` /
+// `--silent` flags — is a concise usage error with a non-zero exit. Never
+// imports steps.
 
 import { deriveRepoRoot } from "../../lib/paths.mts";
 import type { Presentation } from "./report.mts";
 
-export type Verb = "comply" | "verify";
+export type Verb = "comply" | "verify" | "explain";
 export type StepMode = "fix" | "no-fix";
 
 export interface ParsedCommand {
     verb: Verb;
     help: boolean;
     presentation: Presentation;
+    /** `explain` only: the step id or rule id to look up. */
+    topic?: string;
 }
 
 export interface RunContext {
@@ -33,6 +37,18 @@ const RETIRED: Record<string, string> = {
     "--no-fix": "'--no-fix' is gone — run 'verify' to check",
     "--silent": "'--silent' is gone — run 'verify' to check",
 };
+
+/** Parse `explain <topic>`: exactly one non-flag topic, no presentation flags. */
+function parseExplain({ argv }: { argv: string[] }): ParsedCommand {
+    const topic = argv[1];
+    if (topic === undefined || topic.startsWith("-")) {
+        throw new Error("explain needs a topic — e.g. 'defined explain shell'");
+    }
+    if (argv.length > 2) {
+        throw new Error(`unexpected argument: ${argv[2]}`);
+    }
+    return { verb: "explain", help: false, presentation: "full", topic };
+}
 
 function parseHelp({ argv }: { argv: string[] }): ParsedCommand {
     if (argv.length > 1) {
@@ -77,12 +93,15 @@ export function parseCommand({ argv }: { argv: string[] }): ParsedCommand {
         return parseHelp({ argv });
     }
     const verb = argv[0] as string;
+    if (verb === "explain") {
+        return parseExplain({ argv });
+    }
     if (verb !== "comply" && verb !== "verify") {
         if (RETIRED[verb] !== undefined) {
             throw new Error(RETIRED[verb]!);
         }
         throw new Error(
-            `unknown command '${verb}' — expected 'comply' or 'verify'`,
+            `unknown command '${verb}' — expected 'comply', 'verify' or 'explain'`,
         );
     }
     return {
