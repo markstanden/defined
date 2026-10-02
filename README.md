@@ -88,12 +88,37 @@ the plan and noise on every run after that:
 ```bash
 defined comply          # concise: status (+ errors when present)  [default]
 defined comply --full   # adds the per-check results map
+defined comply --timings  # adds monotonic phase/step durations on stderr
 ```
 
 The two presentations describe the identical run — same checks, same
 diagnostics, same exit code — so the flag changes presentation only, never
 scope. Parsers should treat a missing `errors` key as empty
 (`jq -r '.errors // []'`).
+
+### Opt-in timings
+
+`--timings` is independent of the presentation flags and writes one line per
+completed phase and step to **stderr**, so the stdout contract is untouched:
+
+```bash
+defined comply --timings 2>timings.log
+```
+
+```
+defined: timing setup 412ms
+defined: timing fix pass 9120ms
+defined: timing fix/node 8110ms
+defined: timing no-fix pass 4900ms
+defined: timing comply total 14630ms
+```
+
+Durations use a monotonic clock, so cold and warm runs compare consistently.
+Labels are gate-owned step and phase names only — never command text or
+environment — so no command credential can reach the log. The numbers are
+indicative, not a benchmark contract: image pull, a cold named-volume cache and
+a busy host all land in them. Cache hit/miss metrics follow once the caches
+exist.
 
 The launcher is a bash script needing git + podman/docker (plus the standard
 coreutils any bash environment has); it prefers podman, mounts the repo

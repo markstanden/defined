@@ -17,6 +17,7 @@ import {
 import { STEP_IDS as EXPLAIN_STEP_IDS } from "./lib/explain.mts";
 import { failed, passed, type StepResult } from "./lib/step-result.mts";
 import type { GateResult } from "./lib/report.mts";
+import type { Timings } from "./lib/timings.mts";
 import type { SetupCheck } from "./setup.mts";
 
 type PassResult = Map<string, StepResult>;
@@ -114,6 +115,19 @@ test("runPass_recordsAThrownStepAsAnErrorAndContinues", async () => {
         { kind: "execution", message: "cannot run 'tool': not found" },
     ]);
     assert.equal(results.get("after")?.status, "pass");
+});
+
+test("runPass_withTimings_recordsEachStepUnderItsMode", async () => {
+    const labels: string[] = [];
+    const timings: Timings = { record: (label) => labels.push(label) };
+    await runPass({
+        mode: "fix",
+        repoRoot: "/repo",
+        files: [],
+        timings,
+        steps: [fakeStep("node", passed({})), fakeStep("shell", passed({}))],
+    });
+    assert.deepEqual(labels, ["fix/node", "fix/shell"]);
 });
 
 test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
@@ -387,6 +401,50 @@ test("runGate_minFailure_keepsDiagnosticsButDropsResults", async () => {
     ]);
 });
 
+test("runGate_timings_writesDurationsToStderrAndLeavesStdoutAlone", async () => {
+    const printed: string[] = [];
+    const notified: string[] = [];
+    await runGate({
+        verb: "verify",
+        repoRoot: "/repo",
+        files: [],
+        timings: true,
+        deps: {
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async () => allGreen(),
+            printFn: (line) => printed.push(line),
+            notifyFn: (line) => notified.push(line),
+            exitFn: () => undefined,
+        },
+    });
+    // stdout is still exactly the one JSON result line.
+    assert.deepEqual(printed, ['{"status":"compliant"}']);
+    for (const line of notified) {
+        assert.match(line, /^defined: timing .+ \d+ms$/u);
+    }
+    const labels = notified.map((line) =>
+        line.replace(/^defined: timing /u, "").replace(/ \d+ms$/u, ""),
+    );
+    assert.deepEqual(labels, ["setup check", "no-fix pass", "verify total"]);
+});
+
+test("runGate_withoutTimings_writesNoTimingLines", async () => {
+    const notified: string[] = [];
+    await runGate({
+        verb: "verify",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async () => allGreen(),
+            printFn: () => undefined,
+            notifyFn: (line) => notified.push(line),
+            exitFn: () => undefined,
+        },
+    });
+    assert.deepEqual(notified, []);
+});
+
 test("runExplain_printsOneJsonObjectAndDoesNotExit", async () => {
     const printed: string[] = [];
     const exits: number[] = [];
@@ -448,7 +506,7 @@ test("printUsage prints the three-verb usage line with flags", () => {
         console.log = original;
     }
     assert.deepEqual(lines, [
-        "usage: defined comply [--min|--full] | defined verify [--min|--full] | defined explain <step-or-rule>",
+        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined explain <step-or-rule>",
     ]);
 });
 

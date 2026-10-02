@@ -5,7 +5,9 @@
 // check) and `explain <step-or-rule>` (offline house guidance, #74). Each result
 // verb accepts an optional presentation flag: `--min` (default) keeps `status`
 // and every diagnostic; `--full` adds the per-check results map, worth one
-// contextual run and noise thereafter. `explain` takes exactly one topic and no
+// contextual run and noise thereafter. `--timings` is an independent opt-in
+// (issue #71): it adds monotonic phase/step durations on stderr and never
+// changes the stdout contract. `explain` takes exactly one topic and no
 // flags. Everything else — no verb,
 // unknown verbs, the old public `setup`, and the retired `--fix` / `--no-fix` /
 // `--silent` flags — is a concise usage error with a non-zero exit. Never
@@ -24,6 +26,8 @@ export interface ParsedCommand {
     verb: Verb;
     help: boolean;
     presentation: Presentation;
+    /** Opt-in monotonic timings on stderr (`--timings`, issue #71). */
+    timings: boolean;
     /** `explain` only: the step id or rule id to look up. */
     topic?: string;
 }
@@ -32,6 +36,7 @@ export interface RunContext {
     verb: Verb;
     repoRoot: string;
     presentation: Presentation;
+    timings: boolean;
 }
 
 /** Retired public surface: the one-line reason it went away. */
@@ -55,6 +60,7 @@ function parseExplain({ argv }: { argv: string[] }): ParsedCommand {
         verb: "explain",
         help: false,
         presentation: DEFAULT_PRESENTATION,
+        timings: false,
         topic,
     };
 }
@@ -63,16 +69,25 @@ function parseHelp({ argv }: { argv: string[] }): ParsedCommand {
     if (argv.length > 1) {
         throw new Error(`unexpected argument: ${argv[1]}`);
     }
-    return { verb: "verify", help: true, presentation: DEFAULT_PRESENTATION };
+    return {
+        verb: "verify",
+        help: true,
+        presentation: DEFAULT_PRESENTATION,
+        timings: false,
+    };
 }
 
 /**
- * Parse the trailing presentation flags: `--min` or `--full`, at most one of
- * them. Absent means `--min` (concise); `--full` opts into the results map.
+ * Parse the output flags: `--min` or `--full` (at most one, absent means
+ * `--min`), plus the independent `--timings` opt-in for stderr durations.
  */
-function parsePresentation({ argv }: { argv: string[] }): Presentation {
+function parseOutputFlags({ argv }: { argv: string[] }): {
+    presentation: Presentation;
+    timings: boolean;
+} {
     let presentation: Presentation = DEFAULT_PRESENTATION;
     let chosen: "--min" | "--full" | undefined;
+    let timings = false;
     for (const arg of argv) {
         if (arg === "--min" || arg === "--full") {
             if (chosen !== undefined && chosen !== arg) {
@@ -82,11 +97,13 @@ function parsePresentation({ argv }: { argv: string[] }): Presentation {
             }
             chosen = arg;
             presentation = arg === "--min" ? "min" : "full";
+        } else if (arg === "--timings") {
+            timings = true;
         } else {
             throw new Error(`unexpected argument: ${arg}`);
         }
     }
-    return presentation;
+    return { presentation, timings };
 }
 
 /**
@@ -113,11 +130,8 @@ export function parseCommand({ argv }: { argv: string[] }): ParsedCommand {
             `unknown command '${verb}' — expected 'comply', 'verify' or 'explain'`,
         );
     }
-    return {
-        verb,
-        help: false,
-        presentation: parsePresentation({ argv: argv.slice(1) }),
-    };
+    const { presentation, timings } = parseOutputFlags({ argv: argv.slice(1) });
+    return { verb, help: false, presentation, timings };
 }
 
 /** Assemble a full run context, deriving the repo root from startDir. */
@@ -125,11 +139,13 @@ export async function createRunContext({
     verb,
     startDir,
     presentation,
+    timings,
 }: {
     verb: Verb;
     startDir: string;
     presentation: Presentation;
+    timings: boolean;
 }): Promise<RunContext> {
     const repoRoot = await deriveRepoRoot({ startDir });
-    return { verb, repoRoot, presentation };
+    return { verb, repoRoot, presentation, timings };
 }

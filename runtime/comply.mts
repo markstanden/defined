@@ -2,15 +2,17 @@
 // comply.mts — quality gate orchestrator (two-verb contract, decision #23).
 //
 // Public surface:
-//   defined comply [--min|--full]   bootstrap → repair (fix) pass → fresh
-//                                   verify (no-fix) pass → JSON result.
-//   defined verify [--min|--full]   managed-artifact check (never writes) →
-//                                   complete no-fix pass → JSON result.
+//   defined comply [--min|--full] [--timings]   bootstrap → repair (fix) pass
+//                                   → fresh verify (no-fix) pass → JSON result.
+//   defined verify [--min|--full] [--timings]   managed-artifact check (never
+//                                   writes) → complete no-fix pass → JSON result.
 //
 // Exit is 0 only when the canonical result is `compliant`, 1 otherwise; the
 // exit code derives from the result, never from the rendered text. Output is a
 // single JSON line (lib/report.mts): `--min` (default) carries `status` and
 // `errors` whenever any occurred; `--full` adds the per-check `results`.
+// `--timings` is orthogonal: monotonic phase/step durations on stderr (#71),
+// never touching stdout.
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
 // `verify` shares the orchestrator. Steps run in fixed order (naming →
@@ -53,6 +55,7 @@ import {
     type StepResult,
 } from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
+import { createTimings, measure, now, type Timings } from "./lib/timings.mts";
 import { explainTopic, renderExplanation } from "./lib/explain.mts";
 
 interface StepInput {
@@ -184,11 +187,14 @@ export async function runPass({
     repoRoot,
     files,
     steps = STEPS,
+    timings,
 }: {
     mode: StepMode;
     repoRoot: string;
     files: string[];
     steps?: readonly Step[];
+    /** Opt-in per-step durations, reported under `<mode>/<step>` (#71). */
+    timings?: Timings;
 }): Promise<Map<string, StepResult>> {
     const results = new Map<string, StepResult>();
     for (const step of steps) {
@@ -197,6 +203,7 @@ export async function runPass({
     const scratch: Scratch = { dir: null };
     try {
         for (const step of steps) {
+            const started = timings ? now() : 0;
             try {
                 const result = await step.run({
                     mode,
@@ -213,6 +220,9 @@ export async function runPass({
                     err instanceof Error ? err.message : String(err);
                 results.set(step.id, errored({ message }));
             }
+            if (timings) {
+                timings.record(`${mode}/${step.id}`, now() - started);
+            }
         }
     } finally {
         cleanupScratch(scratch);
@@ -223,7 +233,7 @@ export async function runPass({
 /** Report the verbs: the two result verbs with flags, and the guidance verb. */
 export function printUsage(): void {
     console.log(
-        "usage: defined comply [--min|--full] | defined verify [--min|--full] | defined explain <step-or-rule>",
+        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined explain <step-or-rule>",
     );
 }
 
@@ -238,6 +248,8 @@ export interface RunGateDeps {
     trackedFilesFn?: typeof trackedFiles;
     /** Output sink. */
     printFn?: (line: string) => void;
+    /** Stderr sink for opt-in timings (`--timings`). */
+    notifyFn?: (line: string) => void;
     /** Process exit; injected so tests observe the exit code. */
     exitFn?: (code: number) => void;
 }
@@ -250,6 +262,7 @@ async function runComply({
     checkSetupFn,
     runPassFn,
     trackedFilesFn,
+    timings,
 }: {
     repoRoot: string;
     files: string[];
@@ -257,25 +270,31 @@ async function runComply({
     checkSetupFn: typeof checkSetup;
     runPassFn: typeof runPass;
     trackedFilesFn: typeof trackedFiles;
+    timings?: Timings;
 }): Promise<GateResult> {
-    await runSetupFn({ startDir: repoRoot });
+    await measure(timings, "setup", () => runSetupFn({ startDir: repoRoot }));
     // Bootstrap writes .editorconfig, Directory.Build.props, .gitattributes,
     // AGENTS.md and a pinned .defined.json — files the pre-bootstrap
     // snapshot (taken in main()) cannot contain. Re-fetch so both passes
     // judge the repo as it exists after setup; otherwise the node step's
     // prettier file list never sees the gate's own seeded files.
     const filesAfterSetup = trackedFilesFn({ repoRoot });
-    await runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup });
+    await measure(timings, "fix pass", () =>
+        runPassFn({ mode: "fix", repoRoot, files: filesAfterSetup, timings }),
+    );
     // Repairs mutate the tree: a fixer or a consumer command can create,
     // delete or rename files. Re-fetch so verification judges what is actually
     // on disk — a new file is checked, and a deleted path never reaches the
     // no-fix scratch copy, where copying a missing file would abort the pass.
     const filesAfterRepair = trackedFilesFn({ repoRoot });
-    const verify = await runPassFn({
-        mode: "no-fix",
-        repoRoot,
-        files: filesAfterRepair,
-    });
+    const verify = await measure(timings, "no-fix pass", () =>
+        runPassFn({
+            mode: "no-fix",
+            repoRoot,
+            files: filesAfterRepair,
+            timings,
+        }),
+    );
     // Report any gate-owned bootstrap artifact still out of line after setup
     // (the managed workflow and AGENTS block are brought to the gate copy; a
     // seeded default the repo owns is never gated) through the same canonical
@@ -293,14 +312,20 @@ async function runVerify({
     files,
     checkSetupFn,
     runPassFn,
+    timings,
 }: {
     repoRoot: string;
     files: string[];
     checkSetupFn: typeof checkSetup;
     runPassFn: typeof runPass;
+    timings?: Timings;
 }): Promise<GateResult> {
-    const setup = await checkSetupFn({ startDir: repoRoot });
-    const results = await runPassFn({ mode: "no-fix", repoRoot, files });
+    const setup = await measure(timings, "setup check", () =>
+        checkSetupFn({ startDir: repoRoot }),
+    );
+    const results = await measure(timings, "no-fix pass", () =>
+        runPassFn({ mode: "no-fix", repoRoot, files, timings }),
+    );
     return buildResult({
         setup,
         steps: [...results].map(([id, result]) => ({ id, result })),
@@ -315,6 +340,7 @@ function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
         runPassFn = runPass,
         trackedFilesFn = trackedFiles,
         printFn = (line) => console.log(line),
+        notifyFn = (line) => process.stderr.write(`${line}\n`),
         exitFn = (code) => process.exit(code),
     } = deps;
     return {
@@ -323,6 +349,7 @@ function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
         runPassFn,
         trackedFilesFn,
         printFn,
+        notifyFn,
         exitFn,
     };
 }
@@ -339,31 +366,40 @@ export async function runGate({
     repoRoot,
     files,
     presentation = "min",
+    timings = false,
     deps = {},
 }: {
     verb: Verb;
     repoRoot: string;
     files: string[];
     presentation?: Presentation;
+    /** Opt-in monotonic phase/step durations on stderr (#71). */
+    timings?: boolean;
     deps?: RunGateDeps;
 }): Promise<void> {
     const resolved = resolveDeps(deps);
-    const result =
+    const sink = timings
+        ? createTimings({ sink: resolved.notifyFn })
+        : undefined;
+    const result = await measure(sink, `${verb} total`, () =>
         verb === "comply"
-            ? await runComply({
+            ? runComply({
                   repoRoot,
                   files,
                   runSetupFn: resolved.runSetupFn,
                   checkSetupFn: resolved.checkSetupFn,
                   runPassFn: resolved.runPassFn,
                   trackedFilesFn: resolved.trackedFilesFn,
+                  timings: sink,
               })
-            : await runVerify({
+            : runVerify({
                   repoRoot,
                   files,
                   checkSetupFn: resolved.checkSetupFn,
                   runPassFn: resolved.runPassFn,
-              });
+                  timings: sink,
+              }),
+    );
     resolved.printFn(renderResult({ result, presentation }));
     if (result.status !== "compliant") {
         resolved.exitFn(1);
@@ -431,6 +467,7 @@ async function main(): Promise<void> {
         verb: parsed!.verb,
         startDir: process.cwd(),
         presentation: parsed!.presentation,
+        timings: parsed!.timings,
     });
     if (ctx.verb === "explain") {
         await runExplain({ topic: parsed!.topic!, repoRoot: ctx.repoRoot });
@@ -442,6 +479,7 @@ async function main(): Promise<void> {
         repoRoot: ctx.repoRoot,
         files,
         presentation: ctx.presentation,
+        timings: ctx.timings,
     });
 }
 

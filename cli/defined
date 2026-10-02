@@ -55,7 +55,7 @@ UPDATE_WORK=""
 LAUNCHER_REV=""
 
 usage() {
-    echo "usage: ${PROGRAM} comply [--min|--full] | ${PROGRAM} verify [--min|--full] | ${PROGRAM} explain <step-or-rule> | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
+    echo "usage: ${PROGRAM} comply [--min|--full] [--timings] | ${PROGRAM} verify [--min|--full] [--timings] | ${PROGRAM} explain <step-or-rule> | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -575,7 +575,7 @@ main() {
         return 2
     fi
 
-    # Presentation flags (--min/--full) travel to the runtime verbatim; the
+    # Output flags (--min/--full/--timings) travel to the runtime verbatim; the
     # gate owns their validation and their meaning. Everything after the verb
     # is forwarded, so the launcher never re-implements the CLI contract.
     local -a forward=("${@:2}")
