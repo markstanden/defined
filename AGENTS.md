@@ -24,6 +24,14 @@ Where to look:
   `LAUNCHER_SHA256`, so editing the launcher means updating the checksum (a test
   enforces the pair). Both are tested with fake engines/git/curl injected on
   `PATH`, so no real engine or network is needed.
+  **Tag workflow:** a main push republishes `:latest` and the 12-char SHA tag;
+  existing pinned consumers are unaffected until they run `defined update`, so
+  tagging a release is simply `gh release create <sha12>` after the image lands.
+- Commit messages are subject-only (`adds X`, `fixes Y`) and the default
+  verbosity is concise: `comply`/`verify` print one compact JSON line —
+  `status` plus any `errors` — and `--full` adds the per-check `results` map
+  (worth one contextual run, noise thereafter). Use `--full` when you need the
+  plan; leave it off otherwise.
 - `standards/workflows/defined--verify.yml` is the single source of truth for
   the managed gate workflow; `.github/workflows/defined--verify.yml` here is the
   installed copy. Its job skips this repo (the guard excludes
