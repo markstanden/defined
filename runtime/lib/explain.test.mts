@@ -126,6 +126,42 @@ test("explainTopic_stepWithoutAStandardsDoc_carriesANotice", async () => {
     assert.match(e.notice!, /tflint|tofu/u);
 });
 
+test("explainTopic_nodeCoverage_routesToTheCoverageDoc", async () => {
+    const e = await explainTopic({
+        topic: "node-coverage",
+        repoRoot: "/repo",
+        deps: fakeDeps(),
+    });
+    assert.equal(e.doc, "standards/coverage.md");
+});
+
+test("explainTopic_dotnetCoverage_routesToTheCoverageDoc", async () => {
+    const e = await explainTopic({
+        topic: "dotnet-coverage",
+        repoRoot: "/repo",
+        deps: fakeDeps(),
+    });
+    assert.equal(e.doc, "standards/coverage.md");
+});
+
+test("explainTopic_nodeCoverage_noticeNamesTheLcovPath", async () => {
+    const e = await explainTopic({
+        topic: "node-coverage",
+        repoRoot: "/repo",
+        deps: fakeDeps(),
+    });
+    assert.match(e.notice!, /coverage\/lcov\.info/u);
+});
+
+test("explainTopic_dotnetCoverage_noticeNamesTheCoberturaPaths", async () => {
+    const e = await explainTopic({
+        topic: "dotnet-coverage",
+        repoRoot: "/repo",
+        deps: fakeDeps(),
+    });
+    assert.match(e.notice!, /coverage\.cobertura\.xml/u);
+});
+
 test("explainTopic_unknownTopic_throwsAConciseError", async () => {
     await assert.rejects(
         explainTopic({ topic: "SC99999", repoRoot: "/repo", deps: fakeDeps() }),
