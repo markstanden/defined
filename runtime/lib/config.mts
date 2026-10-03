@@ -104,12 +104,11 @@ export interface EslintConfig {
     /** True switches the house ESLint step off for this repo. */
     disable?: boolean;
     /**
-/**
- * Cyclomatic-complexity ceiling for the house config's `complexity` rule:
- * a positive integer per-function max, or `false` to drop the rule.
- * Absent = the house default (10). Only the house config honours it — a
- * repo-owned config governs itself.
- */
+     * Cyclomatic-complexity ceiling for the house config's `complexity` rule:
+     * a positive integer per-function max, or `false` to drop the rule.
+     * Absent = the house default (10). Only the house config honours it — a
+     * repo-owned config governs itself.
+     */
     complexityMax?: number | false;
     /**
      * False drops the house config's public-API documentation rules
