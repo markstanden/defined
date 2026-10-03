@@ -37,7 +37,9 @@ import {
 } from "../lib/config.mts";
 
 export interface DotNetCoverageRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
     scratch?: Scratch;
@@ -50,9 +52,9 @@ type Runner = typeof run;
 const COBERTURA_NAME = "coverage.cobertura.xml";
 
 export interface CoberturaSummary {
-    /** 0.0–1.0 */
+    /** Line coverage as a 0.0–1.0 rate, parsed from a Cobertura XML file. */
     lineRate: number;
-    /** 0.0–1.0 */
+    /** Branch coverage as a 0.0–1.0 rate; undefined when the report omits it. */
     branchRate: number | undefined;
 }
 
@@ -93,13 +95,26 @@ function extractAttribute(xml: string, name: string): string | undefined {
     return match?.[1];
 }
 
+/**
+ * Compare a Cobertura summary against the configured minimums.
+ *
+ * @param root0 the parameter object
+ * @param root0.summary parsed Cobertura rates (0.0–1.0)
+ * @param root0.minimums configured per-metric floors, in percent
+ * @returns pass=false with one failure message per metric below its floor
+ */
 export function checkMinimums({
     summary,
     minimums,
 }: {
     summary: CoberturaSummary;
     minimums: CoverageMinimums;
-}): { pass: boolean; failures: string[] } {
+}): {
+    /** False when any tracked metric sits below its minimum. */
+    pass: boolean;
+    /** One per failed metric: `line/branch: <pct>% < <minimum>% minimum`. */
+    failures: string[];
+} {
     const failures: string[] = [];
 
     if (minimums.line !== undefined) {
@@ -198,6 +213,18 @@ async function loadCoberturaSummary({
     return { summary };
 }
 
+/**
+ * Run the .NET coverage step (see the module header): the consumer's command
+ * runs in fix mode only, writing the report into the repo; no-fix parses the
+ * Cobertura report and enforces the configured minimums against the scratch
+ * copy, so a read-only verify never writes.
+ *
+ * @param root0 the parameter object
+ * @param root0.ctx invocation context (mode, repoRoot, scratch)
+ * @param root0.trackedFiles the gate's git-scoped file list
+ * @param root0.runner the process runner; injectable for tests
+ * @param root0.readFileFn reads the Cobertura XML; injectable for tests
+ */
 export async function runDotNetCoverageStep({
     ctx,
     trackedFiles,

@@ -61,7 +61,9 @@ import { filterPackageJsons } from "../lib/node-packages.mts";
 import { CONSUMER_PRETTIER_CONFIGS } from "../lib/prettier-config.mts";
 
 export interface NodeRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
     /** Shared scratch box (no-fix): the same copy node-deps restored into. */
     scratch?: Scratch;
@@ -69,6 +71,7 @@ export interface NodeRunContext {
 
 type Runner = typeof run;
 
+/** Tracked markdown files; the node step formats the `.md` scope with prettier. */
 export function filterMarkdownFiles({ files }: { files: string[] }): string[] {
     return files.filter((file) => file.endsWith(".md"));
 }

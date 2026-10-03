@@ -78,6 +78,7 @@ export interface NodePackageConfig {
 
 /** Node project-checks configuration (`.defined.json` `node` key). */
 export interface NodeChecksConfig {
+    /** The packages (or package) to restore and check. */
     packages: NodePackageConfig[];
 }
 
@@ -109,14 +110,14 @@ export interface EslintConfig {
  * Absent = the house default (10). Only the house config honours it — a
  * repo-owned config governs itself.
  */
-complexityMax?: number | false;
-/**
- * False drops the house config's public-API documentation rules
- * (`jsdoc/*`): a repo still building out its docs can silence the floor
- * deliberately, as with complexityMax. Absent = the house floor. Only the
- * house config honours it — a repo-owned config governs itself.
- */
-requireJsdoc?: boolean;
+    complexityMax?: number | false;
+    /**
+     * False drops the house config's public-API documentation rules
+     * (`jsdoc/*`): a repo still building out its docs can silence the floor
+     * deliberately, as with complexityMax. Absent = the house floor. Only the
+     * house config honours it — a repo-owned config governs itself.
+     */
+    requireJsdoc?: boolean;
 }
 
 /** Consumer managed-workflow configuration (`.defined.json` `workflow` key). */
@@ -149,7 +150,9 @@ export interface DefinedConfig {
     version: string;
     /** Per-ecosystem coverage configuration. Absent key = step skips. */
     coverage?: {
+        /** Node coverage command + minimums; absent key = step skips. */
         node?: CoverageConfig;
+        /** .NET coverage command + minimums; absent key = step skips. */
         dotnet?: CoverageConfig;
     };
     /** Node project checks. Absent key = the node-checks step skips. */

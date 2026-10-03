@@ -45,7 +45,9 @@ import { removeExample, writeExample } from "../lib/eslint-example.mts";
 import { runWithLocalBin } from "../lib/node-packages.mts";
 
 export interface EslintRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the write-capable steps. */
     scratch?: Scratch;
@@ -309,9 +311,7 @@ async function manageExample({
  * Undefined when neither is set — the baked config keeps its own defaults; a
  * repo-owned config governs itself and must not see either variable.
  */
-function houseConfigEnv(
-    config: DefinedConfig,
-): NodeJS.ProcessEnv | undefined {
+function houseConfigEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
     const max = config.eslint?.complexityMax;
     const requireJsdoc = config.eslint?.requireJsdoc;
     if (max === undefined && requireJsdoc === undefined) {

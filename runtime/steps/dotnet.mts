@@ -31,7 +31,9 @@ import { run, type CommandResult } from "../../lib/proc.mts";
 import { loadConfig } from "../lib/config.mts";
 
 export interface DotNetRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
     scratch?: Scratch;
@@ -39,15 +41,28 @@ export interface DotNetRunContext {
 
 type Runner = typeof run;
 
+/**
+ * The .NET-relevant subset of the tracked file list: manifests and solutions.
+ * Detection is data-driven (no filesystem) so callers can decide cheaply.
+ *
+ * @param root0 the parameter object
+ * @param root0.files the gate's git-scoped file list, repo-relative
+ * @returns the tracked .csproj/.sln/.slnx paths, in order
+ */
 export function filterDotNetFiles({ files }: { files: string[] }): string[] {
     return files.filter((file) => /\.(csproj|sln|slnx)$/u.test(file));
 }
 
 export interface DiscoverWorkspaceInput {
+    /** The (scratch or repo) root the workspace resolution is relative to. */
     repoRoot: string;
+    /** Explicit workspace path from TOOL_WORKSPACE; wins over every file. */
     workspaceEnv?: string;
+    /** Tracked .slnx files at any depth. */
     slnxFiles: string[];
+    /** Tracked .sln files at any depth. */
     slnFiles: string[];
+    /** Tracked .csproj files at any depth. */
     csprojFiles: string[];
 }
 

@@ -26,15 +26,22 @@ import { CONSUMER_ESLINT_CONFIGS } from "./eslint-config.mts";
 export type OwnerSide = "house" | "consumer" | "mixed" | "n/a";
 
 export interface Owner {
+    /** Who governs the topic's effective configuration. */
     side: OwnerSide;
+    /** The owning config file or baked path, mutable or not. */
     detail: string;
 }
 
 export interface Explanation {
+    /** The topic as (normally trimmed) the caller asked it. */
     topic: string;
+    /** A run-plan step id or a rule id. */
     kind: "step" | "rule";
+    /** House or consumer governance of this topic. */
     owner: Owner;
+    /** The governing standards doc path; null when none covers the topic. */
     doc: string | null;
+    /** The doc's contents verbatim; null when the doc is absent. */
     guidance: string | null;
     /** One-line summary; only for topics with no standards doc. */
     notice?: string;
@@ -307,9 +314,13 @@ function unknownTopic(raw: string): Error {
 }
 
 export interface ExplainDeps {
+    /** Reads standards docs; injectable so tests need no filesystem. */
     readFileFn?: typeof readFile;
+    /** Resolves the standards dir inside the running image or checkout. */
     standardsDirFn?: typeof standardsDir;
+    /** Loads the consumer's .defined.json; injectable for tests. */
     loadConfigFn?: typeof loadConfig;
+    /** Probes for a consumer-owned eslint config file at the repo root. */
     existsFn?: (path: string) => boolean;
 }
 

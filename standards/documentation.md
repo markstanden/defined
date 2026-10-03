@@ -11,12 +11,12 @@ documentation checks. One question, one answer:
 - **Public surface (exported JS/TS, publicly visible C#):** every type,
   function/method and property carries a doc comment that explains purpose and
   observable behaviour — not the name restated. Describe:
-  - parameters: meaning, accepted ranges, defaults, and null/empty behaviour
-    when it differs from "invalid";
-  - return values: meaning, and what null/empty/false means when it can
-    happen;
-  - thrown failures and important side effects where they exist;
-  - C# properties: `<summary>` (and `<value>` where the distinction helps).
+    - parameters: meaning, accepted ranges, defaults, and null/empty behaviour
+      when it differs from "invalid";
+    - return values: meaning, and what null/empty/false means when it can
+      happen;
+    - thrown failures and important side effects where they exist;
+    - C# properties: `<summary>` (and `<value>` where the distinction helps).
 - **Non-public code:** document behaviour that needs explanation — an
   invariant, a non-obvious decision, a subtle algorithm. Small, well-named
   private helpers extracted to reduce complexity need no ceremonial block.

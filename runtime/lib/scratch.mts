@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 
 /** Mutable box shared by the write-capable steps so one scratch serves a pass. */
 export interface Scratch {
+    /** Absolute scratch root; null until `ensureScratch` creates it. */
     dir: string | null;
 }
 

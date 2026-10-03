@@ -44,6 +44,7 @@ export interface RestoreTarget {
     install?: string | false;
 }
 
+/** Tracked package.json manifests at any depth, one entry per manifest. */
 export function filterPackageJsons({ files }: { files: string[] }): string[] {
     return files.filter((file) => file.split("/").pop() === "package.json");
 }

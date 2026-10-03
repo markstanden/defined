@@ -27,11 +27,13 @@ import type { Severity } from "../lib/severities.mts";
 export const SHELLCHECK_DEFAULT_FLOOR: Severity = "style";
 
 export interface ShellRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
 }
 
 type Runner = typeof run;
 
+/** Tracked shell scripts; the shfmt/shellcheck step's lint scope. */
 export function filterShellScripts({ files }: { files: string[] }): string[] {
     return files.filter((file) => file.endsWith(".sh"));
 }

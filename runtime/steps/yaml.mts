@@ -26,11 +26,13 @@ import { gateConfigPath } from "../lib/config-path.mts";
 export const YAML_EXTENSIONS = [".yml", ".yaml"] as const;
 
 export interface YamlRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
 }
 
 type Runner = typeof run;
 
+/** Tracked YAML files (`.yml`/`.yaml`); the yamllint/prettier scope. */
 export function filterYamlFiles({ files }: { files: string[] }): string[] {
     return files.filter((file) =>
         (YAML_EXTENSIONS as readonly string[]).some((ext) =>

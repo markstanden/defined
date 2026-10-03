@@ -83,6 +83,14 @@ manages plumbing (the CI workflow and this block), which is brought back in
 line on each run. Edit the seeded defaults here as you wish; raise changes to
 the managed files and the house standards upstream — never fork them locally.
 
+**Public APIs are documented.** Exported functions, properties and public
+.NET members carry doc comments describing purpose, parameters, returns and
+relevant constraints — never name-restating filler written to pass a lint
+rule; small, well-named private helpers need no block. Meaningfulness is
+review work: the gate proves the sections exist, reviewers prove the words
+match the behaviour (`defined explain jsdoc/require-jsdoc`,
+`standards/documentation.md`).
+
 **Looking things up.** For what a step or rule means, run `defined explain
 <step-or-rule>`. It serves the house guidance straight from the pinned image —
 offline, no repo writes — and names whether the configuration is house-owned or
@@ -91,7 +99,7 @@ may be newer than the revision actually gating you.
 
 House standards live in the defined repo
 (<https://github.com/markstanden/defined>): `standards/` covers tests, naming,
-shell and YAML; `practices/architecture.md` covers delivery, structure and
-working style. Read the relevant file when a task touches that area. Tighten the
-floor; don't fork it — raise improvements upstream.
+API documentation, shell and YAML; `practices/architecture.md` covers delivery,
+structure and working style. Read the relevant file when a task touches that
+area. Tighten the floor; don't fork it — raise improvements upstream.
 <!-- defined:end -->

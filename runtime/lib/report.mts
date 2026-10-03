@@ -26,29 +26,43 @@ export type Presentation = "min" | "full";
 export type ResultStatus = "compliant" | "not_compliant";
 
 export interface ReportedStep {
+    /** Stable run-plan step id (or the synthetic `bootstrap` check). */
     id: string;
+    /** The step's outcome as captured during the run. */
     result: StepResult;
 }
 
 export interface ReportInput {
+    /** Bootstrap phase result, when bootstrap ran (comply, and drift-checking verify). */
     setup?: SetupCheck;
+    /** Per-step outcomes, in run-plan order. */
     steps: ReportedStep[];
 }
 
 /** A diagnostic carrying the check that produced it. */
 export interface Diagnostic {
+    /** The check that owns the diagnostic (`bootstrap` included). */
     check: string;
+    /** Finding (lint/tool), execution failure, or blocked dependency. */
     kind: DiagnosticKind;
+    /** Human-readable, single-phrase description of the problem. */
     message: string;
+    /** Repo-relative file the diagnostic points at, when known. */
     file?: string;
+    /** 1-based line, where the tool reports one; else 0. */
     line?: number;
+    /** 1-based column, where the tool reports one; else 0. */
     column?: number;
+    /** The rule id (shellcheck/yamllint/eslint), when the tool names one. */
     rule?: string;
 }
 
 export interface GateResult {
+    /** Compliant when nothing failed; always agrees with the exit code. */
     status: ResultStatus;
+    /** Per-check statuses keyed by stable id (skips included, `--full`). */
     results: Record<string, StepStatus>;
+    /** Actionable diagnostics; omitted on a clean run (concise presentation). */
     errors: Diagnostic[];
 }
 

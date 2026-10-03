@@ -23,19 +23,26 @@ export type StepMode = "fix" | "no-fix";
 const DEFAULT_PRESENTATION: Presentation = "min";
 
 export interface ParsedCommand {
+    /** The parsed verb: comply, verify or explain. */
     verb: Verb;
+    /** True when `--help` was requested (usage text, exit 2). */
     help: boolean;
+    /** Presentation mode honoured by the report phase. */
     presentation: Presentation;
-    /** Opt-in monotonic timings on stderr (`--timings`, issue #71). */
+    /** True when `--timings` was requested (stderr phase/step durations). */
     timings: boolean;
     /** `explain` only: the step id or rule id to look up. */
     topic?: string;
 }
 
 export interface RunContext {
+    /** The parsed verb — comply, verify or explain. */
     verb: Verb;
+    /** The repo this invocation operates on (never the gate's own code). */
     repoRoot: string;
+    /** Presentation mode honoured by the report phase. */
     presentation: Presentation;
+    /** True when `--timings` was requested (stderr phase/step durations). */
     timings: boolean;
 }
 
