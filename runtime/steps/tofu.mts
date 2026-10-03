@@ -33,7 +33,9 @@ import { run, type CommandResult } from "../../lib/proc.mts";
 import { loadConfig } from "../lib/config.mts";
 
 export interface TofuRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
     /** Shared scratch box (no-fix): init must write, so a ro verify needs a copy. */
     scratch?: Scratch;
@@ -41,6 +43,7 @@ export interface TofuRunContext {
 
 type Runner = typeof run;
 
+/** Tracked OpenTofu modules; the tofu step's fmt/init/validate/tflint scope. */
 export function filterTofuFiles({ files }: { files: string[] }): string[] {
     return files.filter((file) => file.endsWith(".tf"));
 }

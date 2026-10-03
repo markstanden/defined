@@ -16,9 +16,13 @@ type RunResult = { status: number; stdout?: string; stderr?: string };
 
 /** One recorded runner invocation, including the cwd/env a step supplied. */
 export interface RunnerCall {
+    /** The spawn binary the step asked for (`sh` for shell composed commands). */
     cmd: string;
+    /** Argument vector, `args[1]` being the composed script when cmd is `sh`. */
     args: string[];
+    /** Working directory the step supplied; undefined inherits the process. */
     cwd?: string;
+    /** Full child environment; undefined inherits the parent's. */
     env?: NodeJS.ProcessEnv;
 }
 

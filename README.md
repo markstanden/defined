@@ -165,7 +165,7 @@ the pinned image** — no network, no repo writes — so the answer always match
 the revision actually gating you (upstream `main` may be newer). It takes one
 topic, a **step id** (`naming`, `eslint`, `yaml`, … the ids in `results`) or a
 **rule id** (shellcheck `SC…`, a yamllint rule name, or an eslint rule such as
-`complexity` / `regexp/*`), and prints one compact JSON object:
+`complexity` / `regexp/*` / `jsdoc/*`), and prints one compact JSON object:
 
 ```json
 {
@@ -275,6 +275,22 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     ```
 
     `false` drops the rule entirely.
+
+    It also carries the public-API documentation floor: exported functions and
+    properties need a JSDoc block with a real summary (`jsdoc/require-*`;
+    a bare `/** */` block is a finding), and any parameter/returns tag an
+    author records must carry a description. Test files are exempt,
+    meaningfulness stays reviewer work (never write filler to pass the
+    linter), and a repo still building out its docs can drop the floor:
+
+    ```jsonc
+    "eslint": { "requireJsdoc": false }
+    ```
+
+    See [`standards/documentation.md`](standards/documentation.md) for the
+    doctrine and [`standards/node-eslint.md`](standards/node-eslint.md) for
+    the rule list. The .NET equivalent is the `CS1591` floor in the seeded
+    `Directory.Build.props`.
 
     An `eslint` entry in `node.checks` is only needed to run your _own_
     config/toolchain at a version or with plugins the gate does not carry; a
@@ -499,6 +515,7 @@ image tag and `defined update latest` always resolves to a pullable SHA.
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)
 - [`standards/node-eslint.md`](standards/node-eslint.md) — the house ESLint step: what it owns, how to override, the v1→v2 growth plan
+- [`standards/documentation.md`](standards/documentation.md) — the API-documentation doctrine behind the gate's doc floors
 - [`practices/architecture.md`](practices/architecture.md) — delivery, structure, code and working-style preferences
 - [`standards/.editorconfig`](standards/.editorconfig) — editor + dotnet code style (installed by gate setup)
 - [`standards/Directory.Build.props`](standards/Directory.Build.props) — common MSBuild properties (installed by gate setup)

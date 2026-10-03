@@ -33,7 +33,9 @@ import { run } from "../../lib/proc.mts";
 import { loadConfig, type CoverageMinimums } from "../lib/config.mts";
 
 export interface NodeCoverageRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the dotnet + coverage steps. */
     scratch?: Scratch;
@@ -44,11 +46,17 @@ export interface NodeCoverageRunContext {
 type Runner = typeof run;
 
 export interface LcovSummary {
+    /** Instruments lines the report tracks. */
     linesFound: number;
+    /** Instrumented lines actually executed. */
     linesHit: number;
+    /** Branches the report tracks. */
     branchesFound: number;
+    /** Branches actually taken. */
     branchesHit: number;
+    /** Functions the report tracks. */
     functionsFound: number;
+    /** Functions actually executed. */
     functionsHit: number;
 }
 
@@ -207,7 +215,12 @@ export function checkMinimums({
 }: {
     summary: LcovSummary;
     minimums: CoverageMinimums;
-}): { pass: boolean; failures: string[] } {
+}): {
+    /** False when any tracked metric sits below its minimum. */
+    pass: boolean;
+    /** One per failed metric: `<label>: <pct>% < <minimum>% minimum`. */
+    failures: string[];
+} {
     const invalid = counterFailures(summary);
     if (invalid.length > 0) {
         return { pass: false, failures: invalid };

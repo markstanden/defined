@@ -31,7 +31,14 @@
     <!-- Documentation -->
     <!-- Generates XML documentation files for all projects (required for SDK-style API documentation) -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <!-- Suppresses warnings about missing XML comments while still generating docs for the comments that exist -->
-    <NoWarn>$(NoWarn);CS1591</NoWarn> <!-- Missing XML comments -->
+    <!-- With GenerateDocumentationFile on, the compiler warns (CS1591) for every
+         publicly visible type/member without an XML doc comment. Together with
+         TreatWarningsAsErrors this makes documentation part of the build:
+         public APIs describe their contract (see standards/). Document private
+         helpers only when their behaviour needs explanation; never add filler
+         to satisfy the warning. To relax per-project (e.g. generated code),
+         re-suppress CS1591 in that project or set "dotnet":
+         { "disable": ... } — do not edit this seeded copy. -->
+    <!-- <NoWarn> deliberately does not suppress CS1591: public API docs are required. -->
   </PropertyGroup>
 </Project>

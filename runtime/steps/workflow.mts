@@ -47,7 +47,9 @@ import {
 } from "../lib/workflow-files.mts";
 
 export interface WorkflowRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
 }
 

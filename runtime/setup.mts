@@ -197,7 +197,9 @@ export async function runSetup({
 }
 
 export interface SetupCheck {
+    /** Every gate-owned managed file's check outcome. */
     files: CheckedFile[];
+    /** Drift state of the AGENTS.md managed block. */
     agents: MarkedBlockStatus;
 }
 

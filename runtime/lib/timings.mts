@@ -10,6 +10,7 @@
 
 /** Destination for timing lines; the gate reports to stderr. */
 export interface Timings {
+    /** Record one labelled phase/step duration in milliseconds. */
     record(label: string, ms: number): void;
 }
 

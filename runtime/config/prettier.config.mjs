@@ -8,5 +8,10 @@
 // standards/.editorconfig into consumer roots, so one file drives prettier,
 // shfmt and every EditorConfig-aware IDE in lockstep. Keep indent_size in
 // .editorconfig and this file's defaults aligned — see PLAN decision.
-/** @type {import("prettier").Config} */
+/**
+ * Prettier settings; the defaults are pure intentional. The indent that
+ * matters travels in .editorconfig (see the header note above).
+ *
+ * @type {import("prettier").Config}
+ */
 export default {};

@@ -45,7 +45,9 @@ import { removeExample, writeExample } from "../lib/eslint-example.mts";
 import { runWithLocalBin } from "../lib/node-packages.mts";
 
 export interface EslintRunContext {
+    /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
     mode: "fix" | "no-fix";
+    /** Repo root the checkout was mounted at; scratch copies hang off it. */
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the write-capable steps. */
     scratch?: Scratch;
@@ -301,20 +303,31 @@ async function manageExample({
 }
 
 /**
- * The house config's complexity ceiling as an env overlay: `.defined.json`
+ * The house config's overrides as an env overlay: `.defined.json`
  * "eslint": { "complexityMax": N | false } forwarded as
- * DEFINED_ESLINT_COMPLEXITY_MAX (a baked config cannot read the repo).
- * Undefined when unset — the baked config keeps its own default; a repo-owned
- * config governs itself and must not see the variable.
+ * DEFINED_ESLINT_COMPLEXITY_MAX and
+ * "eslint": { "requireJsdoc": false } forwarded as
+ * DEFINED_ESLINT_REQUIRE_JSDOC (a baked config cannot read the repo).
+ * Undefined when neither is set — the baked config keeps its own defaults; a
+ * repo-owned config governs itself and must not see either variable.
  */
-function complexityEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
+function houseConfigEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
     const max = config.eslint?.complexityMax;
-    if (max === undefined) {
+    const requireJsdoc = config.eslint?.requireJsdoc;
+    if (max === undefined && requireJsdoc === undefined) {
         return undefined;
     }
     return {
         ...process.env,
-        DEFINED_ESLINT_COMPLEXITY_MAX: max === false ? "off" : String(max),
+        ...(max === undefined
+            ? {}
+            : {
+                  DEFINED_ESLINT_COMPLEXITY_MAX:
+                      max === false ? "off" : String(max),
+              }),
+        ...(requireJsdoc === undefined
+            ? {}
+            : { DEFINED_ESLINT_REQUIRE_JSDOC: requireJsdoc ? "on" : "off" }),
     };
 }
 
@@ -396,7 +409,7 @@ export async function runEslintStep({
     await manageExample({ mode: ctx.mode, kind, workingRoot, notifyFn });
 
     const configPath = gateConfigPath({ name: "eslint.config.mjs" });
-    const env = kind === "house" ? complexityEnv(config) : undefined;
+    const env = kind === "house" ? houseConfigEnv(config) : undefined;
     // Repair (#65): mutate only — eslint --fix. The lint check is the single
     // authoritative no-fix pass; a fix that leaves findings is caught there.
     if (ctx.mode === "fix") {

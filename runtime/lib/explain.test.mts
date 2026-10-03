@@ -76,6 +76,33 @@ test("explainTopic_complexityRule_reportsTheConsumerTuningAsMixed", async () => 
     });
 });
 
+test("explainTopic_jsdocRule_carriesTheHouseDocAndOwner", async () => {
+    const e = await explainTopic({
+        topic: "jsdoc/require-jsdoc",
+        repoRoot: "/repo",
+        deps: fakeDeps({ config: { version: "" } }),
+    });
+    assert.equal(e.doc, "standards/node-eslint.md");
+    assert.deepEqual(e.owner, {
+        side: "house",
+        detail: "runtime/config/eslint.config.mjs",
+    });
+});
+
+test("explainTopic_jsdocRule_reportsTheConsumerTuningAsMixed", async () => {
+    const e = await explainTopic({
+        topic: "jsdoc/require-jsdoc",
+        repoRoot: "/repo",
+        deps: fakeDeps({
+            config: { version: "", eslint: { requireJsdoc: false } },
+        }),
+    });
+    assert.deepEqual(e.owner, {
+        side: "mixed",
+        detail: ".defined.json eslint.requireJsdoc",
+    });
+});
+
 test("explainTopic_repoOwnedEslintConfig_reportsConsumerOwnership", async () => {
     const e = await explainTopic({
         topic: "eslint",

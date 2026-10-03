@@ -130,6 +130,26 @@ test("a complexityMax override reaches the house config as an env var", async ()
     });
     assert.equal(result.status, "pass");
     assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, "12");
+    // An override declared without requireJsdoc must not invent one.
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_REQUIRE_JSDOC, undefined);
+});
+
+test("a requireJsdoc override reaches the house config as an env var", async () => {
+    const root = await makeTempDir("quality-eslint-jsdoc-");
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "requireJsdoc": false } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root },
+        trackedFiles: [".defined.json", "src/a.ts"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_REQUIRE_JSDOC, "off");
+    // complexityMax untouched when only requireJsdoc is declared.
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, undefined);
 });
 
 test("complexityMax false drops the rule via the off sentinel", async () => {
@@ -164,6 +184,27 @@ test("a repo config never receives the complexity override", async () => {
     assert.equal(result.status, "pass");
     assert.equal(
         calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX,
+        undefined,
+        "a repo-owned config governs itself",
+    );
+});
+
+test("a repo config never receives the requireJsdoc override", async () => {
+    const root = await makeTempDir("quality-eslint-jsdoc-repo-");
+    await writeTree(root, {
+        "eslint.config.mjs": "export default [];\n",
+        ".defined.json": '{ "eslint": { "requireJsdoc": false } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root },
+        trackedFiles: ["eslint.config.mjs", ".defined.json", "src/a.ts"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.equal(
+        calls[0]!.env?.DEFINED_ESLINT_REQUIRE_JSDOC,
         undefined,
         "a repo-owned config governs itself",
     );

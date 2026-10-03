@@ -36,20 +36,25 @@ export type CheckStatus = "present" | "absent" | "drift";
  * but installs to .github/workflows/.
  */
 export interface ManagedFile {
+    /** Where the baked copy lives under standards/ (or a subpath prefix). */
     source: string;
+    /** Where the copy installs in the consumer repo, relative to its root. */
     target: string;
+    /** Seeded (install when absent) or managed (keep identical to the gate's). */
     mode: FileMode;
 }
 
 export interface InstalledFile {
     /** Target path relative to the repo root (what the consumer sees). */
     name: string;
+    /** What the installer did: installed, unchanged, or drifted (report). */
     status: InstallStatus;
 }
 
 export interface CheckedFile {
     /** Target path relative to the repo root (what the consumer sees). */
     name: string;
+    /** Read-only verdict: present, missing, or drift (differences from gate). */
     status: CheckStatus;
 }
 

@@ -8,8 +8,11 @@
 import { spawnSync } from "node:child_process";
 
 export interface CommandResult {
+    /** Process exit code: 0 is success; steps use the binary's own contract. */
     status: number;
+    /** Everything the child wrote to stdout, decoded as UTF-8 text. */
     stdout: string;
+    /** Everything the child wrote to stderr, decoded as UTF-8 text. */
     stderr: string;
 }
 
