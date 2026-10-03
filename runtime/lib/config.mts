@@ -103,12 +103,20 @@ export interface EslintConfig {
     /** True switches the house ESLint step off for this repo. */
     disable?: boolean;
     /**
-     * Cyclomatic-complexity ceiling for the house config's `complexity` rule:
-     * a positive integer per-function max, or `false` to drop the rule.
-     * Absent = the house default (10). Only the house config honours it — a
-     * repo-owned config governs itself.
-     */
-    complexityMax?: number | false;
+/**
+ * Cyclomatic-complexity ceiling for the house config's `complexity` rule:
+ * a positive integer per-function max, or `false` to drop the rule.
+ * Absent = the house default (10). Only the house config honours it — a
+ * repo-owned config governs itself.
+ */
+complexityMax?: number | false;
+/**
+ * False drops the house config's public-API documentation rules
+ * (`jsdoc/*`): a repo still building out its docs can silence the floor
+ * deliberately, as with complexityMax. Absent = the house floor. Only the
+ * house config honours it — a repo-owned config governs itself.
+ */
+requireJsdoc?: boolean;
 }
 
 /** Consumer managed-workflow configuration (`.defined.json` `workflow` key). */
@@ -479,7 +487,7 @@ function validateTofu(raw: unknown): TofuConfig | undefined {
     };
 }
 
-const ESLINT_KEYS = new Set(["disable", "complexityMax"]);
+const ESLINT_KEYS = new Set(["disable", "complexityMax", "requireJsdoc"]);
 
 /** The complexity ceiling: a positive integer, or `false` to drop the rule. */
 function validateComplexityMax(value: unknown): number | false {
@@ -511,6 +519,14 @@ function validateEslint(raw: unknown): EslintConfig | undefined {
     }
     if (entry.complexityMax !== undefined) {
         result.complexityMax = validateComplexityMax(entry.complexityMax);
+    }
+    if (entry.requireJsdoc !== undefined) {
+        if (typeof entry.requireJsdoc !== "boolean") {
+            throw new TypeError(
+                `.defined.json: "eslint.requireJsdoc" must be a boolean`,
+            );
+        }
+        result.requireJsdoc = entry.requireJsdoc;
     }
     // `eslint` present but nothing declared: the house step still runs.
     return Object.keys(result).length === 0 ? undefined : result;
