@@ -196,6 +196,11 @@ test(
                 "fail",
                 "eslint stays red after comply (the regexp rule is not auto-fixable)",
             );
+            assert.equal(
+                repaired.results.dotnet,
+                "fail",
+                "dotnet stays red after comply (CS1591 needs written prose, not a fixer)",
+            );
 
             // Ignored file untouched even by comply's repair pass.
             const ignored = await readFile(
@@ -276,6 +281,33 @@ test(
                     " */",
                     "export function measure(value: number): number {",
                     "    return value;",
+                    "}",
+                    "",
+                ].join("\n"),
+            );
+
+            // Repair the CS1591 finding: the documented static holder. The
+            // shape (static class + static member) keeps the CA analysers
+            // quiet so the only red/green delta is the documentation itself.
+            await writeFile(
+                join(root, "src/Contracts/Probe.cs"),
+                [
+                    "namespace Contracts;",
+                    "",
+                    "/// <summary>",
+                    "/// Probes numeric values by echoing them back.",
+                    "/// </summary>",
+                    "public static class Probe",
+                    "{",
+                    "    /// <summary>",
+                    "    /// Echoes the supplied value back to the caller.",
+                    "    /// </summary>",
+                    '    /// <param name="value">The value to echo; any integer is accepted.</param>',
+                    "    /// <returns>The same value that was supplied.</returns>",
+                    "    public static int Measure(int value)",
+                    "    {",
+                    "        return value;",
+                    "    }",
                     "}",
                     "",
                 ].join("\n"),

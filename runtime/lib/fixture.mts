@@ -1,12 +1,13 @@
 // lib/fixture.mts — build a deliberately-broken git repo for gate integration
 // tests.
 //
-// Each ecosystem gets one deterministic offence. The fixture is generated at
-// test time into a temp git repo (never stored in the gate's own tracked
-// tree — a committed broken fixture would fail the coding-standards repo's
-// own gate). Assertions focus on pick-up + auto-fix, not exact messages:
-// check mode fails on each broken ecosystem, --fix repairs the auto-fixable
-// ones, and a file behind the host .prettierignore is never touched.
+// Each ecosystem gets deterministic offences (eslint owns two: the regex
+// floor and the documentation floor). The fixture is generated at test time
+// into a temp git repo (never stored in the gate's own tracked tree — a
+// committed broken fixture would fail the coding-standards repo's own gate).
+// Assertions focus on pick-up + auto-fix, not exact messages: check mode
+// fails on each broken ecosystem, --fix repairs the auto-fixable ones, and
+// a file behind the host .prettierignore is never touched.
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -53,6 +54,20 @@ export function brokenFixtureFiles(): Record<string, string> {
         // tflint phase stays green and only the fmt offence gates.
         "main.tf":
             'terraform {\n  required_version = ">= 1.0"\n  required_providers {\n    null = {\n      source  = "hashicorp/null"\n      version = "~> 3.0"\n    }\n  }\n}\n\nresource "null_resource" "probe" {\n   }\n',
+
+        // dotnet (2026-10-03): the CS1591 floor. A packageless classlib (no
+        // NuGet sources needed) with an undocumented public static holder —
+        // the shape avoids CA1822/CA1052 so the seeded floor's only findings
+        // are the two CS1591 doc errors. dotnet test exits 0 on a classlib.
+        // Bootstrap seeds Directory.Build.props on comply; check-only on a
+        // fresh clone has no props yet, so this offence reads as compliant
+        // there and red after comply — the seeded-defaults adoption path
+        // itself, end to end.
+        ".gitignore": "obj/\nbin/\n",
+        "src/Contracts/Contracts.csproj":
+            '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n',
+        "src/Contracts/Probe.cs":
+            "namespace Contracts;\n\npublic static class Probe\n{\n    public static int Measure(int value)\n    {\n        return value;\n    }\n}\n",
 
         // ignore case: behind the host .prettierignore, must never be touched.
         "dotfiles/nvim/lazy-lock.json": '{ "lock":  true }\n',
