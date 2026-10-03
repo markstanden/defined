@@ -82,7 +82,12 @@ function assertTreeUntouched(root: string, before: Map<string, string>): void {
 interface GateResult {
     status: string;
     results: Record<string, string>;
-    errors?: Array<{ check: string; kind: string; message: string }>;
+    errors?: Array<{
+        check: string;
+        kind: string;
+        message: string;
+        rule?: string;
+    }>;
 }
 
 /** Parse the single JSON result line the gate prints to stdout. */
@@ -148,6 +153,16 @@ test(
             assert.ok(
                 checked.errors?.some((error) => error.check === "bootstrap"),
                 "bootstrap drift must appear in errors",
+            );
+            // The documentation floor must appear in errors: broken docblocks
+            // are findings (eslint), never repair output (no autofill).
+            assert.ok(
+                checked.errors?.some(
+                    (error) =>
+                        error.check === "eslint" &&
+                        error.rule?.startsWith("jsdoc/"),
+                ),
+                "a jsdoc documentation finding must appear in errors",
             );
             assertTreeUntouched(root, before);
 
@@ -236,11 +251,34 @@ test(
             ].join("\n");
             await writeFile(workflowPath, repaired);
 
-            // Repair the ESLint finding too: the post-fix regex from
-            // system-config PR #62 (exclude `[` from the class).
+            // Repair the ESLint findings: the post-fix regex from
+            // system-config PR #62 (exclude `[` from the class), and the
+            // documentation floor's real prose — written by hand, never
+            // autofilled, matching the seeded style (4-space indent).
             await writeFile(
                 join(root, "lib/healthcheck.mts"),
                 "export const MARKDOWN_LINK = /\\[[^\\[\\]]*\\]\\(([^)]*)\\)/g;\n",
+            );
+            await writeFile(
+                join(root, "lib/contracts.mts"),
+                [
+                    "/** Probes numeric values by echoing them back. */",
+                    "export interface Probe {",
+                    "    /** Echoes the supplied value back to the caller. */",
+                    "    measure(value: number): number;",
+                    "}",
+                    "",
+                    "/**",
+                    " * Measures the supplied value by returning it unchanged.",
+                    " *",
+                    " * @param value the value to measure; any number is accepted",
+                    " * @returns the same value that was supplied",
+                    " */",
+                    "export function measure(value: number): number {",
+                    "    return value;",
+                    "}",
+                    "",
+                ].join("\n"),
             );
 
             for (const args of [["--check-only", "--full"], ["--full"]]) {

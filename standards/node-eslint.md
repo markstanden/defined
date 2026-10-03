@@ -45,31 +45,48 @@ Deliberately narrow, so a pin bump cannot fail every consumer at once:
 
 ## The public-API documentation floor (2026-10-03)
 
-Exported functions and arrow functions, exported class properties, and
-interface members need a JSDoc block carrying a real summary; where an
-author documents a parameter or a returned value, the tag's description is
-mandatory and names must match the signature. Rules:
+Exported functions, arrow functions and function expressions, exported class
+members (methods, accessors and fields), and interface members need a JSDoc
+block carrying a real summary; where an author documents a parameter or a
+returned value, the tag's description is mandatory and names must match the
+signature. Rules:
 
 - `jsdoc/require-jsdoc` — `publicOnly: { cjs: true, esm: true }` with contexts
-  `FunctionDeclaration`, `ArrowFunctionExpression`, `PropertyDefinition`,
-  `TSMethodSignature`, `TSPropertySignature`, and `enableFixer: false`.
+  `FunctionDeclaration`, `ArrowFunctionExpression`, `FunctionExpression`,
+  `MethodDefinition`, `PropertyDefinition`, `TSMethodSignature`,
+  `TSPropertySignature`, and `enableFixer: false`.
   Oracle-verified on eslint-plugin-jsdoc 65.0.2 / ESLint 10.11.0 /
-  typescript-eslint 8.70.1: `publicOnly` covers `export`/`module.exports`
-  functions but NOT exported class members — the explicit
-  `PropertyDefinition` context makes exported fields and accessors
-  reportable while private fields and non-exported classes stay exempt.
-  Interface members are reported regardless of the interface's own export
-  marker (the plugin does not walk to the enclosing export); documented
-  shapes stay clean, so the practical cost is documenting the shape once;
+  typescript-eslint 8.70.1:
+    - `publicOnly` covers `export`/`module.exports` functions but NOT exported
+      class members — the explicit `MethodDefinition`/`PropertyDefinition`
+      contexts make exported members reportable while private (`private`, `#`)
+      members, non-exported classes and inline callbacks stay exempt;
+    - `FunctionExpression` must be listed or a DOCUMENTED class method still
+      reports as missing (the method's block only attaches through its
+      function-expression node); listing it does not double-report methods;
+    - interface members are reported regardless of the interface's own export
+      marker (the plugin does not walk to the enclosing export); documented
+      shapes stay clean, so the practical cost is documenting the shape once;
+- `jsdoc/check-param-names` (fixer off) — a recorded `@param` name must match
+  the signature, and a tag for a parameter that does not exist is a finding.
+  `require-param-name` alone does NOT catch this (2026-10-03 review: a
+  `@param typo` tag for `value` passed the floor). Destructured `root0`-style
+  docs are accepted as written;
 - `jsdoc/require-param-description`, `jsdoc/require-param-name` — a recorded
-  parameters tag must carry a description and a matching name;
+  parameter tag must carry a description;
 - `jsdoc/require-returns-description` — a recorded `@returns` must carry a
   description;
-- `jsdoc/require-description` with contexts
-  `ExportNamedDeclaration:not(Program)`, `ExportDefaultDeclaration`,
-  `PropertyDefinition`, `TSPropertySignature` — a bare `/** */` or
-  `/** silence */` block on an export is a finding; ordinary summaries are
-  not.
+- `jsdoc/require-description` — covers the declaration forms that require a
+  block (`ExportNamedDeclaration:not(Program)`,
+  `ExportDefaultDeclaration`, `MethodDefinition`, `PropertyDefinition`,
+  `TSMethodSignature`, `TSPropertySignature`): an empty or whitespace-only
+  block is a finding wherever a block is required. Ordinary summaries pass.
+
+What the floor deliberately does NOT catch: a non-empty junk summary
+(`/** silence */`) passes `require-description` everywhere — prose quality is
+review work, and no shipped rule separates a junk word from a real one.
+(`jsdoc/informative-docs` is the candidate if v2 wants this enforced; it
+needs a false-positive audit across consumers first.)
 
 Test files are exempt from the whole floor: a fixture firehose is not
 machinery a future consumer calls into.

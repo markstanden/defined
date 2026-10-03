@@ -85,16 +85,23 @@ const LINT_FILES = [
 
 // The JSDoc contexts the documentation floor cares about (see the oracle
 // notes in standards/node-eslint.md):
-// - exported function declarations and arrow functions (publicOnly: export
-//   tracking), plus exported class members via the explicit context;
+// - exported function declarations, arrow functions and function expressions
+//   (publicOnly export tracking — inline callbacks stay exempt);
+// - class members via `MethodDefinition` (methods and accessors) and
+//   `PropertyDefinition` (fields): `MethodDefinition` needs `FunctionExpression`
+//   also listed or a documented method's block does not attach;
 // - interface members: `TSMethodSignature`/`TSPropertySignature` are reported
 //   regardless of the interface's own export marker (the plugin does not walk
 //   to the enclosing export) — documented shapes stay clean, so the practical
 //   cost is documenting the shape once;
-// - `require-description`'s `ExportNamedDeclaration:not(Program)` context
-//   reports a bare `/** */` block on an export without flagging ordinary
-//   summaries.
-const FUNCTION_CONTEXTS = ["FunctionDeclaration", "ArrowFunctionExpression"];
+// - `require-description` covers the same declaration forms that require a
+//   block, so an EMPTY block is a finding everywhere a block is required
+//   (`ExportNamedDeclaration:not(Program)` spans the export-node cases).
+const FUNCTION_CONTEXTS = [
+    "FunctionDeclaration",
+    "ArrowFunctionExpression",
+    "FunctionExpression",
+];
 
 const JSDOC_RULES = {
     "jsdoc/require-jsdoc": [
@@ -103,6 +110,7 @@ const JSDOC_RULES = {
             publicOnly: { cjs: true, esm: true },
             contexts: [
                 ...FUNCTION_CONTEXTS,
+                "MethodDefinition",
                 "PropertyDefinition",
                 "TSMethodSignature",
                 "TSPropertySignature",
@@ -114,6 +122,10 @@ const JSDOC_RULES = {
             enableFixer: false,
         },
     ],
+    // A recorded @param name must match the signature — `require-param-name`
+    // only checks the tag HAS a name; stale or wrong names satisfy it.
+    // (2026-10-03 review: `@param typo` for `value` passed the floor.)
+    "jsdoc/check-param-names": ["error", { enableFixer: false }],
     "jsdoc/require-param-description": "error",
     "jsdoc/require-param-name": "error",
     "jsdoc/require-returns-description": "error",
@@ -123,7 +135,9 @@ const JSDOC_RULES = {
             contexts: [
                 "ExportNamedDeclaration:not(Program)",
                 "ExportDefaultDeclaration",
+                "MethodDefinition",
                 "PropertyDefinition",
+                "TSMethodSignature",
                 "TSPropertySignature",
             ],
         },

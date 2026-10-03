@@ -19,12 +19,21 @@ export function brokenFixtureFiles(): Record<string, string> {
         // node: unformatted JSON; prettier --write repairs.
         "package.json": '{ "name" :  "fixture" }\n',
 
-        // eslint: the super-linear-regex spelling from system-config's
+        // eslint offence 1: the super-linear-regex spelling from system-config's
         // lib/healthcheck.mts (Sonar typescript:S8786), fixed in its PR #62.
         // Not auto-fixable, so it stays red after comply like the workflow
         // finding; the regression proof that the house rule catches it.
         "lib/healthcheck.mts":
             "export const MARKDOWN_LINK = /\\[[^\\]]*\\]\\(([^)]*)\\)/g;\n",
+
+        // eslint offence 2 (2026-10-03): the public-API documentation floor.
+        // Undocumented exported function/class, an empty interface-method
+        // docblock, and a @param name that does not match the signature —
+        // one file covering the floor's three checks. None of it is
+        // auto-fixable (the jsdoc fixers are disabled), so eslint stays red
+        // after comply until the semantic repair supplies real prose.
+        "lib/contracts.mts":
+            "export interface Probe {\n    /** */\n    measure(value: number): number;\n}\n\nexport function measureAll(value: number): number {\n    return value;\n}\n\nexport const describe = function (value: number): string {\n    return String(value);\n};\n\nexport class Meter {\n    read(): number {\n        return 1;\n    }\n\n    /** Scales the value.\n     *\n     * @param multiplier the scaling factor\n     */\n    scale(value: number, factor: number): number {\n        return value * factor;\n    }\n}\n",
 
         // shell: shfmt-bad indentation; shfmt -w repairs.
         "script.sh": '#!/usr/bin/env bash\nif true; then\n  echo "hi"\nfi\n',
