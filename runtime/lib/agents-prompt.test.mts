@@ -84,8 +84,8 @@ test("the block preserves project content above and below on re-install", async 
         await writeFile(target, `${above}${template}${below}`);
         // A fresh template (simulating a gate update) must replace only the block.
         const updated = template.replace(
-            "Tighten the\nfloor",
-            "Tighten the\nfloor (updated)",
+            "Tighten the floor",
+            "Tighten the floor (updated)",
         );
         await writeMarkedBlock({ filePath: target, block: updated });
         const result = await readFile(target, "utf8");

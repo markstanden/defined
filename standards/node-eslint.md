@@ -37,7 +37,52 @@ Deliberately narrow, so a pin bump cannot fail every consumer at once:
   `"eslint": { "complexityMax": 12 }` raises it, `false` drops the rule; the
   step forwards the value to the baked config as
   `DEFINED_ESLINT_COMPLEXITY_MAX`;
+- the **public-API documentation floor** (2026-10-03): the `jsdoc/*` rules
+  below. Per-repo tunable: `"eslint": { "requireJsdoc": false }` drops the
+  floor (forwarded as `DEFINED_ESLINT_REQUIRE_JSDOC=off`); a repo-owned
+  config governs itself and sees neither variable;
 - `eslint-config-prettier` last, so ESLint never votes on formatting.
+
+## The public-API documentation floor (2026-10-03)
+
+Exported functions and arrow functions, exported class properties, and
+interface members need a JSDoc block; where a block exists, its `@param` /
+`@returns` entries need descriptions — a bare tag is no more useful to a
+caller than no block at all. Rules:
+
+- `jsdoc/require-jsdoc` — `publicOnly: { cjs: true, esm: true }` with contexts
+  `FunctionDeclaration`, `ArrowFunctionExpression`, `PropertyDefinition`,
+  `TSMethodSignature`, `TSPropertySignature`. Oracle-verified on
+  eslint-plugin-jsdoc 65.0.2 / ESLint 10.11.0 / typescript-eslint 8.70.1:
+  `publicOnly` covers `export`/`module.exports` functions but NOT exported
+  class members — the explicit `PropertyDefinition` context makes exported
+  fields and accessors reportable while private fields and non-exported
+  classes stay exempt. Interface members are reported regardless of the
+  interface's own export marker (the plugin does not walk to the enclosing
+  export); documented shapes stay clean, so the practical cost is documenting
+  the shape once;
+- `jsdoc/require-param`, `jsdoc/require-param-description`,
+  `jsdoc/require-param-name` — parameters are declared and described, and
+  names match the signature;
+- `jsdoc/require-returns`, `jsdoc/require-returns-description` — returned
+  values are described;
+- `jsdoc/require-description` with contexts
+  `ExportNamedDeclaration:not(Program)`, `ExportDefaultDeclaration`,
+  `PropertyDefinition`, `TSPropertySignature` — a bare `/** */` or
+  `/** silence */` block on an export is a finding; ordinary summaries are
+  not.
+
+Test files are exempt from the whole floor: a fixture firehose is not
+machinery a future consumer calls into.
+
+## What the floor cannot do
+
+A linter proves the sections exist and carry words. It cannot prove the words
+describe the real behaviour — that is review work. Never add a comment to
+satisfy the rule; document private helpers only when their behaviour needs
+explanation, and write `@param`/`@returns` text that a caller cannot guess
+from the signature (accepted ranges, null/empty behaviour, thrown failures).
+House doctrine lives in [`documentation.md`](documentation.md).
 
 ## Adding a rule (v1 → v2 growth plan)
 

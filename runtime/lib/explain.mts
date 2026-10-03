@@ -82,8 +82,8 @@ function house(
 
 /**
  * ESLint ownership: a repo-owned config wins (`consumer`), then an explicit
- * disable, then a house config tuned by `complexityMax` (`mixed`), else the
- * baked house config.
+ * disable, then a house config tuned by `complexityMax`/`requireJsdoc`
+ * (`mixed`), else the baked house config.
  */
 function eslintOwner(ctx: OwnerContext): Owner {
     if (ctx.consumerEslintConfigName !== undefined) {
@@ -92,8 +92,19 @@ function eslintOwner(ctx: OwnerContext): Owner {
     if (ctx.config.eslint?.disable === true) {
         return { side: "consumer", detail: ".defined.json eslint.disable" };
     }
-    if (ctx.config.eslint?.complexityMax !== undefined) {
-        return { side: "mixed", detail: ".defined.json eslint.complexityMax" };
+    const tuned = [
+        ...(ctx.config.eslint?.complexityMax !== undefined
+            ? ["eslint.complexityMax"]
+            : []),
+        ...(ctx.config.eslint?.requireJsdoc !== undefined
+            ? ["eslint.requireJsdoc"]
+            : []),
+    ];
+    if (tuned.length > 0) {
+        return {
+            side: "mixed",
+            detail: `.defined.json ${tuned.join(", ")}`,
+        };
     }
     return { side: "house", detail: "runtime/config/eslint.config.mjs" };
 }
@@ -143,7 +154,7 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
     },
     dotnet: {
         kind: "step",
-        docRel: null,
+        docRel: "documentation.md",
         notice: "runs dotnet format/build/test when .NET projects are detected",
         owner: (ctx) =>
             ctx.config.dotnet?.disable === true
@@ -232,6 +243,7 @@ const YAMLLINT_RULES = new Set([
 
 const SHELLCHECK_RE = /^SC\d{3,4}$/u;
 const REGEXP_RE = /^regexp\/.+$/u;
+const JSDOC_RE = /^jsdoc\/.+$/u;
 
 const RULE_ENTRIES: Record<string, TopicEntry> = {
     shellcheck: {
@@ -246,6 +258,7 @@ const RULE_ENTRIES: Record<string, TopicEntry> = {
     },
     complexity: { kind: "rule", docRel: "node-eslint.md", owner: eslintOwner },
     regexp: { kind: "rule", docRel: "node-eslint.md", owner: eslintOwner },
+    jsdoc: { kind: "rule", docRel: "node-eslint.md", owner: eslintOwner },
     "naming-convention": {
         kind: "rule",
         docRel: "naming/typescript.md",
@@ -273,6 +286,9 @@ function resolveTopic(
     if (REGEXP_RE.test(topic)) {
         return { topic, entry: RULE_ENTRIES.regexp! };
     }
+    if (JSDOC_RE.test(topic)) {
+        return { topic, entry: RULE_ENTRIES.jsdoc! };
+    }
     if (topic === "@typescript-eslint/naming-convention") {
         return { topic, entry: RULE_ENTRIES["naming-convention"]! };
     }
@@ -285,7 +301,8 @@ function unknownTopic(raw: string): Error {
         `unknown topic '${raw}' — known steps: ${STEP_IDS.join(", ")}; ` +
             "known rules: shellcheck SC<code>, yamllint rules " +
             "(line-length, document-start, truthy, comments, …), eslint " +
-            "complexity, regexp/<rule>, @typescript-eslint/naming-convention",
+            "complexity, regexp/<rule>, jsdoc/<rule>, " +
+            "@typescript-eslint/naming-convention",
     );
 }
 
