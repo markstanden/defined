@@ -46,26 +46,25 @@ Deliberately narrow, so a pin bump cannot fail every consumer at once:
 ## The public-API documentation floor (2026-10-03)
 
 Exported functions and arrow functions, exported class properties, and
-interface members need a JSDoc block; where a block exists, its `@param` /
-`@returns` entries need descriptions — a bare tag is no more useful to a
-caller than no block at all. Rules:
+interface members need a JSDoc block carrying a real summary; where an
+author documents a parameter or a returned value, the tag's description is
+mandatory and names must match the signature. Rules:
 
 - `jsdoc/require-jsdoc` — `publicOnly: { cjs: true, esm: true }` with contexts
   `FunctionDeclaration`, `ArrowFunctionExpression`, `PropertyDefinition`,
-  `TSMethodSignature`, `TSPropertySignature`. Oracle-verified on
-  eslint-plugin-jsdoc 65.0.2 / ESLint 10.11.0 / typescript-eslint 8.70.1:
-  `publicOnly` covers `export`/`module.exports` functions but NOT exported
-  class members — the explicit `PropertyDefinition` context makes exported
-  fields and accessors reportable while private fields and non-exported
-  classes stay exempt. Interface members are reported regardless of the
-  interface's own export marker (the plugin does not walk to the enclosing
-  export); documented shapes stay clean, so the practical cost is documenting
-  the shape once;
-- `jsdoc/require-param`, `jsdoc/require-param-description`,
-  `jsdoc/require-param-name` — parameters are declared and described, and
-  names match the signature;
-- `jsdoc/require-returns`, `jsdoc/require-returns-description` — returned
-  values are described;
+  `TSMethodSignature`, `TSPropertySignature`, and `enableFixer: false`.
+  Oracle-verified on eslint-plugin-jsdoc 65.0.2 / ESLint 10.11.0 /
+  typescript-eslint 8.70.1: `publicOnly` covers `export`/`module.exports`
+  functions but NOT exported class members — the explicit
+  `PropertyDefinition` context makes exported fields and accessors
+  reportable while private fields and non-exported classes stay exempt.
+  Interface members are reported regardless of the interface's own export
+  marker (the plugin does not walk to the enclosing export); documented
+  shapes stay clean, so the practical cost is documenting the shape once;
+- `jsdoc/require-param-description`, `jsdoc/require-param-name` — a recorded
+  parameters tag must carry a description and a matching name;
+- `jsdoc/require-returns-description` — a recorded `@returns` must carry a
+  description;
 - `jsdoc/require-description` with contexts
   `ExportNamedDeclaration:not(Program)`, `ExportDefaultDeclaration`,
   `PropertyDefinition`, `TSPropertySignature` — a bare `/** */` or
@@ -74,6 +73,24 @@ caller than no block at all. Rules:
 
 Test files are exempt from the whole floor: a fixture firehose is not
 machinery a future consumer calls into.
+
+Deliberately outside the floor: `jsdoc/require-param` and
+`jsdoc/require-returns` (tag-presence) are NOT enforced. In TypeScript, every
+options-object parameter needs `@param root0` boilerplate for each destructured
+member — hundreds of ceremonial tags across these modules and consumers (the
+2026-10-03 adoption audit priced this repo alone at ~500 entries). Summary +
+described-when-present tags is the v1 floor; the doctrine's "describe every
+parameter" stays a documentation and review standard. Revisit in v2 once
+repos converge.
+
+## The floor never manufactures docs
+
+Every rule that admits an auto-fixer runs with `enableFixer: false`
+(2026-10-03: with fixers on, comply's repair pass filled this repo's own
+tree with empty `@param root0` stubs that passed the check). A docblock must
+be written by a human or agent who read the code; a stub that exists to
+turn a check green is worse than no docblock, and the gate must not
+produce that path. A failing finding is resolved by writing the prose.
 
 ## What the floor cannot do
 

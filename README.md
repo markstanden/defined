@@ -277,9 +277,10 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     `false` drops the rule entirely.
 
     It also carries the public-API documentation floor: exported functions and
-    properties need a JSDoc block whose parameters and returns are described
-    (`jsdoc/require-*`; bare `@param count` tags are findings). Test files are
-    exempt, meaningfulness stays reviewer work (never write filler to pass the
+    properties need a JSDoc block with a real summary (`jsdoc/require-*`;
+    a bare `/** */` block is a finding), and any parameter/returns tag an
+    author records must carry a description. Test files are exempt,
+    meaningfulness stays reviewer work (never write filler to pass the
     linter), and a repo still building out its docs can drop the floor:
 
     ```jsonc

@@ -31,8 +31,9 @@ documentation checks. One question, one answer:
 ## How the gate enforces it
 
 - **TypeScript:** the ESLint step's `jsdoc/*` rules (house config; see
-  [`node-eslint.md`](node-eslint.md) for the rule list, oracle notes and the
-  `requireJsdoc` override).
+  [`node-eslint.md`](node-eslint.md) for the rule list, its deliberate
+  strength, oracle notes, the no-auto-fill guarantee and the `requireJsdoc`
+  override).
 - **C#:** `standards/Directory.Build.props` enables
   `GenerateDocumentationFile` without the `CS1591` suppression, so the
   compiler warns for every publicly visible member without a doc comment, and
