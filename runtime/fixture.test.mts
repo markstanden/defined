@@ -102,6 +102,21 @@ function isUnsuccessful(result: GateResult, check: string): boolean {
     return ["fail", "error", "blocked"].includes(result.results[check] ?? "");
 }
 
+// Deterministic, engine-free regression guard for #89: the tofu fixture must
+// stay provider-free. A provider declaration, a `provider` block or any
+// resource other than the core-only `terraform_data` makes `tofu init` fetch a
+// registry provider, and flaky egress then fails this e2e for a reason
+// unrelated to the change under test.
+test("the tofu fixture declares no provider and fetches nothing over the network", () => {
+    const mainTf = brokenFixtureFiles()["main.tf"] ?? "";
+    assert.match(mainTf, /resource "terraform_data"/u);
+    assert.doesNotMatch(
+        mainTf,
+        /required_providers|\bprovider\s+"|\bresource\s+"(?!terraform_data")/u,
+        "the tofu fixture must not declare a provider or a provider-backed resource (#89)",
+    );
+});
+
 test(
     "check-only fails read-only on broken code; comply repairs safe findings and stays red for check-only ones",
     { skip: !hasEngine() },
