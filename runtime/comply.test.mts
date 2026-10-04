@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+    acquireComplyLock,
     cancellableRunner,
     CONSUMER_RESOURCE,
     DEFAULT_CONCURRENCY,
@@ -19,6 +20,7 @@ import {
     STEP_IDS,
 } from "./comply.mts";
 import { STEP_IDS as EXPLAIN_STEP_IDS } from "./lib/explain.mts";
+import type { AcquireLockResult, LockInfo } from "./lib/lock.mts";
 import { failed, passed, type StepResult } from "./lib/step-result.mts";
 import type { GateResult } from "./lib/report.mts";
 import type { Timings } from "./lib/timings.mts";
@@ -904,4 +906,75 @@ test("resolveConcurrency_prefersOverrideThenEnvThenDefault", () => {
             process.env.DEFINED_CONCURRENCY = previous;
         }
     }
+});
+
+test("acquireComplyLock_busy_printsTheBusyResultAndExits", async () => {
+    const printed: string[] = [];
+    const exits: number[] = [];
+    const lock: LockInfo = {
+        pid: 99,
+        startedAt: "2026-10-04T00:00:00.000Z",
+        checkout: "/repo",
+        command: "comply",
+    };
+    const handle = await acquireComplyLock({
+        repoRoot: "/repo",
+        files: ["src/a.ts"],
+        deps: {
+            absoluteGitDirFn: async () => "/repo/.git",
+            acquireLockFn: () =>
+                ({
+                    kind: "busy",
+                    lock,
+                    newerThanRun: ["src/a.ts"],
+                }) satisfies AcquireLockResult,
+            printFn: (line) => printed.push(line),
+            exitFn: (code) => exits.push(code),
+        },
+    });
+
+    assert.equal(handle, undefined, "a contended run takes no handle");
+    assert.deepEqual(exits, [1], "busy is a non-zero exit, never green");
+    assert.deepEqual(JSON.parse(printed[0]!), {
+        status: "busy",
+        lock,
+        newerThanRun: ["src/a.ts"],
+    });
+});
+
+test("acquireComplyLock_acquired_returnsTheHandleAndDoesNotExit", async () => {
+    const printed: string[] = [];
+    const exits: number[] = [];
+    let released = 0;
+    const handle = await acquireComplyLock({
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            absoluteGitDirFn: async () => "/repo/.git",
+            acquireLockFn: () =>
+                ({
+                    kind: "acquired",
+                    handle: {
+                        path: "/repo/.git/defined.lock",
+                        info: {
+                            pid: 1,
+                            startedAt: "2026-10-04T00:00:00.000Z",
+                            checkout: "/repo",
+                            command: "comply",
+                        },
+                        release: () => {
+                            released += 1;
+                        },
+                    },
+                }) satisfies AcquireLockResult,
+            printFn: (line) => printed.push(line),
+            exitFn: (code) => exits.push(code),
+        },
+    });
+
+    assert.notEqual(handle, undefined);
+    handle?.release();
+    assert.equal(released, 1, "the caller releases the lock it was given");
+    assert.deepEqual(printed, []);
+    assert.deepEqual(exits, []);
 });

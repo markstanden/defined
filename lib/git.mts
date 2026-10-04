@@ -42,3 +42,29 @@ export async function trackedFiles({
         .split("\0")
         .filter((path) => path !== "" && existsSync(join(repoRoot, path)));
 }
+
+/**
+ * The absolute path of the checkout's git dir (`git rev-parse
+ * --absolute-git-dir`). For a linked worktree this is the per-worktree dir, so
+ * callers keying on it (e.g. the comply lock) keep independent worktrees
+ * independent. Throws when git itself fails, so a missing git dir is never
+ * mistaken for a valid path.
+ */
+export async function absoluteGitDir({
+    repoRoot,
+}: {
+    repoRoot: string;
+}): Promise<string> {
+    const result = await run({
+        cmd: "git",
+        args: ["rev-parse", "--absolute-git-dir"],
+        cwd: repoRoot,
+    });
+    if (result.status !== 0) {
+        const detail = (result.stderr || result.stdout).trim() || "no output";
+        throw new Error(
+            `git rev-parse --absolute-git-dir failed (exit ${result.status}): ${detail}`,
+        );
+    }
+    return result.stdout.trim();
+}

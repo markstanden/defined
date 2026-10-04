@@ -8,6 +8,7 @@ import {
     BOOTSTRAP_CHECK,
     buildResult,
     mergeRepairErrors,
+    renderBusyResult,
     renderResult,
 } from "./report.mts";
 import { blocked, errored, failed, passed, skipped } from "./step-result.mts";
@@ -290,5 +291,20 @@ test("mergeRepairErrors_addsARepairStepVerifyDidNotRun", () => {
             ["node", "pass"],
             ["shell", "error"],
         ],
+    );
+});
+
+test("renderBusyResult_isTheThirdStatusWithTheHolderAndStaleEdits", () => {
+    assert.equal(
+        renderBusyResult({
+            lock: {
+                pid: 99,
+                startedAt: "2026-10-04T00:00:00.000Z",
+                checkout: "/repo",
+                command: "comply",
+            },
+            newerThanRun: ["src/a.ts"],
+        }),
+        '{"status":"busy","lock":{"pid":99,"startedAt":"2026-10-04T00:00:00.000Z","checkout":"/repo","command":"comply"},"newerThanRun":["src/a.ts"]}',
     );
 });
