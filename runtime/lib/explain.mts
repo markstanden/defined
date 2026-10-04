@@ -43,7 +43,10 @@ export interface Explanation {
     doc: string | null;
     /** The doc's contents verbatim; null when the doc is absent. */
     guidance: string | null;
-    /** One-line summary; only for topics with no standards doc. */
+    /**
+     * One-line at-a-glance pointer: the sole guidance for a topic with no
+     * standards doc, shown alongside the doc otherwise.
+     */
     notice?: string;
 }
 
@@ -149,8 +152,8 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
     },
     "node-coverage": {
         kind: "step",
-        docRel: null,
-        notice: "coverage minimums are consumer-configured; see the README coverage section",
+        docRel: "coverage.md",
+        notice: "reads coverage/lcov.info; minimums are consumer-configured",
         owner: (ctx) =>
             ctx.config.coverage?.node !== undefined
                 ? { side: "consumer", detail: ".defined.json coverage.node" }
@@ -170,8 +173,8 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
     },
     "dotnet-coverage": {
         kind: "step",
-        docRel: null,
-        notice: "coverage minimums are consumer-configured; see the README coverage section",
+        docRel: "coverage.md",
+        notice: "reads coverage.cobertura.xml or TestResults/coverage.cobertura.xml; minimums are consumer-configured",
         owner: (ctx) =>
             ctx.config.coverage?.dotnet !== undefined
                 ? { side: "consumer", detail: ".defined.json coverage.dotnet" }
