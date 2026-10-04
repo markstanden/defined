@@ -49,11 +49,15 @@ export function brokenFixtureFiles(): Record<string, string> {
         ".github/workflows/fixture--build.yml":
             "name: CI\non: push\njobs:\n  build:\n    steps:\n      - run: echo hi\n",
 
-        // tofu: fmt drift (misaligned closing brace); tofu fmt repairs. Content is
-        // tflint-clean (required_version + required_providers present) so the
-        // tflint phase stays green and only the fmt offence gates.
+        // tofu: fmt drift (misaligned closing brace); tofu fmt repairs. The
+        // config is provider-free — core-only `terraform_data` and no
+        // `required_providers` — so `tofu init -backend=false` fetches nothing
+        // over the network (#89). tflint stays green: its
+        // `terraform_required_providers` rule only checks providers actually
+        // referenced, so an absent block is clean and only the fmt offence
+        // gates. Keep the e2e independent of registry egress.
         "main.tf":
-            'terraform {\n  required_version = ">= 1.0"\n  required_providers {\n    null = {\n      source  = "hashicorp/null"\n      version = "~> 3.0"\n    }\n  }\n}\n\nresource "null_resource" "probe" {\n   }\n',
+            'terraform {\n  required_version = ">= 1.0"\n}\n\nresource "terraform_data" "probe" {\n   }\n',
 
         // dotnet (2026-10-03): the CS1591 floor. A packageless classlib (no
         // NuGet sources needed) with an undocumented public static holder —
