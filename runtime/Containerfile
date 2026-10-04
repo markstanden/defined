@@ -135,9 +135,12 @@ RUN install -d -m 0777 \
         /home/node/.npm \
         /home/node/.nuget \
         /home/node/.nuget/packages \
+        /home/node/.cache \
+        /home/node/.cache/defined \
         /repo/node_modules
 ENV HOME=/home/node \
-    NUGET_PACKAGES=/home/node/.nuget/packages
+    NUGET_PACKAGES=/home/node/.nuget/packages \
+    DEFINED_CACHE_DIR=/home/node/.cache/defined
 USER node
 
 # Prove the cache mount points are writable by the run user. `install -d` only
@@ -148,6 +151,7 @@ USER node
 RUN test -w /home/node/.npm && \
     test -w /home/node/.nuget && \
     test -w /home/node/.nuget/packages && \
+    test -w /home/node/.cache/defined && \
     test -w /repo/node_modules
 
 WORKDIR /repo

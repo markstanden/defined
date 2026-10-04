@@ -632,6 +632,7 @@ main() {
             -v "defined-node-${pin}-${repo_hash}:/repo/node_modules"
             -v "defined-npm-${repo_hash}:/home/node/.npm"
             -v "defined-nuget-${repo_hash}:/home/node/.nuget/packages"
+            -v "defined-cache-${pin}-${repo_hash}:/home/node/.cache/defined"
             -e "NUGET_PACKAGES=/home/node/.nuget/packages"
         )
     fi

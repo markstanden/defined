@@ -495,6 +495,53 @@ test("runGate_withoutTimings_writesNoTimingLines", async () => {
     assert.deepEqual(notified, []);
 });
 
+test("runGate threads the cache dir into the no-fix pass", async () => {
+    const captured: { cacheDir?: string }[] = [];
+    await runGate({
+        verb: "verify",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            cacheDir: "/caches/defined",
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async ({ cacheDir }) => {
+                captured.push({ cacheDir });
+                return allGreen();
+            },
+            printFn: () => undefined,
+            exitFn: () => undefined,
+        },
+    });
+    assert.deepEqual(captured, [{ cacheDir: "/caches/defined" }]);
+});
+
+test("runGate passes the notify sink only under --timings", async () => {
+    const runVerifyWith = async (timings: boolean): Promise<boolean> => {
+        let received: ((line: string) => void) | undefined;
+        await runGate({
+            verb: "verify",
+            repoRoot: "/repo",
+            files: [],
+            timings,
+            deps: {
+                checkSetupFn: async () => cleanSetup(),
+                runPassFn: async ({ notify }) => {
+                    received = notify;
+                    return allGreen();
+                },
+                printFn: () => undefined,
+                notifyFn: () => undefined,
+                exitFn: () => undefined,
+            },
+        });
+        return received !== undefined;
+    };
+    // Without --timings the cache metrics must stay silent: no notify to steps.
+    assert.equal(await runVerifyWith(false), false);
+    // With --timings the sink reaches the steps.
+    assert.equal(await runVerifyWith(true), true);
+});
+
 test("runExplain_printsOneJsonObjectAndDoesNotExit", async () => {
     const printed: string[] = [];
     const exits: number[] = [];

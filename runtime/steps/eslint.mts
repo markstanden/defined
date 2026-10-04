@@ -38,11 +38,19 @@ import {
 } from "../lib/step-result.mts";
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
 import { run, type CommandResult } from "../../lib/proc.mts";
-import { gateConfigPath } from "../lib/config-path.mts";
+import { gateConfigPath, toolVersionsPath } from "../lib/config-path.mts";
 import { loadConfig, type DefinedConfig } from "../lib/config.mts";
 import { hasConsumerEslintConfig } from "../lib/eslint-config.mts";
 import { removeExample, writeExample } from "../lib/eslint-example.mts";
 import { runWithLocalBin } from "../lib/node-packages.mts";
+import {
+    createFileCache,
+    hashFile,
+    identityHash,
+    partitionByHash,
+    reportCacheMetric,
+    type FileCache,
+} from "../lib/cache.mts";
 
 export interface EslintRunContext {
     /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
@@ -51,6 +59,10 @@ export interface EslintRunContext {
     repoRoot: string;
     /** Shared scratch box (no-fix): one copy serves the write-capable steps. */
     scratch?: Scratch;
+    /** Content-cache root (#68); caching is off when absent. */
+    cacheDir?: string;
+    /** Opt-in metric sink (`--timings`); metrics are silent without it. */
+    notify?: (line: string) => void;
 }
 
 type Runner = typeof run;
@@ -262,6 +274,30 @@ function findingsToDiagnostics({
     }));
 }
 
+/**
+ * Group this run's diagnostics by repo-relative file path, so each file's
+ * verdict can be cached under its own content hash (#68). Keyed the same way
+ * as the step's file list; a file with no findings simply has no entry.
+ */
+function groupDiagnostics({
+    findings,
+    workingRoot,
+}: {
+    findings: Finding[];
+    workingRoot: string;
+}): Map<string, StepDiagnostic[]> {
+    const byFile = new Map<string, StepDiagnostic[]>();
+    for (const diagnostic of findingsToDiagnostics({ findings, workingRoot })) {
+        const existing = byFile.get(diagnostic.file ?? "");
+        if (existing === undefined) {
+            byFile.set(diagnostic.file ?? "", [diagnostic]);
+        } else {
+            existing.push(diagnostic);
+        }
+    }
+    return byFile;
+}
+
 /** First non-empty line of a result's output, for a one-line notice. */
 function firstLine({ result }: { result: CommandResult }): string {
     const text =
@@ -422,21 +458,208 @@ export async function runEslintStep({
             env,
         });
     }
-    const check = await invokeEslint({
+    // Verification: one authoritative lint, per-file cached where the house
+    // config lets it (#68).
+    return verifyEslint({
+        ctx,
         kind,
+        config,
         configPath,
         files,
-        fix: false,
         workingRoot,
         runner,
         env,
     });
-    if (check.status === 0) {
-        return passed({
-            notice: `eslint: ${files.length} file(s) clean (${KIND_LABEL[kind]})`,
+}
+
+/**
+ * The authoritative no-fix lint. With the house config unchanged files are
+ * served from the content cache and only misses reach eslint (#68); the merge
+ * is in file order so cached and uncached verdicts agree. Caching off (a
+ * repo-owned config, or no cache dir) falls back to one whole-scope lint.
+ */
+async function verifyEslint({
+    ctx,
+    kind,
+    config,
+    configPath,
+    files,
+    workingRoot,
+    runner,
+    env,
+}: {
+    ctx: EslintRunContext;
+    kind: ConfigKind;
+    config: DefinedConfig;
+    configPath: string;
+    files: string[];
+    workingRoot: string;
+    runner: Runner;
+    env?: NodeJS.ProcessEnv;
+}): Promise<StepResult> {
+    const cache = eslintFileCache({ ctx, kind, config });
+    if (cache === undefined) {
+        const check = await invokeEslint({
+            kind,
+            configPath,
+            files,
+            fix: false,
+            workingRoot,
+            runner,
+            env,
+        });
+        if (check.status === 0) {
+            return passed({
+                notice: `eslint: ${files.length} file(s) clean (${KIND_LABEL[kind]})`,
+            });
+        }
+        return lintFailure({ check, kind, workingRoot });
+    }
+
+    const { cached, missing, hashes } = partitionByHash<StepDiagnostic[]>({
+        paths: files,
+        workingRoot,
+        cache,
+    });
+    if (missing.length > 0) {
+        const check = await invokeEslint({
+            kind,
+            configPath,
+            files: missing,
+            fix: false,
+            workingRoot,
+            runner,
+            env,
+        });
+        const failure = collectFindings({
+            check,
+            kind,
+            workingRoot,
+            cache,
+            hashes,
+            missing,
+            verdicts: cached,
+        });
+        if (failure !== undefined) {
+            return failure;
+        }
+    }
+    cache.flush();
+    reportCacheMetric({ notify: ctx.notify, step: "eslint", cache });
+
+    const errors = files.flatMap((file) => cached.get(file) ?? []);
+    const counts = `${cache.hits} cached, ${missing.length} checked`;
+    if (errors.length > 0) {
+        return failed({
+            notice: `eslint: ${errors.length} finding(s) (${KIND_LABEL[kind]}; ${counts})`,
+            errors,
         });
     }
-    return lintFailure({ check, kind, workingRoot });
+    return passed({
+        notice: `eslint: ${files.length} file(s) clean (${KIND_LABEL[kind]}; ${counts})`,
+    });
+}
+
+/**
+ * Turn a partial lint run into per-file cache entries, returning a StepResult
+ * only when the run is not a per-file verdict — a config/parse crash, or exit 1
+ * with nothing parseable — in which case nothing is cached for the misses.
+ */
+function collectFindings({
+    check,
+    kind,
+    workingRoot,
+    cache,
+    hashes,
+    missing,
+    verdicts,
+}: {
+    check: CommandResult;
+    kind: ConfigKind;
+    workingRoot: string;
+    cache: FileCache<StepDiagnostic[]>;
+    hashes: Map<string, string>;
+    missing: string[];
+    verdicts: Map<string, StepDiagnostic[]>;
+}): StepResult | undefined {
+    if (check.status !== 0 && check.status !== 1) {
+        return lintFailure({ check, kind, workingRoot });
+    }
+    const findings =
+        check.status === 0 ? [] : parseFindings({ stdout: check.stdout });
+    if (check.status === 1 && findings.length === 0) {
+        return lintFailure({ check, kind, workingRoot });
+    }
+    const byFile = groupDiagnostics({ findings, workingRoot });
+    for (const file of missing) {
+        const hash = hashes.get(file);
+        if (hash === undefined) {
+            continue;
+        }
+        const diagnostics = byFile.get(file) ?? [];
+        cache.record({ path: file, hash }, diagnostics);
+        verdicts.set(file, diagnostics);
+    }
+    return undefined;
+}
+
+/**
+ * The house-config content cache for this pass, or undefined when caching is
+ * off (fix pass, or no cache dir) or the repo owns its config — a consumer
+ * config bypasses until its invalidation inputs are defined (#68).
+ */
+function eslintFileCache({
+    ctx,
+    kind,
+    config,
+}: {
+    ctx: EslintRunContext;
+    kind: ConfigKind;
+    config: DefinedConfig;
+}): FileCache<StepDiagnostic[]> | undefined {
+    if (
+        ctx.mode !== "no-fix" ||
+        ctx.cacheDir === undefined ||
+        kind !== "house"
+    ) {
+        return undefined;
+    }
+    return createFileCache<StepDiagnostic[]>({
+        dir: ctx.cacheDir,
+        step: "eslint",
+        identity: identityHash({
+            parts: {
+                step: "eslint",
+                tool: hashFile({ path: toolVersionsPath() }) ?? "unknown",
+                config:
+                    hashFile({
+                        path: gateConfigPath({ name: "eslint.config.mjs" }),
+                    }) ?? "unknown",
+                // The only .defined.json inputs the house config reads, as the
+                // same values it forwards: a change is a new identity.
+                complexity: complexityEnvValue(config),
+                requireJsdoc: jsdocEnvValue(config),
+            },
+        }),
+    });
+}
+
+/** Effective complexityMax as the house config sees it ("default" when unset). */
+function complexityEnvValue(config: DefinedConfig): string {
+    const max = config.eslint?.complexityMax;
+    if (max === undefined) {
+        return "default";
+    }
+    return max === false ? "off" : String(max);
+}
+
+/** Effective requireJsdoc as the house config sees it ("default" when unset). */
+function jsdocEnvValue(config: DefinedConfig): string {
+    const requireJsdoc = config.eslint?.requireJsdoc;
+    if (requireJsdoc === undefined) {
+        return "default";
+    }
+    return requireJsdoc ? "on" : "off";
 }
 
 /**

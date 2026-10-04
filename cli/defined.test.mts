@@ -422,9 +422,25 @@ test("mounts read-only with no cache volumes for explain", async () => {
         assert.ok(run, "explain must invoke the engine");
         assert.match(run!, new RegExp(`-v ${fixture.repo}:/repo:ro`));
         assert.doesNotMatch(run!, /defined-node-/, "explain writes nothing");
+        assert.doesNotMatch(run!, /defined-cache-/, "explain writes nothing");
         assert.ok(
             run!.endsWith(`${IMAGE_REPO}:abc12345 explain shell`),
             `the topic must reach the container, got: ${run}`,
+        );
+    });
+});
+
+test("mounts the content cache volume outside the read-only checkout", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const r = await runLauncher({ fixture, args: ["verify"] });
+        assert.equal(r.status, 0);
+        const run = r.log.find((line) => line.startsWith("run --rm"));
+        assert.ok(run, "verify must invoke the engine");
+        // Keyed by pin + repo: a pin change gets a fresh identity, and two
+        // checkouts of one repo share it. Outside /repo, so :ro verify can write.
+        assert.match(
+            run!,
+            /-v defined-cache-abc12345-[0-9a-f]{12}:\/home\/node\/\.cache\/defined( |$)/u,
         );
     });
 });

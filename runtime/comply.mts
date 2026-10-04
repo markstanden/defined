@@ -31,8 +31,10 @@ import {
     type StepMode,
     type Verb,
 } from "./lib/ctx.mts";
+import { homedir } from "node:os";
 import { trackedFiles, absoluteGitDir } from "../lib/git.mts";
 import { run } from "../lib/proc.mts";
+import { resolveCacheDir } from "./lib/cache.mts";
 import { checkSetup, runSetup } from "./setup.mts";
 import {
     buildResult,
@@ -107,6 +109,16 @@ interface StepInput {
      * `runner = run` default applies.
      */
     runner?: Runner;
+    /**
+     * Content-cache root (#68); caching is a no-fix-only optimisation, so this
+     * is only threaded into the verification pass. Steps ignore it when absent.
+     */
+    cacheDir?: string;
+    /**
+     * Opt-in metric sink (the `--timings` stderr channel). Steps report cache
+     * hit/miss counts here; undefined keeps them silent.
+     */
+    notify?: (line: string) => void;
 }
 
 interface Step {
@@ -171,9 +183,9 @@ const STEPS: Step[] = [
     {
         id: "node",
         needs: ["node-deps"],
-        run: ({ mode, repoRoot, files, scratch, runner }) =>
+        run: ({ mode, repoRoot, files, scratch, runner, cacheDir, notify }) =>
             runNodeStep({
-                ctx: { mode, repoRoot, scratch },
+                ctx: { mode, repoRoot, scratch, cacheDir, notify },
                 trackedFiles: files,
                 runner,
             }),
@@ -181,9 +193,9 @@ const STEPS: Step[] = [
     {
         id: "eslint",
         needs: ["node-deps"],
-        run: ({ mode, repoRoot, files, scratch, runner }) =>
+        run: ({ mode, repoRoot, files, scratch, runner, cacheDir, notify }) =>
             runEslintStep({
-                ctx: { mode, repoRoot, scratch },
+                ctx: { mode, repoRoot, scratch, cacheDir, notify },
                 trackedFiles: files,
                 runner,
             }),
@@ -640,6 +652,8 @@ export async function runPass({
     repoWritable = false,
     concurrency,
     signal,
+    cacheDir,
+    notify,
 }: {
     mode: StepMode;
     repoRoot: string;
@@ -653,6 +667,10 @@ export async function runPass({
     concurrency?: number;
     /** Cancels pending steps and kills running children (#70). */
     signal?: AbortSignal;
+    /** Content-cache root (#68); no-fix steps reuse per-file verdicts. */
+    cacheDir?: string;
+    /** Opt-in cache metric sink (`--timings`); silent without it. */
+    notify?: (line: string) => void;
 }): Promise<Map<string, StepResult>> {
     const results = initialiseResults(steps);
     const scratch: Scratch = { dir: null };
@@ -663,6 +681,8 @@ export async function runPass({
         scratch,
         repoWritable,
         runner: cancellableRunner({ signal }),
+        cacheDir,
+        notify,
     };
     try {
         if (mode === "fix") {
@@ -707,6 +727,8 @@ export interface RunGateDeps {
     runPassFn?: typeof runPass;
     /** Re-fetch git-tracked files after bootstrap (comply creates files). */
     trackedFilesFn?: typeof trackedFiles;
+    /** Content-cache root (#68); resolved from env/home when omitted. */
+    cacheDir?: string;
     /** Output sink. */
     printFn?: (line: string) => void;
     /** Stderr sink for opt-in timings (`--timings`). */
@@ -725,6 +747,8 @@ async function runComply({
     trackedFilesFn,
     timings,
     signal,
+    cacheDir,
+    notify,
 }: {
     repoRoot: string;
     files: string[];
@@ -734,6 +758,8 @@ async function runComply({
     trackedFilesFn: typeof trackedFiles;
     timings?: Timings;
     signal?: AbortSignal;
+    cacheDir?: string;
+    notify?: (line: string) => void;
 }): Promise<GateResult> {
     await measure(timings, "setup", () => runSetupFn({ startDir: repoRoot }));
     // Bootstrap writes .editorconfig, Directory.Build.props, .gitattributes,
@@ -765,6 +791,8 @@ async function runComply({
             timings,
             repoWritable: true,
             signal,
+            cacheDir,
+            notify,
         }),
     );
     // Report any gate-owned bootstrap artifact still out of line after setup
@@ -787,6 +815,8 @@ async function runVerify({
     runPassFn,
     timings,
     signal,
+    cacheDir,
+    notify,
 }: {
     repoRoot: string;
     files: string[];
@@ -794,12 +824,22 @@ async function runVerify({
     runPassFn: typeof runPass;
     timings?: Timings;
     signal?: AbortSignal;
+    cacheDir?: string;
+    notify?: (line: string) => void;
 }): Promise<GateResult> {
     const setup = await measure(timings, "setup check", () =>
         checkSetupFn({ startDir: repoRoot }),
     );
     const results = await measure(timings, "no-fix pass", () =>
-        runPassFn({ mode: "no-fix", repoRoot, files, timings, signal }),
+        runPassFn({
+            mode: "no-fix",
+            repoRoot,
+            files,
+            timings,
+            signal,
+            cacheDir,
+            notify,
+        }),
     );
     return buildResult({
         setup,
@@ -814,6 +854,7 @@ function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
         checkSetupFn = checkSetup,
         runPassFn = runPass,
         trackedFilesFn = trackedFiles,
+        cacheDir = resolveCacheDir({ env: process.env, home: homedir() }),
         printFn = (line) => console.log(line),
         notifyFn = (line) => process.stderr.write(`${line}\n`),
         exitFn = (code) => process.exit(code),
@@ -823,6 +864,7 @@ function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
         checkSetupFn,
         runPassFn,
         trackedFilesFn,
+        cacheDir,
         printFn,
         notifyFn,
         exitFn,
@@ -870,6 +912,9 @@ export async function runGate({
                   trackedFilesFn: resolved.trackedFilesFn,
                   timings: sink,
                   signal,
+                  cacheDir: resolved.cacheDir,
+                  // Cache metrics ride the same opt-in channel as timings (#68).
+                  notify: timings ? resolved.notifyFn : undefined,
               })
             : runVerify({
                   repoRoot,
@@ -878,6 +923,8 @@ export async function runGate({
                   runPassFn: resolved.runPassFn,
                   timings: sink,
                   signal,
+                  cacheDir: resolved.cacheDir,
+                  notify: timings ? resolved.notifyFn : undefined,
               }),
     );
     resolved.printFn(renderResult({ result, presentation }));

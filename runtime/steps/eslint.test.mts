@@ -550,3 +550,199 @@ test("prune leaves an exclude file without the entry untouched", async () => {
         "other\n",
     );
 });
+
+/**
+ * A fake eslint that emits a JSON report for the files in `findings`, keyed by
+ * repo-relative path, and records the file list each call was handed. Lets a
+ * test drive per-file cache hits and misses without a real binary.
+ */
+function lintRunner(findings: Map<string, number>): {
+    runner: typeof import("../../lib/proc.mts").run;
+    calls: string[][];
+} {
+    const calls: string[][] = [];
+    const runner = (async (options: { args: string[]; cwd?: string }) => {
+        // args: --config <cfg> --format json --no-warn-ignored <files...>
+        const files = options.args.slice(5);
+        calls.push(files);
+        const report = files
+            .filter((file) => findings.has(file))
+            .map((file) => ({
+                filePath: join(options.cwd ?? "", file),
+                messages: [
+                    {
+                        ruleId: "test/rule",
+                        severity: 2,
+                        line: findings.get(file),
+                    },
+                ],
+            }));
+        return {
+            status: report.length > 0 ? 1 : 0,
+            stdout: JSON.stringify(report),
+            stderr: "",
+            signal: null,
+            timedOut: false,
+            cancelled: false,
+            truncated: false,
+        };
+    }) as typeof import("../../lib/proc.mts").run;
+    return { runner, calls };
+}
+
+test("an unchanged scope is served from the eslint cache with no process", async () => {
+    const root = await makeTempDir("quality-eslint-cache-hit-");
+    await writeTree(root, {
+        "a.ts": "export const a = 1;\n",
+        "b.ts": "export const b = 2;\n",
+    });
+    const cacheDir = await makeTempDir("quality-eslint-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const notes: string[] = [];
+    const findings = new Map([
+        ["a.ts", 1],
+        ["b.ts", 2],
+    ]);
+
+    const first = lintRunner(findings);
+    const r1 = await runEslintStep({
+        ctx,
+        trackedFiles: ["a.ts", "b.ts"],
+        runner: first.runner,
+    });
+    assert.equal(r1.status, "fail");
+    assert.deepEqual(first.calls, [["a.ts", "b.ts"]]);
+
+    const second = lintRunner(findings);
+    const r2 = await runEslintStep({
+        ctx: { ...ctx, notify: (line) => notes.push(line) },
+        trackedFiles: ["a.ts", "b.ts"],
+        runner: second.runner,
+    });
+    assert.equal(r2.status, "fail");
+    assert.deepEqual(second.calls, [], "all files cached: no process");
+    assert.deepEqual(r2.errors, r1.errors);
+    assert.deepEqual(notes, ["defined: cache eslint hit=2 miss=0"]);
+});
+
+test("editing one file re-lints only that file", async () => {
+    const root = await makeTempDir("quality-eslint-cache-edit-");
+    await writeTree(root, {
+        "a.ts": "export const a = 1;\n",
+        "b.ts": "export const b = 2;\n",
+    });
+    const cacheDir = await makeTempDir("quality-eslint-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+
+    await runEslintStep({
+        ctx,
+        trackedFiles: ["a.ts", "b.ts"],
+        runner: lintRunner(new Map()).runner,
+    });
+
+    await writeFile(join(root, "a.ts"), "export const a = 11;\n");
+    const edited = lintRunner(new Map([["a.ts", 3]]));
+    const result = await runEslintStep({
+        ctx,
+        trackedFiles: ["a.ts", "b.ts"],
+        runner: edited.runner,
+    });
+    assert.equal(result.status, "fail");
+    assert.deepEqual(
+        edited.calls,
+        [["a.ts"]],
+        "only the edited file is re-run",
+    );
+    assert.deepEqual(
+        result.errors?.map((error) => error.file),
+        ["a.ts"],
+    );
+});
+
+test("a changed effective config invalidates every entry", async () => {
+    const root = await makeTempDir("quality-eslint-cache-ident-");
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "complexityMax": 12 } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const cacheDir = await makeTempDir("quality-eslint-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const trackedFiles = [".defined.json", "src/a.ts"];
+
+    await runEslintStep({
+        ctx,
+        trackedFiles,
+        runner: lintRunner(new Map()).runner,
+    });
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "complexityMax": 14 } }\n',
+    });
+    const changed = lintRunner(new Map());
+    await runEslintStep({ ctx, trackedFiles, runner: changed.runner });
+    assert.deepEqual(changed.calls, [["src/a.ts"]], "new identity: all miss");
+});
+
+test("a repo config bypasses the eslint cache", async () => {
+    const root = await makeTempDir("quality-eslint-cache-bypass-");
+    await writeTree(root, {
+        "eslint.config.mjs": "export default [];\n",
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const cacheDir = await makeTempDir("quality-eslint-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const notes: string[] = [];
+
+    for (let run = 0; run < 2; run += 1) {
+        const { runner, calls } = recordingRunner();
+        await runEslintStep({
+            ctx: { ...ctx, notify: (line) => notes.push(line) },
+            trackedFiles: ["eslint.config.mjs", "src/a.ts"],
+            runner,
+        });
+        assert.equal(calls.length, 1, "each run still spawns");
+    }
+    assert.deepEqual(notes, [], "no cache metric when bypassed");
+});
+
+test("cached and uncached eslint runs agree on the verdict", async () => {
+    const root = await makeTempDir("quality-eslint-cache-agree-");
+    await writeTree(root, {
+        "a.ts": "export const a = 1;\n",
+        "b.ts": "export const b = 2;\n",
+    });
+    const cacheDir = await makeTempDir("quality-eslint-cache-");
+    const findings = new Map([["a.ts", 5]]);
+
+    const cached = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root }, cacheDir },
+        trackedFiles: ["a.ts", "b.ts"],
+        runner: lintRunner(findings).runner,
+    });
+    const uncached = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
+        trackedFiles: ["a.ts", "b.ts"],
+        runner: lintRunner(findings).runner,
+    });
+    assert.equal(cached.status, uncached.status);
+    assert.deepEqual(cached.errors, uncached.errors);
+});
