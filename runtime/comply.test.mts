@@ -7,7 +7,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+    cancellableRunner,
+    CONSUMER_RESOURCE,
+    DEFAULT_CONCURRENCY,
     printUsage,
+    resolveConcurrency,
     runExplain,
     runGate,
     runPass,
@@ -19,6 +23,7 @@ import { failed, passed, type StepResult } from "./lib/step-result.mts";
 import type { GateResult } from "./lib/report.mts";
 import type { Timings } from "./lib/timings.mts";
 import type { SetupCheck } from "./setup.mts";
+import type { CommandResult } from "../lib/proc.mts";
 
 type PassResult = Map<string, StepResult>;
 
@@ -560,4 +565,343 @@ test("runSmoke probes /usr/bin/git in the container", async () => {
         files: [],
     });
     assert.equal(result.status, "pass");
+});
+
+// #70 — bounded concurrency, deterministic reports, resources and cancellation.
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((res) => {
+        resolve = res;
+    });
+    return { promise, resolve };
+}
+
+/** Yield enough microtasks for the scheduler to launch and settle work. */
+async function flushMicrotasks(): Promise<void> {
+    for (let i = 0; i < 8; i += 1) {
+        await Promise.resolve();
+    }
+}
+
+test("runPass_noFix_overlapsIndependentSteps", async () => {
+    const a = deferred<void>();
+    const b = deferred<void>();
+    const started: string[] = [];
+    const step = (id: string, gate: { promise: Promise<void> }) => ({
+        id,
+        run: async () => {
+            started.push(id);
+            await gate.promise;
+            return passed({});
+        },
+    });
+    const pass = runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        steps: [step("a", a), step("b", b)],
+        concurrency: 2,
+    });
+    assert.deepEqual(
+        [...started].sort(),
+        ["a", "b"],
+        "independent steps run together",
+    );
+    a.resolve();
+    b.resolve();
+    await pass;
+});
+
+test("runPass_noFix_serialisesStepsSharingAResource", async () => {
+    let active = 0;
+    let peak = 0;
+    const step = (id: string) => ({
+        id,
+        uses: [CONSUMER_RESOURCE],
+        run: async () => {
+            active += 1;
+            peak = Math.max(peak, active);
+            await flushMicrotasks();
+            active -= 1;
+            return passed({});
+        },
+    });
+    await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        steps: [step("a"), step("b"), step("c")],
+        concurrency: 4,
+    });
+    assert.equal(peak, 1, "resource holders never overlap");
+});
+
+test("runPass_noFix_neverExceedsTheConcurrencyBound", async () => {
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let peak = 0;
+    const steps = ["a", "b", "c", "d", "e"].map((id) => ({
+        id,
+        run: async () => {
+            active += 1;
+            peak = Math.max(peak, active);
+            await new Promise<void>((resolve) => releases.push(resolve));
+            active -= 1;
+            return passed({});
+        },
+    }));
+    const pass = runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        steps,
+        concurrency: 2,
+    });
+    assert.equal(active, 2, "two steps start at the bound");
+    for (let i = 0; i < steps.length; i += 1) {
+        assert.ok(active <= 2, `active ${active} exceeded the bound`);
+        releases.shift()?.();
+        await flushMicrotasks();
+    }
+    const results = await pass;
+    assert.equal(peak, 2);
+    assert.equal(
+        [...results.values()].every((r) => r.status === "pass"),
+        true,
+    );
+});
+
+test("runPass_noFix_blocksDependentsOfAFailedPrerequisite", async () => {
+    let dependentRan = false;
+    const results = await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        steps: [
+            {
+                id: "node-deps",
+                run: async () => failed({ notice: "install failed" }),
+            },
+            {
+                id: "node",
+                needs: ["node-deps"],
+                run: async () => {
+                    dependentRan = true;
+                    return passed({});
+                },
+            },
+        ],
+    });
+    assert.equal(results.get("node-deps")?.status, "fail");
+    assert.equal(results.get("node")?.status, "blocked");
+    assert.match(results.get("node")?.notice ?? "", /node-deps/u);
+    assert.equal(dependentRan, false, "a blocked step never runs");
+});
+
+test("runPass_noFix_keepsStepOrderRegardlessOfCompletionOrder", async () => {
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const pass = runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        concurrency: 2,
+        steps: [
+            {
+                id: "first",
+                run: async () => {
+                    await first.promise;
+                    return passed({});
+                },
+            },
+            {
+                id: "second",
+                run: async () => {
+                    await second.promise;
+                    return passed({});
+                },
+            },
+        ],
+    });
+    // Resolve the later step first: completion order is second, then first.
+    second.resolve();
+    await flushMicrotasks();
+    first.resolve();
+    const results = await pass;
+    assert.deepEqual([...results.keys()], ["first", "second"]);
+});
+
+test("runPass_noFix_emitsTimingsInStepOrder", async () => {
+    const labels: string[] = [];
+    const timings: Timings = { record: (label) => labels.push(label) };
+    const first = deferred<void>();
+    const second = deferred<void>();
+    const pass = runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        timings,
+        concurrency: 2,
+        steps: [
+            {
+                id: "first",
+                run: async () => {
+                    await first.promise;
+                    return passed({});
+                },
+            },
+            {
+                id: "second",
+                run: async () => {
+                    await second.promise;
+                    return passed({});
+                },
+            },
+        ],
+    });
+    second.resolve();
+    await flushMicrotasks();
+    first.resolve();
+    await pass;
+    assert.deepEqual(labels, ["no-fix/first", "no-fix/second"]);
+});
+
+test("runPass_fix_runsStepsSequentially", async () => {
+    let active = 0;
+    let peak = 0;
+    const steps = ["a", "b", "c"].map((id) => ({
+        id,
+        run: async () => {
+            active += 1;
+            peak = Math.max(peak, active);
+            await flushMicrotasks();
+            active -= 1;
+            return passed({});
+        },
+    }));
+    await runPass({
+        mode: "fix",
+        repoRoot: "/repo",
+        files: [],
+        steps,
+        concurrency: 4,
+    });
+    assert.equal(peak, 1, "repair never runs steps together");
+});
+
+test("runPass_noFix_signal_cancelsUnstartedSteps", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const touched: string[] = [];
+    const results = await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        signal: controller.signal,
+        concurrency: 1,
+        steps: [
+            {
+                id: "a",
+                run: async () => {
+                    touched.push("a");
+                    return passed({});
+                },
+            },
+            {
+                id: "b",
+                run: async () => {
+                    touched.push("b");
+                    return passed({});
+                },
+            },
+        ],
+    });
+    assert.deepEqual(touched, [], "no step starts after abort");
+    assert.equal(results.get("a")?.status, "error");
+    assert.match(results.get("a")?.notice ?? "", /cancelled/u);
+    assert.equal(results.get("b")?.status, "error");
+});
+
+test("runPass_noFix_signal_stopsLaunchingFurtherSteps", async () => {
+    const controller = new AbortController();
+    const firstDone = deferred<void>();
+    const started: string[] = [];
+    const pass = runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: [],
+        signal: controller.signal,
+        concurrency: 1,
+        steps: [
+            {
+                id: "a",
+                run: async () => {
+                    started.push("a");
+                    await firstDone.promise;
+                    return passed({});
+                },
+            },
+            {
+                id: "b",
+                run: async () => {
+                    started.push("b");
+                    return passed({});
+                },
+            },
+        ],
+    });
+    assert.deepEqual(started, ["a"], "only the first step starts at bound 1");
+    controller.abort();
+    firstDone.resolve();
+    const results = await pass;
+    assert.deepEqual(started, ["a"], "the pending step never starts");
+    assert.equal(results.get("a")?.status, "pass", "a running step completes");
+    assert.match(results.get("b")?.notice ?? "", /cancelled/u);
+});
+
+test("cancellableRunner_forwardsTheSignalToTheWrappedRunner", async () => {
+    const controller = new AbortController();
+    const seen: Array<AbortSignal | undefined> = [];
+    const fake = (async (options: {
+        signal?: AbortSignal;
+    }): Promise<CommandResult> => {
+        seen.push(options.signal);
+        return {
+            status: 0,
+            stdout: "",
+            stderr: "",
+            signal: null,
+            timedOut: false,
+            cancelled: false,
+            truncated: false,
+        };
+    }) as unknown as typeof import("../lib/proc.mts").run;
+    const runner = cancellableRunner({
+        runner: fake,
+        signal: controller.signal,
+    });
+    await runner({ cmd: "true" });
+    assert.equal(seen[0], controller.signal);
+});
+
+test("resolveConcurrency_prefersOverrideThenEnvThenDefault", () => {
+    const previous = process.env.DEFINED_CONCURRENCY;
+    try {
+        delete process.env.DEFINED_CONCURRENCY;
+        assert.equal(resolveConcurrency(), DEFAULT_CONCURRENCY);
+        process.env.DEFINED_CONCURRENCY = "7";
+        assert.equal(resolveConcurrency(), 7);
+        assert.equal(resolveConcurrency({ override: 2 }), 2);
+        process.env.DEFINED_CONCURRENCY = "0";
+        assert.equal(resolveConcurrency(), DEFAULT_CONCURRENCY);
+        process.env.DEFINED_CONCURRENCY = "nonsense";
+        assert.equal(resolveConcurrency(), DEFAULT_CONCURRENCY);
+    } finally {
+        if (previous === undefined) {
+            delete process.env.DEFINED_CONCURRENCY;
+        } else {
+            process.env.DEFINED_CONCURRENCY = previous;
+        }
+    }
 });
