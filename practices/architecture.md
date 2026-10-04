@@ -33,6 +33,11 @@ are enforced by the gate.
 - **One gate workflow**: `defined--verify.yml` is the sole consumer-facing gate
   workflow, installed as a managed file. Delivery actions live in the consumer's
   own pipelines.
+- **Plugin-free by default**: the gate bakes no ecosystem-specific plugins, and
+  its baked prettier config carries none at all. New capability arrives as
+  consumer-declared tasks in `.defined.json`, run _alongside_ the house steps, so
+  an extension never has to replace the floor. A real consumer need reopens a
+  bake deliberately; the default is to extend, not to bake.
 
 ## Structure
 
