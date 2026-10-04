@@ -127,7 +127,7 @@ test(
 
             // ---- check-only: non-zero, every ecosystem picked up, no writes ----
             const before = hashTree(root);
-            const checkOnly = run({
+            const checkOnly = await run({
                 cmd: gateShim(),
                 args: ["--check-only", "--full", "--timings"],
                 cwd: root,
@@ -182,7 +182,7 @@ test(
             assertTreeUntouched(root, before);
 
             // ---- comply: bootstraps, repairs, workflow stays red ----
-            const comply = run({
+            const comply = await run({
                 cmd: gateShim(),
                 args: ["--full"],
                 cwd: root,
@@ -242,7 +242,7 @@ test(
 
             // comply bootstraps managed files + repairs safe findings; workflow
             // stays red until a human/agent fixes the check-only finding.
-            const comply = run({
+            const comply = await run({
                 cmd: gateShim(),
                 args: ["--full"],
                 cwd: root,
@@ -332,7 +332,7 @@ test(
                 const label = args.includes("--check-only")
                     ? "--check-only"
                     : "comply";
-                const result = run({
+                const result = await run({
                     cmd: gateShim(),
                     args,
                     cwd: root,

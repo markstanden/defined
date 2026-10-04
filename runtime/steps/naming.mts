@@ -78,7 +78,7 @@ export function workflowNameViolations({
  * filename grammar and the rules command are verification, run once in the
  * authoritative no-fix pass. Returns skip when the consumer declared no autofix.
  */
-function runNamingRepair({
+async function runNamingRepair({
     ctx,
     naming,
     trackedFiles,
@@ -88,11 +88,11 @@ function runNamingRepair({
     naming: NamingConfig | undefined;
     trackedFiles: string[];
     runner: Runner;
-}): StepResult {
+}): Promise<StepResult> {
     if (naming?.fix === undefined) {
         return skipped({ notice: "naming: no consumer autofix declared" });
     }
-    const fix = runScopedCommand({
+    const fix = await runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
@@ -110,7 +110,7 @@ function runNamingRepair({
  * Run the consumer's rules check over the git scope, appending a failure line
  * when it breaks. Verification only.
  */
-function runConsumerRules({
+async function runConsumerRules({
     ctx,
     naming,
     trackedFiles,
@@ -122,8 +122,8 @@ function runConsumerRules({
     trackedFiles: string[];
     runner: Runner;
     failures: string[];
-}): void {
-    const check = runScopedCommand({
+}): Promise<void> {
+    const check = await runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
@@ -197,7 +197,7 @@ export async function runNamingStep({
             `${file}: filename must match <namespace>--<verb>[--<target>].yml`,
     );
     if (naming?.command !== undefined) {
-        runConsumerRules({
+        await runConsumerRules({
             ctx,
             naming,
             trackedFiles,

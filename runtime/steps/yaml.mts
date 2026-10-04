@@ -20,7 +20,7 @@ import {
     type StepDiagnostic,
     type StepResult,
 } from "../lib/step-result.mts";
-import { run } from "../../lib/proc.mts";
+import { run, failureDetail } from "../../lib/proc.mts";
 import { gateConfigPath } from "../lib/config-path.mts";
 
 export const YAML_EXTENSIONS = [".yml", ".yaml"] as const;
@@ -98,7 +98,7 @@ export async function runYamlStep({
     // -s makes warnings failures too: the same bar locally and in CI.
     // Config resolves from the gate's own directory (lib/paths.mts), never
     // the CWD — consumer repos have no runtime/ of their own.
-    const result = runner({
+    const result = await runner({
         cmd: "yamllint",
         args: [
             "-c",
@@ -113,9 +113,7 @@ export async function runYamlStep({
         const errors = parseYamllint({ stdout: result.stdout });
         if (errors.length === 0) {
             return failed({
-                notice: `yaml: yamllint failed: ${
-                    result.stderr.trim() || result.stdout.trim()
-                }`,
+                notice: `yaml: yamllint failed: ${failureDetail({ result })}`,
             });
         }
         return failed({

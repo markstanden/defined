@@ -33,7 +33,7 @@ async function makeRepo({
     const root = await mkdtemp(join(tmpdir(), "quality-git-"));
     tempDirs.push(root);
 
-    run({ cmd: "git", args: ["init", "-q"], cwd: root });
+    await run({ cmd: "git", args: ["init", "-q"], cwd: root });
     await writeFile(join(root, ".gitignore"), "*.ignored\n");
     for (const rel of [
         ".gitignore",
@@ -47,8 +47,8 @@ async function makeRepo({
         await writeFile(abs, "#!/usr/bin/env bash\n");
     }
     if (committed?.length) {
-        run({ cmd: "git", args: ["add", ...committed], cwd: root });
-        run({
+        await run({ cmd: "git", args: ["add", ...committed], cwd: root });
+        await run({
             cmd: "git",
             args: [
                 "-c",
@@ -69,10 +69,11 @@ async function makeRepo({
 
 test("trackedFiles lists tracked and untracked-but-not-ignored files", async () => {
     const root = await makeRepo({ committed: ["a.sh"], untracked: ["b.sh"] });
-    assert.deepEqual(
-        (await Promise.resolve(trackedFiles({ repoRoot: root }))).sort(),
-        [".gitignore", "a.sh", "b.sh"],
-    );
+    assert.deepEqual((await trackedFiles({ repoRoot: root })).sort(), [
+        ".gitignore",
+        "a.sh",
+        "b.sh",
+    ]);
 });
 
 test("trackedFiles excludes ignored and untracked-but-ignored files", async () => {
@@ -80,7 +81,7 @@ test("trackedFiles excludes ignored and untracked-but-ignored files", async () =
         committed: ["a.sh"],
         ignored: ["gen.ignored"],
     });
-    assert.deepEqual(trackedFiles({ repoRoot: root }).sort(), [
+    assert.deepEqual((await trackedFiles({ repoRoot: root })).sort(), [
         ".gitignore",
         "a.sh",
     ]);
@@ -91,7 +92,7 @@ test("trackedFiles drops deleted files and lists symlinks as themselves", async 
     await rm(join(root, "gone.sh"));
     await writeFile(join(root, "real.sh"), "x\n");
     await symlink(join(root, "real.sh"), join(root, "link.sh"));
-    run({ cmd: "git", args: ["add", "link.sh"], cwd: root });
+    await run({ cmd: "git", args: ["add", "link.sh"], cwd: root });
 
     const files = await trackedFiles({ repoRoot: root });
     assert.equal(files.includes("gone.sh"), false);
@@ -110,7 +111,7 @@ test("trackedFiles preserves spaces, quotes, tabs, unicode and newlines", async 
     for (const rel of tricky) {
         await writeFile(join(root, rel), "x\n");
     }
-    const files = trackedFiles({ repoRoot: root });
+    const files = await trackedFiles({ repoRoot: root });
     for (const rel of tricky) {
         assert.ok(
             files.includes(rel),
@@ -125,8 +126,8 @@ test("trackedFiles throws when the git inventory command fails", async () => {
     // fail loudly rather than treat the empty output as a clean scope.
     const dir = await mkdtemp(join(tmpdir(), "quality-notgit-"));
     tempDirs.push(dir);
-    assert.throws(
-        () => trackedFiles({ repoRoot: dir }),
+    await assert.rejects(
+        trackedFiles({ repoRoot: dir }),
         /git ls-files failed/u,
     );
 });

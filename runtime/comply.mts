@@ -20,8 +20,6 @@
 // dotnet-coverage → shell → smoke → yaml → workflow → tofu), strictly
 // sequentially.
 
-import { spawnSync } from "node:child_process";
-
 import {
     createRunContext,
     parseCommand,
@@ -29,6 +27,7 @@ import {
     type Verb,
 } from "./lib/ctx.mts";
 import { trackedFiles } from "../lib/git.mts";
+import { run } from "../lib/proc.mts";
 import { checkSetup, runSetup } from "./setup.mts";
 import {
     buildResult,
@@ -91,9 +90,7 @@ export async function runSmoke({ mode }: StepInput): Promise<StepResult> {
     if (mode === "fix") {
         return skipped({ notice: "smoke: deferred to verification" });
     }
-    const probe = spawnSync("/usr/bin/git", ["--version"], {
-        encoding: "utf8",
-    });
+    const probe = await run({ cmd: "/usr/bin/git", args: ["--version"] });
     if (probe.status !== 0) {
         return failed({ notice: "git not available in container" });
     }
@@ -295,7 +292,7 @@ async function runComply({
     // snapshot (taken in main()) cannot contain. Re-fetch so both passes
     // judge the repo as it exists after setup; otherwise the node step's
     // prettier file list never sees the gate's own seeded files.
-    const filesAfterSetup = trackedFilesFn({ repoRoot });
+    const filesAfterSetup = await trackedFilesFn({ repoRoot });
     const repair = await measure(timings, "fix pass", () =>
         runPassFn({
             mode: "fix",
@@ -309,7 +306,7 @@ async function runComply({
     // delete or rename files. Re-fetch so verification judges what is actually
     // on disk — a new file is checked, and a deleted path never reaches the
     // no-fix scratch copy, where copying a missing file would abort the pass.
-    const filesAfterRepair = trackedFilesFn({ repoRoot });
+    const filesAfterRepair = await trackedFilesFn({ repoRoot });
     const verify = await measure(timings, "no-fix pass", () =>
         runPassFn({
             mode: "no-fix",
@@ -498,7 +495,7 @@ async function main(): Promise<void> {
         await runExplain({ topic: parsed!.topic!, repoRoot: ctx.repoRoot });
         return;
     }
-    const files = trackedFiles({ repoRoot: ctx.repoRoot });
+    const files = await trackedFiles({ repoRoot: ctx.repoRoot });
     await runGate({
         verb: ctx.verb,
         repoRoot: ctx.repoRoot,

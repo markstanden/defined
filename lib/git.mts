@@ -22,8 +22,12 @@ import { run } from "./proc.mts";
  * working tree are excluded; symlinks appear as themselves. Throws when the
  * git inventory command itself fails.
  */
-export function trackedFiles({ repoRoot }: { repoRoot: string }): string[] {
-    const result = run({
+export async function trackedFiles({
+    repoRoot,
+}: {
+    repoRoot: string;
+}): Promise<string[]> {
+    const result = await run({
         cmd: "git",
         args: ["ls-files", "-co", "--exclude-standard", "--deduplicate", "-z"],
         cwd: repoRoot,

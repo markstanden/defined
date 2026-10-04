@@ -22,7 +22,7 @@
 import { cpSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { run, type CommandResult } from "../../lib/proc.mts";
+import { run, failureDetail, type CommandResult } from "../../lib/proc.mts";
 import { hasConsumerPrettierConfig } from "./prettier-config.mts";
 import { hasConsumerEslintConfig } from "./eslint-config.mts";
 
@@ -112,7 +112,7 @@ export function packageLabel(dir: string): string {
 }
 
 /** Run a shell command with the package's local binaries ahead of PATH. */
-export function runWithLocalBin({
+export async function runWithLocalBin({
     runner,
     packageDir,
     workingRoot,
@@ -122,7 +122,7 @@ export function runWithLocalBin({
     packageDir: string;
     workingRoot: string;
     command: string;
-}): CommandResult {
+}): Promise<CommandResult> {
     const binDirs = [
         join(packageDir, "node_modules", ".bin"),
         join(workingRoot, "node_modules", ".bin"),
@@ -140,12 +140,7 @@ export function runWithLocalBin({
 
 /** stdout first: test/build failures land there; stderr can be first-run noise. */
 export function detail(result: CommandResult): string {
-    return (
-        [result.stdout, result.stderr]
-            .map((stream) => stream.trim())
-            .filter((stream) => stream !== "")
-            .join("\n") || "no output"
-    );
+    return failureDetail({ result });
 }
 
 /**
@@ -309,7 +304,7 @@ type RestoreVerdict = "restored" | "reused" | "skipped";
  * install command with local binaries ahead of PATH. A `failure` string is a
  * finding; `skipped` without one is a legitimate no-op (install: false).
  */
-function restoreOnePackage({
+async function restoreOnePackage({
     pkg,
     dir,
     workingRoot,
@@ -325,7 +320,7 @@ function restoreOnePackage({
     existsSyncFn: Exists;
     warmRoot: string | undefined;
     copyFn: typeof cpSync;
-}): { verdict: RestoreVerdict; failure?: string } {
+}): Promise<{ verdict: RestoreVerdict; failure?: string }> {
     const label = packageLabel(dir);
     const packageDir = join(workingRoot, dir);
     if (!existsSyncFn(join(packageDir, "package.json"))) {
@@ -348,7 +343,7 @@ function restoreOnePackage({
     }
     const command =
         pkg.install ?? defaultInstall({ packageDir, exists: existsSyncFn });
-    const result = runWithLocalBin({
+    const result = await runWithLocalBin({
         runner,
         packageDir,
         workingRoot,
@@ -372,7 +367,7 @@ function restoreOnePackage({
  * and the number satisfied from the warm tree instead (`warmRoot`, #67 —
  * see reuseWarmTree).
  */
-export function restoreNodePackages({
+export async function restoreNodePackages({
     workingRoot,
     trackedFiles,
     packages,
@@ -389,7 +384,7 @@ export function restoreNodePackages({
     /** The root a previous pass restored into; enables warm reuse (#67). */
     warmRoot?: string;
     copyFn?: typeof cpSync;
-}): { failures: string[]; restored: number; reused: number } {
+}): Promise<{ failures: string[]; restored: number; reused: number }> {
     const failures: string[] = [];
     const seen = new Set<string>();
     let restored = 0;
@@ -408,7 +403,7 @@ export function restoreNodePackages({
             continue;
         }
         seen.add(resolved.dir);
-        const { verdict, failure } = restoreOnePackage({
+        const { verdict, failure } = await restoreOnePackage({
             pkg,
             dir: resolved.dir,
             workingRoot,

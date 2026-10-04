@@ -55,7 +55,7 @@ import {
     type StepResult,
 } from "../lib/step-result.mts";
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
-import { run } from "../../lib/proc.mts";
+import { run, failureDetail } from "../../lib/proc.mts";
 import { gateConfigPath } from "../lib/config-path.mts";
 import { filterPackageJsons } from "../lib/node-packages.mts";
 import { CONSUMER_PRETTIER_CONFIGS } from "../lib/prettier-config.mts";
@@ -255,14 +255,16 @@ export async function runNodeStep({
     // Repair (#65): mutate only. prettier --write rewrites the tree; the check
     // belongs to the single authoritative no-fix pass, never here.
     if (ctx.mode === "fix") {
-        const write = runner({
+        const write = await runner({
             cmd: "prettier",
             args: ["--write", ...sharedArgs, ...prettierFiles],
             cwd: workingRoot,
         });
         if (write.status !== 0) {
             return errored({
-                message: `node: prettier --write failed: ${write.stderr.trim()}`,
+                message: `node: prettier --write failed: ${failureDetail({
+                    result: write,
+                })}`,
             });
         }
         return passed({
@@ -271,7 +273,7 @@ export async function runNodeStep({
     }
 
     // Verification: prettier --check decides.
-    const check = runner({
+    const check = await runner({
         cmd: "prettier",
         args: ["--check", ...sharedArgs, ...prettierFiles],
         cwd: workingRoot,
@@ -280,9 +282,9 @@ export async function runNodeStep({
         const errors = parsePrettierFindings({ stdout: check.stdout });
         if (errors.length === 0) {
             return errored({
-                message: `node: prettier --check failed: ${
-                    check.stderr.trim() || check.stdout.trim()
-                }`,
+                message: `node: prettier --check failed: ${failureDetail({
+                    result: check,
+                })}`,
             });
         }
         return failed({

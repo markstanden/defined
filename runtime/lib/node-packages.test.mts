@@ -171,7 +171,7 @@ test("restoreNodePackages restores each distinct directory once", async () => {
     const root = await makeTempDir("quality-node-packages-");
     await writeTree(root, { "package.json": "{}\n" });
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: root,
         trackedFiles: ["package.json"],
         packages: [{ dir: "" }, { dir: "" }],
@@ -185,7 +185,7 @@ test("restoreNodePackages restores each distinct directory once", async () => {
 test("restoreNodePackages reports a missing manifest and installs nothing", async () => {
     const root = await makeTempDir("quality-node-packages-");
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: root,
         trackedFiles: ["package.json"],
         packages: [{ dir: "" }],
@@ -233,7 +233,7 @@ async function warmFixture({
 test("restoreNodePackages copies a matching warm tree instead of installing", async () => {
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "" }],
@@ -250,7 +250,7 @@ test("restoreNodePackages reinstalls when the warm lockfile differs", async () =
         lockfile: '{"lockfileVersion":3,"packages":{"stale":{}}}\n',
     });
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "" }],
@@ -264,7 +264,7 @@ test("restoreNodePackages reinstalls when the warm lockfile differs", async () =
 test("restoreNodePackages reinstalls when no warm tree exists", async () => {
     const { repo, scratch } = await warmFixture({ repoTree: false });
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "" }],
@@ -278,7 +278,7 @@ test("restoreNodePackages reinstalls when no warm tree exists", async () => {
 test("restoreNodePackages falls back to an install when the copy fails", async () => {
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "" }],
@@ -295,7 +295,7 @@ test("restoreNodePackages falls back to an install when the copy fails", async (
 test("restoreNodePackages never reuses a declared install command", async () => {
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "", install: "npm ci" }],
@@ -315,7 +315,7 @@ test("restoreNodePackages does not reuse the no-lockfile npm install fallback", 
     });
     await writeTree(scratch, { "package.json": MANIFEST });
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json"],
         packages: [{ dir: "" }],
@@ -334,7 +334,7 @@ test("restoreNodePackages skips the install when the working root is the warm ro
         "node_modules/.warm": "warm tree\n",
     });
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: repo,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "" }],
@@ -348,7 +348,7 @@ test("restoreNodePackages skips the install when the working root is the warm ro
 test("restoreNodePackages counts install:false as neither restored nor reused", async () => {
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
-    const result = restoreNodePackages({
+    const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "", install: false }],

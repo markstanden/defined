@@ -37,14 +37,22 @@ function reportWriterRunner({
     calls: string[][];
     lcov: string;
 }): typeof import("../../lib/proc.mts").run {
-    return (({ cmd, args, cwd }) => {
+    return (async ({ cmd, args, cwd }) => {
         calls.push([cmd, ...args, cwd ?? ""]);
         if (cmd === "sh") {
             const target = join(cwd!, "coverage/lcov.info");
             mkdirSync(dirname(target), { recursive: true });
             writeFileSync(target, lcov);
         }
-        return { status: 0, stdout: "", stderr: "" } satisfies CommandResult;
+        return {
+            status: 0,
+            stdout: "",
+            stderr: "",
+            signal: null,
+            timedOut: false,
+            cancelled: false,
+            truncated: false,
+        } satisfies CommandResult;
     }) as typeof import("../../lib/proc.mts").run;
 }
 
@@ -478,12 +486,16 @@ test("no-fix runs the coverage command in a scratch workspace, isolated from the
     const calls: string[][] = [];
     const scratch = { dir: null as string | null };
     try {
-        const runner = (({ cmd, args, cwd }) => {
+        const runner = (async ({ cmd, args, cwd }) => {
             calls.push([cmd, ...args, cwd ?? ""]);
             return {
                 status: 0,
                 stdout: "",
                 stderr: "",
+                signal: null,
+                timedOut: false,
+                cancelled: false,
+                truncated: false,
             } satisfies CommandResult;
         }) as typeof import("../../lib/proc.mts").run;
         const result = await runNodeCoverageStep({

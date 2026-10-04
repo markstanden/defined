@@ -57,7 +57,7 @@ type Runner = typeof run;
 type Exists = typeof existsSync;
 
 /** Run one check (or, in repair, only its fix); null when nothing failed. */
-function runCheck({
+async function runCheck({
     mode,
     check,
     packageDir,
@@ -71,14 +71,14 @@ function runCheck({
     workingRoot: string;
     runner: Runner;
     label: string;
-}): string | null {
+}): Promise<string | null> {
     // Repair (#65): run the per-check fix mutation only. The check itself runs
     // once in the authoritative no-fix verification pass.
     if (mode === "fix") {
         if (check.fix === undefined) {
             return null;
         }
-        const fixed = runWithLocalBin({
+        const fixed = await runWithLocalBin({
             runner,
             packageDir,
             workingRoot,
@@ -88,7 +88,7 @@ function runCheck({
             ? null
             : `${label}: fix "${check.name}" failed: ${detail(fixed)}`;
     }
-    const result = runWithLocalBin({
+    const result = await runWithLocalBin({
         runner,
         packageDir,
         workingRoot,
@@ -113,7 +113,7 @@ function satisfiedCheck({
 }
 
 /** Resolve and check one package; returns its failures and pass count. */
-function runPackage({
+async function runPackage({
     mode,
     pkg,
     workingRoot,
@@ -130,7 +130,7 @@ function runPackage({
     existsSyncFn: Exists;
     /** A `coverage.satisfies` entry whose check this package must skip. */
     satisfied?: { dir: string; check: string };
-}): { failures: string[]; ran: number } {
+}): Promise<{ failures: string[]; ran: number }> {
     const resolved = resolvePackageDir({ files: trackedFiles, dir: pkg.dir });
     if ("error" in resolved) {
         return { failures: [resolved.error], ran: 0 };
@@ -154,7 +154,7 @@ function runPackage({
         if (check.name === skipCheck) {
             continue;
         }
-        const failure = runCheck({
+        const failure = await runCheck({
             mode,
             check,
             packageDir,
@@ -209,7 +209,7 @@ export async function runNodeChecksStep({
     const failures: string[] = [];
     let ran = 0;
     for (const pkg of packages) {
-        const outcome = runPackage({
+        const outcome = await runPackage({
             mode: ctx.mode,
             pkg,
             workingRoot,

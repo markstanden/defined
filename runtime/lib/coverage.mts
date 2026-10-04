@@ -10,7 +10,7 @@
 // do with the result.
 
 import { resolveWorkingRoot, type Scratch } from "./scratch.mts";
-import { run } from "../../lib/proc.mts";
+import { run, failureDetail } from "../../lib/proc.mts";
 
 type Runner = typeof run;
 
@@ -29,7 +29,7 @@ export interface ScopedCommandOutcome {
  * caller reads generated artifacts from the same place) and the failure detail
  * when the command exits non-zero.
  */
-export function runScopedCommand({
+export async function runScopedCommand({
     mode,
     repoRoot,
     scratch,
@@ -46,7 +46,7 @@ export function runScopedCommand({
     runner: Runner;
     /** Work in the repo even in no-fix (a write-capable invocation). */
     repoWritable?: boolean;
-}): ScopedCommandOutcome {
+}): Promise<ScopedCommandOutcome> {
     const workingRoot = resolveWorkingRoot({
         mode,
         repoRoot,
@@ -55,21 +55,13 @@ export function runScopedCommand({
         repoWritable,
     });
 
-    const result = runner({
+    const result = await runner({
         cmd: "sh",
         args: ["-c", command],
         cwd: workingRoot,
     });
     if (result.status !== 0) {
-        // Show stdout first: test/build failures land there, while a stray
-        // first-run banner or noise lands on stderr — stderr-first masks the
-        // real failure.
-        const detail = [result.stdout, result.stderr]
-            .filter((s) => typeof s === "string")
-            .map((s) => s.trim())
-            .filter((s) => s !== "")
-            .join("\n");
-        return { workingRoot, failure: detail || "no output" };
+        return { workingRoot, failure: failureDetail({ result }) };
     }
 
     return { workingRoot, failure: null };

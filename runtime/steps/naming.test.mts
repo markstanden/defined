@@ -28,7 +28,7 @@ function recordingRunner(
     calls: RunInput[];
 } {
     const calls: RunInput[] = [];
-    const runner = ((input: RunInput) => {
+    const runner = (async (input: RunInput) => {
         calls.push(input);
         const command = input.args[1] ?? input.cmd;
         const outcome = outcomes[command] ?? { status: 0 };
@@ -36,6 +36,10 @@ function recordingRunner(
             status: outcome.status,
             stdout: outcome.out ?? "",
             stderr: "",
+            signal: null,
+            timedOut: false,
+            cancelled: false,
+            truncated: false,
         } satisfies CommandResult;
     }) as typeof import("../../lib/proc.mts").run;
     return { runner, calls };
