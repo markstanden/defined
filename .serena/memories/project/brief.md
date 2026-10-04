@@ -58,9 +58,9 @@ explain` serves `standards/` docs verbatim.
   once stranded the #75 lock, so the very next run reported `busy`. See
   `mem:runtime/comply-checkout-lock`.
 - `pr-flow`'s `pr-prep.sh post-merge` counts a `skipped` run as a failing
-  conclusion, so `Defined Gate` (skipped by design on this repo) turns the
-  post-merge verdict red. Expected here, not a regression — see
-  `mem:runtime/managed-workflow-self-audit`.
+  conclusion — a trap for any workflow that legitimately skips. `Defined Gate`
+  no longer trips it: on this repo the job runs a host-repo validation step and
+  concludes `success`. See `mem:runtime/managed-workflow-self-audit`.
 
 ## Open problem
 
@@ -76,8 +76,9 @@ as PR #96 (`e2de0f1`). Deep dives below.
   reports (#70): docs/runtime/bounded-concurrency.md
 - `mem:runtime/comply-checkout-lock` — the per-checkout comply lock (#75):
   docs/runtime/comply-checkout-lock.md
-- `mem:runtime/managed-workflow-self-audit` — why this repo keeps its skipped
-  managed workflow: docs/runtime/managed-workflow-self-audit.md
+- `mem:runtime/managed-workflow-self-audit` — why this repo keeps its managed
+  workflow (and how the host-repo step made it green):
+  docs/runtime/managed-workflow-self-audit.md
 - `mem:plans/public-api-docblock-floor` — public-API docblock floor:
   docs/plans/public-api-docblock-floor.md
 - `mem:plans/explain-coverage-doc` — explain coverage-path doc + tofu fixture
