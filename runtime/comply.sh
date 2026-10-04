@@ -95,6 +95,7 @@ exec "${ENGINE}" run --rm \
     -v "defined-node-${PINHASH}-${REPO_HASH}:/repo/node_modules" \
     -v "defined-npm-${REPO_HASH}:/home/node/.npm" \
     -v "defined-nuget-${REPO_HASH}:/home/node/.nuget/packages" \
+    -v "defined-cache-${PINHASH}-${REPO_HASH}:/home/node/.cache/defined" \
     -e "NUGET_PACKAGES=/home/node/.nuget/packages" \
     --workdir /repo \
     "${IMAGE}" "${VERB}" "$@"

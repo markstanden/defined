@@ -6,7 +6,7 @@ verification is the gate's own suite plus the self-host gate.
 
 ## Verified commands
 
-- `node --test` — full unit suite; 475 pass on 2026-10-04 (465 before #75;
+- `node --test` — full unit suite; 500 pass on 2026-10-04 (475 before #68;
   fixture e2e inside it skips cleanly without podman).
 - `node --test runtime/fixture.test.mts` — the real-container e2e: builds/drives
   the gate image over a generated broken repo; needs podman or docker. Runs the
@@ -34,6 +34,9 @@ explain` serves `standards/` docs verbatim.
 
 ## Traps
 
+- The gate's own eslint enforces cyclomatic complexity ≤ 10: a step function
+  over that fails the gate. Extract helpers (e.g. #68's `partitionByHash` +
+  `verifyNode`/`verifyEslint`) rather than adding branches in place.
 - ESLint flat config silently ignores files outside the eslint process CWD's
   base path: running the house config from a foreign cwd returns `[]` with
   rc 0 and no diagnostics. Always set cwd to the repo root. (Bit the docblock
@@ -64,14 +67,18 @@ explain` serves `standards/` docs verbatim.
 
 ## Open problem
 
-None at present. The ordered issues-attack stands at #69/#70/#75 done, #68 open
-— tracked in `docs/plans/PLAN_issues-attack.md`; #75 (per-checkout lock) merged
-as PR #96 (`e2de0f1`). Deep dives below.
+All fifteen roadmap issues are addressed. #68 (content caches) is committed on
+`add-content-format-lint-caches` (@ `20c73b1`) and awaits a PR/merge; the branch
+also carries the managed-workflow doc capture (`0395bfc`). Next agent: open the
+PR and run the gates — see `mem:runtime/content-caches` and
+`docs/plans/PLAN_issues-attack.md`. Deep dives below.
 
 ## Deep dives
 
 - `mem:runtime/async-process-runner` — the async process runner (#69):
   docs/runtime/async-process-runner.md
+- `mem:runtime/content-caches` — per-file prettier/eslint verdict caches (#68):
+  docs/runtime/content-caches.md
 - `mem:runtime/bounded-concurrency` — bounded concurrency + deterministic
   reports (#70): docs/runtime/bounded-concurrency.md
 - `mem:runtime/comply-checkout-lock` — the per-checkout comply lock (#75):

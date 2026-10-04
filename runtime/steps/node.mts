@@ -56,9 +56,20 @@ import {
 } from "../lib/step-result.mts";
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
 import { run, failureDetail } from "../../lib/proc.mts";
-import { gateConfigPath } from "../lib/config-path.mts";
+import { gateConfigPath, toolVersionsPath } from "../lib/config-path.mts";
 import { filterPackageJsons } from "../lib/node-packages.mts";
-import { CONSUMER_PRETTIER_CONFIGS } from "../lib/prettier-config.mts";
+import {
+    CONSUMER_PRETTIER_CONFIGS,
+    hasConsumerPrettierConfig,
+} from "../lib/prettier-config.mts";
+import {
+    createFileCache,
+    hashFile,
+    identityHash,
+    partitionByHash,
+    reportCacheMetric,
+    type FileCache,
+} from "../lib/cache.mts";
 
 export interface NodeRunContext {
     /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
@@ -67,6 +78,10 @@ export interface NodeRunContext {
     repoRoot: string;
     /** Shared scratch box (no-fix): the same copy node-deps restored into. */
     scratch?: Scratch;
+    /** Content-cache root (#68); caching is off when absent. */
+    cacheDir?: string;
+    /** Opt-in metric sink (`--timings`); metrics are silent without it. */
+    notify?: (line: string) => void;
 }
 
 type Runner = typeof run;
@@ -272,28 +287,237 @@ export async function runNodeStep({
         });
     }
 
-    // Verification: prettier --check decides.
-    const check = await runner({
-        cmd: "prettier",
-        args: ["--check", ...sharedArgs, ...prettierFiles],
-        cwd: workingRoot,
+    // Verification: prettier --check decides, via the content cache where the
+    // house config lets per-file reuse (#68).
+    return verifyNode({
+        ctx,
+        prettierFiles,
+        sharedArgs,
+        workingRoot,
+        trackedFiles,
+        runner,
+        summary: `${manifests.length} package(s), ${markdownFiles.length} md, ${prettierFiles.length} parseable`,
     });
-    if (check.status !== 0) {
-        const errors = parsePrettierFindings({ stdout: check.stdout });
-        if (errors.length === 0) {
-            return errored({
-                message: `node: prettier --check failed: ${failureDetail({
-                    result: check,
-                })}`,
-            });
-        }
-        return failed({
-            notice: `node: prettier found ${errors.length} unformatted file(s)`,
-            errors,
+}
+
+/**
+ * The authoritative no-fix prettier check. With the house config unchanged
+ * files are served from the content cache and only misses reach prettier (#68);
+ * the merge is in scope order so cached and uncached verdicts agree. Caching
+ * off (a consumer config, or no cache dir) falls back to one whole-scope check.
+ */
+async function verifyNode({
+    ctx,
+    prettierFiles,
+    sharedArgs,
+    workingRoot,
+    trackedFiles,
+    runner,
+    summary,
+}: {
+    ctx: NodeRunContext;
+    prettierFiles: string[];
+    sharedArgs: string[];
+    workingRoot: string;
+    trackedFiles: string[];
+    runner: Runner;
+    /** Human counts for the notice: "N package(s), M md, K parseable". */
+    summary: string;
+}): Promise<StepResult> {
+    const cache = nodeFileCache({ ctx, trackedFiles, workingRoot });
+    if (cache === undefined) {
+        return runPrettierCheck({
+            files: prettierFiles,
+            sharedArgs,
+            workingRoot,
+            runner,
+            summary,
         });
     }
 
-    return passed({
-        notice: `node: tree formatted (${manifests.length} package(s), ${markdownFiles.length} md, ${prettierFiles.length} parseable)`,
+    const { cached, missing, hashes } = partitionByHash<boolean>({
+        paths: prettierFiles,
+        workingRoot,
+        cache,
     });
+    const dirty = new Set<string>();
+    for (const [file, clean] of cached) {
+        if (!clean) {
+            dirty.add(file);
+        }
+    }
+    const outcome = await checkPrettier({
+        files: missing,
+        sharedArgs,
+        workingRoot,
+        runner,
+    });
+    if ("error" in outcome) {
+        return errored({ message: outcome.error });
+    }
+    for (const finding of outcome.findings) {
+        dirty.add(finding.file ?? "");
+    }
+    for (const file of missing) {
+        const hash = hashes.get(file);
+        if (hash !== undefined) {
+            cache.record({ path: file, hash }, !dirty.has(file));
+        }
+    }
+    cache.flush();
+    reportCacheMetric({ notify: ctx.notify, step: "node", cache });
+
+    const errors = prettierFiles
+        .filter((file) => dirty.has(file))
+        .map((file) => ({
+            kind: "finding" as const,
+            file,
+            message: "unformatted (run prettier --write)",
+        }));
+    const counts = `${cache.hits} cached, ${missing.length} checked`;
+    if (errors.length > 0) {
+        return failed({
+            notice: `node: prettier found ${errors.length} unformatted file(s) (${counts})`,
+            errors,
+        });
+    }
+    return passed({ notice: `node: tree formatted (${summary}; ${counts})` });
+}
+
+/** A whole-scope (uncached) prettier --check and its result. */
+async function runPrettierCheck({
+    files,
+    sharedArgs,
+    workingRoot,
+    runner,
+    summary,
+}: {
+    files: string[];
+    sharedArgs: string[];
+    workingRoot: string;
+    runner: Runner;
+    summary: string;
+}): Promise<StepResult> {
+    const outcome = await checkPrettier({
+        files,
+        sharedArgs,
+        workingRoot,
+        runner,
+    });
+    if ("error" in outcome) {
+        return errored({ message: outcome.error });
+    }
+    if (outcome.findings.length > 0) {
+        return failed({
+            notice: `node: prettier found ${outcome.findings.length} unformatted file(s)`,
+            errors: outcome.findings,
+        });
+    }
+    return passed({ notice: `node: tree formatted (${summary})` });
+}
+
+/**
+ * Run prettier --check over `files` and return the parsed per-file findings, or
+ * an execution error. An empty list short-circuits: the all-cached run spawns
+ * no process.
+ */
+async function checkPrettier({
+    files,
+    sharedArgs,
+    workingRoot,
+    runner,
+}: {
+    files: string[];
+    sharedArgs: string[];
+    workingRoot: string;
+    runner: Runner;
+}): Promise<{ findings: StepDiagnostic[] } | { error: string }> {
+    if (files.length === 0) {
+        return { findings: [] };
+    }
+    const check = await runner({
+        cmd: "prettier",
+        args: ["--check", ...sharedArgs, ...files],
+        cwd: workingRoot,
+    });
+    if (check.status === 0) {
+        return { findings: [] };
+    }
+    const findings = parsePrettierFindings({ stdout: check.stdout });
+    if (findings.length === 0) {
+        return {
+            error: `node: prettier --check failed: ${failureDetail({
+                result: check,
+            })}`,
+        };
+    }
+    return { findings };
+}
+
+/**
+ * The house-config content cache for this pass, or undefined when caching is
+ * off (fix pass, or no cache dir) or a consumer-owned prettier config makes the
+ * tool's identity arbitrary — consumer configs bypass until their invalidation
+ * inputs are defined (#68).
+ */
+function nodeFileCache({
+    ctx,
+    trackedFiles,
+    workingRoot,
+}: {
+    ctx: NodeRunContext;
+    trackedFiles: string[];
+    workingRoot: string;
+}): FileCache<boolean> | undefined {
+    if (ctx.mode !== "no-fix" || ctx.cacheDir === undefined) {
+        return undefined;
+    }
+    if (hasConsumerPrettierConfig({ files: trackedFiles })) {
+        return undefined;
+    }
+    return createFileCache<boolean>({
+        dir: ctx.cacheDir,
+        step: "node",
+        identity: identityHash({
+            parts: prettierIdentityParts({ trackedFiles, workingRoot }),
+        }),
+    });
+}
+
+/**
+ * Every input that can change prettier's per-file verdict: the pinned tool and
+ * house config, the ignore policy (travelling plus a consumer .prettierignore),
+ * and every tracked .editorconfig (prettier reads them natively and they
+ * override --config).
+ */
+function prettierIdentityParts({
+    trackedFiles,
+    workingRoot,
+}: {
+    trackedFiles: string[];
+    workingRoot: string;
+}): Record<string, string> {
+    const parts: Record<string, string> = {
+        step: "prettier",
+        tool: hashFile({ path: toolVersionsPath() }) ?? "unknown",
+        config:
+            hashFile({
+                path: gateConfigPath({ name: "prettier.config.mjs" }),
+            }) ?? "unknown",
+        ignore:
+            hashFile({ path: gateConfigPath({ name: "prettierignore" }) }) ??
+            "unknown",
+    };
+    if (trackedFiles.includes(".prettierignore")) {
+        parts["ignore-repo"] =
+            hashFile({ path: join(workingRoot, ".prettierignore") }) ??
+            "missing";
+    }
+    for (const file of trackedFiles) {
+        if (file.split("/").pop() === ".editorconfig") {
+            parts[`editorconfig:${file}`] =
+                hashFile({ path: join(workingRoot, file) }) ?? "missing";
+        }
+    }
+    return parts;
 }

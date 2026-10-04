@@ -290,3 +290,194 @@ test("a consumer-owned prettier config replaces the travelling default", async (
         cleanupScratch(scratch);
     }
 });
+
+/**
+ * A fake prettier that reports exactly the files in `dirty` as unformatted and
+ * records the file list it was handed each call. Lets a test drive per-file
+ * cache hits without a real binary.
+ */
+function checkedRunner(dirty: Set<string>): {
+    runner: typeof import("../../lib/proc.mts").run;
+    calls: string[][];
+} {
+    const calls: string[][] = [];
+    const runner = (async ({ args }: { args: string[] }) => {
+        // args: --check --config <cfg> --ignore-path <ig> <files...>
+        const files = args.slice(5);
+        calls.push(files);
+        const flagged = files.filter((file) => dirty.has(file));
+        return {
+            status: flagged.length > 0 ? 1 : 0,
+            stdout: flagged.map((file) => `[warn] ${file}`).join("\n"),
+            stderr: "",
+            signal: null,
+            timedOut: false,
+            cancelled: false,
+            truncated: false,
+        };
+    }) as typeof import("../../lib/proc.mts").run;
+    return { runner, calls };
+}
+
+test("an unchanged scope is served from the cache with no prettier process", async () => {
+    const root = await makeTempDir("quality-node-cache-hit-");
+    await writeTree(root, { "a.md": "# a\n", "b.md": "# b\n" });
+    const cacheDir = await makeTempDir("quality-node-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const notes: string[] = [];
+
+    const first = checkedRunner(new Set(["a.md", "b.md"]));
+    const r1 = await runNodeStep({
+        ctx,
+        trackedFiles: ["a.md", "b.md"],
+        runner: first.runner,
+    });
+    assert.equal(r1.status, "fail");
+    assert.deepEqual(first.calls, [["a.md", "b.md"]]);
+
+    const second = checkedRunner(new Set(["a.md", "b.md"]));
+    const r2 = await runNodeStep({
+        ctx: { ...ctx, notify: (line) => notes.push(line) },
+        trackedFiles: ["a.md", "b.md"],
+        runner: second.runner,
+    });
+    assert.equal(r2.status, "fail");
+    assert.deepEqual(second.calls, [], "all files cached: no process");
+    assert.deepEqual(
+        r2.errors?.map((error) => error.file),
+        ["a.md", "b.md"],
+    );
+    assert.deepEqual(notes, ["defined: cache node hit=2 miss=0"]);
+});
+
+test("editing one file re-checks only that file", async () => {
+    const root = await makeTempDir("quality-node-cache-edit-");
+    await writeTree(root, { "a.md": "# a\n", "b.md": "# b\n" });
+    const cacheDir = await makeTempDir("quality-node-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+
+    const clean = checkedRunner(new Set());
+    await runNodeStep({
+        ctx,
+        trackedFiles: ["a.md", "b.md"],
+        runner: clean.runner,
+    });
+
+    await writeFile(join(root, "a.md"), "# a changed\n");
+    const edited = checkedRunner(new Set(["a.md"]));
+    const result = await runNodeStep({
+        ctx,
+        trackedFiles: ["a.md", "b.md"],
+        runner: edited.runner,
+    });
+    assert.equal(result.status, "fail");
+    assert.deepEqual(
+        edited.calls,
+        [["a.md"]],
+        "only the edited file is re-run",
+    );
+    assert.deepEqual(
+        result.errors?.map((error) => error.file),
+        ["a.md"],
+    );
+});
+
+test("added and deleted files are handled by the per-file keys", async () => {
+    const root = await makeTempDir("quality-node-cache-scope-");
+    await writeTree(root, { "a.md": "# a\n" });
+    const cacheDir = await makeTempDir("quality-node-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+
+    await runNodeStep({
+        ctx,
+        trackedFiles: ["a.md"],
+        runner: checkedRunner(new Set()).runner,
+    });
+
+    // A new file is a miss; a deleted file simply leaves the key set.
+    await writeTree(root, { "b.md": "# b\n" });
+    const added = checkedRunner(new Set());
+    const withNew = await runNodeStep({
+        ctx,
+        trackedFiles: ["a.md", "b.md"],
+        runner: added.runner,
+    });
+    assert.equal(withNew.status, "pass");
+    assert.deepEqual(added.calls, [["b.md"]]);
+
+    const afterDelete = checkedRunner(new Set());
+    await runNodeStep({
+        ctx,
+        trackedFiles: ["a.md"],
+        runner: afterDelete.runner,
+    });
+    assert.deepEqual(afterDelete.calls, [], "a.md stays a hit");
+});
+
+test("cached and uncached runs agree on the verdict", async () => {
+    const root = await makeTempDir("quality-node-cache-agree-");
+    await writeTree(root, { "a.md": "# a\n", "b.md": "# b\n" });
+    const cacheDir = await makeTempDir("quality-node-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const dirty = new Set(["a.md"]);
+
+    const cached = await runNodeStep({
+        ctx,
+        trackedFiles: ["a.md", "b.md"],
+        runner: checkedRunner(dirty).runner,
+    });
+    const uncached = await runNodeStep({
+        ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
+        trackedFiles: ["a.md", "b.md"],
+        runner: checkedRunner(dirty).runner,
+    });
+    assert.equal(cached.status, uncached.status);
+    assert.deepEqual(cached.errors, uncached.errors);
+});
+
+test("a consumer prettier config bypasses the cache", async () => {
+    const root = await makeTempDir("quality-node-cache-bypass-");
+    await writeTree(root, {
+        "prettier.config.mjs": "export default {};\n",
+        "a.md": "# a\n",
+    });
+    const cacheDir = await makeTempDir("quality-node-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const notes: string[] = [];
+
+    for (let run = 0; run < 2; run += 1) {
+        const runner = checkedRunner(new Set());
+        await runNodeStep({
+            ctx: { ...ctx, notify: (line) => notes.push(line) },
+            trackedFiles: ["prettier.config.mjs", "a.md"],
+            runner: runner.runner,
+        });
+        assert.equal(runner.calls.length, 1, "each run still spawns");
+    }
+    assert.deepEqual(notes, [], "no cache metric when bypassed");
+});

@@ -131,6 +131,8 @@ defined: timing setup 412ms
 defined: timing fix pass 9120ms
 defined: timing fix/node 8110ms
 defined: timing no-fix pass 4900ms
+defined: cache node hit=41 miss=3
+defined: cache eslint hit=41 miss=3
 defined: timing comply total 14630ms
 ```
 
@@ -138,8 +140,30 @@ Durations use a monotonic clock, so cold and warm runs compare consistently.
 Labels are gate-owned step and phase names only — never command text or
 environment — so no command credential can reach the log. The numbers are
 indicative, not a benchmark contract: image pull, a cold named-volume cache and
-a busy host all land in them. Cache hit/miss metrics follow once the caches
-exist.
+a busy host all land in them. The cache `hit`/`miss` lines are the content-cache
+metrics described below.
+
+### Content caches
+
+Repeated iterations over a large checkout mostly reconsider files that did not
+change. With the house config (no consumer-owned prettier/eslint config), the
+`node` (prettier) and `eslint` steps key each file's verdict by its content hash
+plus a gate identity — the pinned tool and plugin versions, the effective house
+config, ignore/`.editorconfig` policy, and the `.defined.json` overrides the
+config reads — and reuse it, re-running only changed or new files. A run where
+nothing changed spawns neither tool. A consumer-owned config bypasses the cache
+until its invalidation inputs are defined.
+
+The cache lives outside the checkout, on a named volume keyed by pin + repo
+(`defined-cache-<pin>-<repo>` → `/home/node/.cache/defined`), so read-only
+`verify` can use it without writing to the repo; override the location with
+`DEFINED_CACHE_DIR`. It is a pure optimisation: a verdict is always rebuilt from
+per-file facts, any cache read or write failure degrades to a miss, and the
+manifest is rebuilt each run so deleted files drop out. Hit/miss counts print
+under `--timings` (above); the merged report is identical whether or not the
+cache is warm. Ceiling: house v1 rules are file-local, which is what makes
+per-file reuse sound — a future rule that lints one file in the context of
+others would need the unit (or the identity) widened.
 
 ### Concurrency and cancellation
 
