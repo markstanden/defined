@@ -62,7 +62,10 @@ export function identityHash({
     parts: Record<string, string>;
 }): string {
     const canonical = Object.keys(parts)
-        .sort()
+        // Explicit code-unit comparator (not localeCompare, which is
+        // locale-dependent): the sort only needs to be deterministic and
+        // order-independent, and it matches the default sort's ordering.
+        .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
         .map((key) => `${key}\u0000${parts[key]}`)
         .join("\u0001");
     return sha256Hex({ data: canonical });
