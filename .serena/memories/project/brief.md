@@ -6,7 +6,7 @@ verification is the gate's own suite plus the self-host gate.
 
 ## Verified commands
 
-- `node --test` — full unit suite; 454 pass on 2026-10-04 (fixture e2e inside
+- `node --test` — full unit suite; 465 pass on 2026-10-04 (fixture e2e inside
   it skips cleanly without podman).
 - `node --test runtime/fixture.test.mts` — the real-container e2e: builds/drives
   the gate image over a generated broken repo; needs podman or docker. Runs the
@@ -56,14 +56,15 @@ explain` serves `standards/` docs verbatim.
 
 ## Open problem
 
-None at present. The coverage doc landed (#93, `acd605a`); the current effort
-is the ordered issues-attack (#69 done, #70/#75/#68 open) tracked in
-`docs/plans/PLAN_issues-attack.md`. Deep dives below.
+None at present. The current effort is the ordered issues-attack (#69/#70 done,
+#75/#68 open) tracked in `docs/plans/PLAN_issues-attack.md`. Deep dives below.
 
 ## Deep dives
 
 - `mem:runtime/async-process-runner` — the async process runner (#69):
   docs/runtime/async-process-runner.md
+- `mem:runtime/bounded-concurrency` — bounded concurrency + deterministic
+  reports (#70): docs/runtime/bounded-concurrency.md
 - `mem:plans/public-api-docblock-floor` — public-API docblock floor:
   docs/plans/public-api-docblock-floor.md
 - `mem:plans/explain-coverage-doc` — explain coverage-path doc + tofu fixture

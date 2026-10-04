@@ -15,10 +15,12 @@
 // never touching stdout.
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
-// `verify` shares the orchestrator. Steps run in fixed order (naming →
+// `verify` shares the orchestrator. Steps are named in fixed order (naming →
 // node-deps → node → eslint → node-checks → node-coverage → dotnet →
-// dotnet-coverage → shell → smoke → yaml → workflow → tofu), strictly
-// sequentially.
+// dotnet-coverage → shell → smoke → yaml → workflow → tofu). Repair runs
+// strictly sequentially; verification runs with bounded concurrency over the
+// declared dependency edges and shared-resource locks (#70) — results stay
+// deterministic in step order, and a signal cancels pending and running work.
 
 import {
     createRunContext,
@@ -49,15 +51,36 @@ import { runTofuStep } from "./steps/tofu.mts";
 import { runWorkflowStep } from "./steps/workflow.mts";
 import { runYamlStep } from "./steps/yaml.mts";
 import {
+    blocked,
     errored,
     failed,
     passed,
     skipped,
     type StepResult,
+    type StepStatus,
 } from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
 import { createTimings, measure, now, type Timings } from "./lib/timings.mts";
 import { explainTopic, renderExplanation } from "./lib/explain.mts";
+
+/** Child-process runner a pass injects into its steps (lib/proc.mts). */
+type Runner = typeof run;
+
+/** Default number of steps allowed to run at once (#70). */
+export const DEFAULT_CONCURRENCY = 4;
+
+/** Env overlay for the concurrency bound; invalid values fall back to default. */
+const CONCURRENCY_ENV = "DEFINED_CONCURRENCY";
+
+/**
+ * Shared mutable resource for arbitrary consumer commands (#70): the consumer's
+ * own rules/autofix, checks, coverage and build/test commands. Two steps that
+ * both run consumer code never overlap, so output directories they share are
+ * serialised. Steps whose writes are bounded and disjoint (node-deps installs
+ * node_modules; node/eslint/shell/yaml/workflow read only) take no resource and
+ * overlap freely.
+ */
+export const CONSUMER_RESOURCE = "consumer-command";
 
 interface StepInput {
     mode: StepMode;
@@ -73,11 +96,28 @@ interface StepInput {
      * leaves it false, so the repo mount is never written.
      */
     repoWritable?: boolean;
+    /**
+     * Child-process runner the pass injects — the cancellation-aware seam
+     * (#70). Omitted for direct calls in tests, where a step's own
+     * `runner = run` default applies.
+     */
+    runner?: Runner;
 }
 
 interface Step {
     id: string;
     run: (input: StepInput) => Promise<StepResult>;
+    /**
+     * Prerequisite step ids. A prerequisite that did not pass (or was skipped
+     * cleanly) blocks this step rather than letting it run on half-restored
+     * state (#70).
+     */
+    needs?: readonly string[];
+    /**
+     * Named mutable resources, as mutual-exclusion keys. Two steps sharing one
+     * never run concurrently; a resource is not a dependency edge (see `needs`).
+     */
+    uses?: readonly string[];
 }
 
 /**
@@ -86,11 +126,14 @@ interface Step {
  * Debian slim), so no PATH lookup is involved and the probe is deterministic.
  * Verification-only: repair skips it (#65).
  */
-export async function runSmoke({ mode }: StepInput): Promise<StepResult> {
+export async function runSmoke({
+    mode,
+    runner = run,
+}: StepInput): Promise<StepResult> {
     if (mode === "fix") {
         return skipped({ notice: "smoke: deferred to verification" });
     }
-    const probe = await run({ cmd: "/usr/bin/git", args: ["--version"] });
+    const probe = await runner({ cmd: "/usr/bin/git", args: ["--version"] });
     if (probe.status !== 0) {
         return failed({ notice: "git not available in container" });
     }
@@ -100,90 +143,125 @@ export async function runSmoke({ mode }: StepInput): Promise<StepResult> {
 const STEPS: Step[] = [
     {
         id: "naming",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        uses: [CONSUMER_RESOURCE],
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runNamingStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
+        // The install contract is to materialise node_modules — a path no other
+        // step writes — and the node family waits on it (`needs`), so it takes
+        // no shared resource and may overlap the dotnet family (#70).
         id: "node-deps",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runNodeDepsStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
         id: "node",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        needs: ["node-deps"],
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runNodeStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
         id: "eslint",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        needs: ["node-deps"],
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runEslintStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
         id: "node-checks",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        needs: ["node-deps"],
+        uses: [CONSUMER_RESOURCE],
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runNodeChecksStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
         id: "node-coverage",
-        run: ({ mode, repoRoot, files, scratch, repoWritable }) =>
+        needs: ["node-deps"],
+        uses: [CONSUMER_RESOURCE],
+        run: ({ mode, repoRoot, files, scratch, runner, repoWritable }) =>
             runNodeCoverageStep({
                 ctx: { mode, repoRoot, scratch, repoWritable },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
         id: "dotnet",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        uses: [CONSUMER_RESOURCE],
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runDotNetStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
         id: "dotnet-coverage",
-        run: ({ mode, repoRoot, files, scratch, repoWritable }) =>
+        needs: ["dotnet"],
+        uses: [CONSUMER_RESOURCE],
+        run: ({ mode, repoRoot, files, scratch, runner, repoWritable }) =>
             runDotNetCoverageStep({
                 ctx: { mode, repoRoot, scratch, repoWritable },
                 trackedFiles: files,
+                runner,
             }),
     },
     {
         id: "shell",
-        run: ({ mode, repoRoot, files }) =>
-            runShellStep({ ctx: { mode, repoRoot }, trackedFiles: files }),
+        run: ({ mode, repoRoot, files, runner }) =>
+            runShellStep({
+                ctx: { mode, repoRoot },
+                trackedFiles: files,
+                runner,
+            }),
     },
     { id: "smoke", run: runSmoke },
     {
         id: "yaml",
-        run: ({ mode, repoRoot, files }) =>
-            runYamlStep({ ctx: { mode, repoRoot }, trackedFiles: files }),
+        run: ({ mode, repoRoot, files, runner }) =>
+            runYamlStep({
+                ctx: { mode, repoRoot },
+                trackedFiles: files,
+                runner,
+            }),
     },
     {
         id: "workflow",
-        run: ({ mode, repoRoot, files }) =>
-            runWorkflowStep({ ctx: { mode, repoRoot }, trackedFiles: files }),
+        run: ({ mode, repoRoot, files, runner }) =>
+            runWorkflowStep({
+                ctx: { mode, repoRoot },
+                trackedFiles: files,
+                runner,
+            }),
     },
     {
         id: "tofu",
-        run: ({ mode, repoRoot, files, scratch }) =>
+        uses: [CONSUMER_RESOURCE],
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runTofuStep({
                 ctx: { mode, repoRoot, scratch },
                 trackedFiles: files,
+                runner,
             }),
     },
 ];
@@ -191,7 +269,363 @@ const STEPS: Step[] = [
 /** The run-plan step ids, in order (the guide for `defined explain` coverage). */
 export const STEP_IDS: readonly string[] = STEPS.map((step) => step.id);
 
-/** Run every step in order in the given mode; nothing may crash silently. */
+/**
+ * Resolve the concurrency bound: an explicit override wins, then the
+ * `DEFINED_CONCURRENCY` env overlay, then DEFAULT_CONCURRENCY. Anything that is
+ * not a positive integer is ignored, so a bad value cannot wedge a run.
+ */
+export function resolveConcurrency({
+    override,
+}: { override?: number } = {}): number {
+    if (override !== undefined) {
+        return Math.max(1, Math.floor(override));
+    }
+    const raw = process.env[CONCURRENCY_ENV];
+    if (raw === undefined) {
+        return DEFAULT_CONCURRENCY;
+    }
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed > 0
+        ? parsed
+        : DEFAULT_CONCURRENCY;
+}
+
+/**
+ * The runner a pass injects: every child inherits the pass's AbortSignal, so a
+ * cancellation kills running work as well as stopping pending steps (#70). The
+ * `runner` seam keeps this testable without spawning a process.
+ */
+export function cancellableRunner({
+    runner = run,
+    signal,
+}: {
+    runner?: Runner;
+    signal?: AbortSignal;
+} = {}): Runner {
+    if (signal === undefined) {
+        return runner;
+    }
+    return (options, spawnFn) => runner({ ...options, signal }, spawnFn);
+}
+
+/** True for a status that lets dependents proceed (a pass or a clean skip). */
+function isSuccessful(status: StepStatus): boolean {
+    return status === "pass" || status === "skip";
+}
+
+/** A step's prerequisite state during scheduling. */
+type NeedsState =
+    | { kind: "ready" }
+    | { kind: "wait" }
+    | { kind: "blocked"; needId: string; status: StepStatus };
+
+/** Evaluate a step's `needs` against the results completed so far. */
+function needsState({
+    step,
+    present,
+    done,
+}: {
+    step: Step;
+    present: ReadonlySet<string>;
+    done: ReadonlyMap<string, StepResult>;
+}): NeedsState {
+    for (const needId of step.needs ?? []) {
+        // A prerequisite outside this run's step list is not modelled, so it
+        // cannot gate: tests inject subsets of steps.
+        if (!present.has(needId)) {
+            continue;
+        }
+        const result = done.get(needId);
+        if (result === undefined) {
+            return { kind: "wait" };
+        }
+        if (!isSuccessful(result.status)) {
+            return { kind: "blocked", needId, status: result.status };
+        }
+    }
+    return { kind: "ready" };
+}
+
+/** Run one step, turning a throw into an execution error (never aborting the pass). */
+async function runStep(step: Step, input: StepInput): Promise<StepResult> {
+    try {
+        return await step.run(input);
+    } catch (err) {
+        // A step that throws (missing binary, bad config) must never abort the
+        // run: record it as an execution error and continue, so the remaining
+        // checks still report and stdout stays JSON.
+        const message = err instanceof Error ? err.message : String(err);
+        return errored({ message });
+    }
+}
+
+/** Emit collected step durations in step order, so stderr stays deterministic. */
+function emitTimings({
+    timings,
+    mode,
+    steps,
+    durations,
+}: {
+    timings: Timings | undefined;
+    mode: StepMode;
+    steps: readonly Step[];
+    durations: ReadonlyMap<string, number>;
+}): void {
+    if (timings === undefined) {
+        return;
+    }
+    for (const step of steps) {
+        const ms = durations.get(step.id);
+        if (ms !== undefined) {
+            timings.record(`${mode}/${step.id}`, ms);
+        }
+    }
+}
+
+/** Initialise the results map in step order (its key order is the report order). */
+function initialiseResults(steps: readonly Step[]): Map<string, StepResult> {
+    const results = new Map<string, StepResult>();
+    for (const step of steps) {
+        results.set(step.id, failed({ notice: "not started" }));
+    }
+    return results;
+}
+
+/** Repair pass: strictly sequential, honouring a signal between steps. */
+async function runSequential({
+    steps,
+    results,
+    mode,
+    timings,
+    signal,
+    input,
+}: {
+    steps: readonly Step[];
+    results: Map<string, StepResult>;
+    mode: StepMode;
+    timings?: Timings;
+    signal?: AbortSignal;
+    input: StepInput;
+}): Promise<void> {
+    const durations = new Map<string, number>();
+    for (const step of steps) {
+        if (signal?.aborted === true) {
+            results.set(
+                step.id,
+                errored({ message: `${step.id}: cancelled before start` }),
+            );
+            continue;
+        }
+        const started = timings ? now() : 0;
+        results.set(step.id, await runStep(step, input));
+        if (timings) {
+            durations.set(step.id, now() - started);
+        }
+    }
+    emitTimings({ timings, mode, steps, durations });
+}
+
+/**
+ * Launch every ready pending step within the bound, blocking a dependent whose
+ * prerequisite did not pass. Returns true when it changed any state, so the
+ * caller can tell progress from a stuck schedule.
+ */
+function launchReady({
+    steps,
+    pending,
+    running,
+    present,
+    done,
+    bound,
+    signal,
+    start,
+    finish,
+    free,
+}: {
+    steps: readonly Step[];
+    pending: Set<string>;
+    running: ReadonlyMap<string, Promise<void>>;
+    present: ReadonlySet<string>;
+    done: ReadonlyMap<string, StepResult>;
+    bound: number;
+    signal?: AbortSignal;
+    start: (step: Step) => void;
+    finish: (step: Step, result: StepResult) => void;
+    free: (step: Step) => boolean;
+}): boolean {
+    let progressed = false;
+    for (const step of steps) {
+        if (running.size >= bound || signal?.aborted === true) {
+            break;
+        }
+        if (!pending.has(step.id)) {
+            continue;
+        }
+        const needs = needsState({ step, present, done });
+        if (needs.kind === "wait") {
+            continue;
+        }
+        if (needs.kind === "blocked") {
+            finish(
+                step,
+                blocked({
+                    message: `${step.id}: blocked — prerequisite '${needs.needId}' ${needs.status}`,
+                }),
+            );
+            progressed = true;
+            continue;
+        }
+        if (!free(step)) {
+            continue;
+        }
+        start(step);
+        progressed = true;
+    }
+    return progressed;
+}
+
+/**
+ * Give every still-pending step the same failure result, draining the schedule
+ * after a cancellation or an unresolvable dependency cycle.
+ */
+function drainPending({
+    steps,
+    pending,
+    finish,
+    makeResult,
+}: {
+    steps: readonly Step[];
+    pending: ReadonlySet<string>;
+    finish: (step: Step, result: StepResult) => void;
+    makeResult: (step: Step) => StepResult;
+}): void {
+    for (const step of steps) {
+        if (pending.has(step.id)) {
+            finish(step, makeResult(step));
+        }
+    }
+}
+
+/**
+ * Verification pass: bounded concurrency over steps whose `needs` are satisfied
+ * and whose `uses` resources do not conflict with a running step. A prerequisite
+ * that did not pass blocks its dependents; a cancelled pass stops launching and
+ * frees the scratch. Results stay keyed in step order (#70).
+ */
+async function runScheduled({
+    steps,
+    results,
+    mode,
+    timings,
+    signal,
+    input,
+    bound,
+}: {
+    steps: readonly Step[];
+    results: Map<string, StepResult>;
+    mode: StepMode;
+    timings?: Timings;
+    signal?: AbortSignal;
+    input: StepInput;
+    bound: number;
+}): Promise<void> {
+    const present = new Set(steps.map((step) => step.id));
+    const done = new Map<string, StepResult>();
+    const pending = new Set(steps.map((step) => step.id));
+    const running = new Map<string, Promise<void>>();
+    const held = new Map<string, number>();
+    const durations = new Map<string, number>();
+
+    const finish = (step: Step, result: StepResult): void => {
+        results.set(step.id, result);
+        done.set(step.id, result);
+        pending.delete(step.id);
+    };
+    const acquire = (step: Step): void => {
+        for (const resource of step.uses ?? []) {
+            held.set(resource, (held.get(resource) ?? 0) + 1);
+        }
+    };
+    const release = (step: Step): void => {
+        for (const resource of step.uses ?? []) {
+            const next = (held.get(resource) ?? 1) - 1;
+            if (next <= 0) {
+                held.delete(resource);
+            } else {
+                held.set(resource, next);
+            }
+        }
+    };
+    const free = (step: Step): boolean =>
+        (step.uses ?? []).every((resource) => (held.get(resource) ?? 0) === 0);
+    const start = (step: Step): void => {
+        pending.delete(step.id);
+        acquire(step);
+        const started = timings ? now() : 0;
+        const settled = runStep(step, input).then((result) => {
+            finish(step, result);
+            release(step);
+            if (timings) {
+                durations.set(step.id, now() - started);
+            }
+            running.delete(step.id);
+        });
+        running.set(step.id, settled);
+    };
+
+    while (pending.size > 0 || running.size > 0) {
+        const progressed = launchReady({
+            steps,
+            pending,
+            running,
+            present,
+            done,
+            bound,
+            signal,
+            start,
+            finish,
+            free,
+        });
+        if (running.size > 0) {
+            await Promise.race(running.values());
+            continue;
+        }
+        if (signal?.aborted === true) {
+            drainPending({
+                steps,
+                pending,
+                finish,
+                makeResult: (step) =>
+                    errored({ message: `${step.id}: cancelled before start` }),
+            });
+            break;
+        }
+        if (!progressed) {
+            // Nothing runnable and nothing in flight: a dependency cycle or an
+            // unsatisfiable schedule. Fail safe rather than spin forever.
+            drainPending({
+                steps,
+                pending,
+                finish,
+                makeResult: (step) =>
+                    errored({
+                        message: `${step.id}: cannot be scheduled (unresolved prerequisite)`,
+                    }),
+            });
+            break;
+        }
+    }
+    emitTimings({ timings, mode, steps, durations });
+}
+
+/**
+ * Run a pass of steps. Repair (`fix`) runs strictly sequentially; verification
+ * (`no-fix`) runs with bounded concurrency respecting each step's `needs` and
+ * `uses` (#70). Either way results are keyed in `steps` order, so the report is
+ * deterministic whatever the completion order, and a step that throws is an
+ * execution error, never a crashed pass. A `signal` cancels pending work and
+ * kills running children via the injected runner.
+ */
 export async function runPass({
     mode,
     repoRoot,
@@ -199,6 +633,8 @@ export async function runPass({
     steps = STEPS,
     timings,
     repoWritable = false,
+    concurrency,
+    signal,
 }: {
     mode: StepMode;
     repoRoot: string;
@@ -208,35 +644,41 @@ export async function runPass({
     timings?: Timings;
     /** Write-capable invocation (`comply`): no-fix report steps work in the repo. */
     repoWritable?: boolean;
+    /** Override the concurrency bound (tests); env/DEFAULT_CONCURRENCY otherwise. */
+    concurrency?: number;
+    /** Cancels pending steps and kills running children (#70). */
+    signal?: AbortSignal;
 }): Promise<Map<string, StepResult>> {
-    const results = new Map<string, StepResult>();
-    for (const step of steps) {
-        results.set(step.id, failed({ notice: "not started" }));
-    }
+    const results = initialiseResults(steps);
     const scratch: Scratch = { dir: null };
+    const input: StepInput = {
+        mode,
+        repoRoot,
+        files,
+        scratch,
+        repoWritable,
+        runner: cancellableRunner({ signal }),
+    };
     try {
-        for (const step of steps) {
-            const started = timings ? now() : 0;
-            try {
-                const result = await step.run({
-                    mode,
-                    repoRoot,
-                    files,
-                    scratch,
-                    repoWritable,
-                });
-                results.set(step.id, result);
-            } catch (err) {
-                // A step that throws (missing binary, bad config) must never
-                // abort the run: record it as an execution error and continue,
-                // so the remaining checks still report and stdout stays JSON.
-                const message =
-                    err instanceof Error ? err.message : String(err);
-                results.set(step.id, errored({ message }));
-            }
-            if (timings) {
-                timings.record(`${mode}/${step.id}`, now() - started);
-            }
+        if (mode === "fix") {
+            await runSequential({
+                steps,
+                results,
+                mode,
+                timings,
+                signal,
+                input,
+            });
+        } else {
+            await runScheduled({
+                steps,
+                results,
+                mode,
+                timings,
+                signal,
+                input,
+                bound: resolveConcurrency({ override: concurrency }),
+            });
         }
     } finally {
         cleanupScratch(scratch);
@@ -277,6 +719,7 @@ async function runComply({
     runPassFn,
     trackedFilesFn,
     timings,
+    signal,
 }: {
     repoRoot: string;
     files: string[];
@@ -285,6 +728,7 @@ async function runComply({
     runPassFn: typeof runPass;
     trackedFilesFn: typeof trackedFiles;
     timings?: Timings;
+    signal?: AbortSignal;
 }): Promise<GateResult> {
     await measure(timings, "setup", () => runSetupFn({ startDir: repoRoot }));
     // Bootstrap writes .editorconfig, Directory.Build.props, .gitattributes,
@@ -300,6 +744,7 @@ async function runComply({
             files: filesAfterSetup,
             timings,
             repoWritable: true,
+            signal,
         }),
     );
     // Repairs mutate the tree: a fixer or a consumer command can create,
@@ -314,6 +759,7 @@ async function runComply({
             files: filesAfterRepair,
             timings,
             repoWritable: true,
+            signal,
         }),
     );
     // Report any gate-owned bootstrap artifact still out of line after setup
@@ -335,18 +781,20 @@ async function runVerify({
     checkSetupFn,
     runPassFn,
     timings,
+    signal,
 }: {
     repoRoot: string;
     files: string[];
     checkSetupFn: typeof checkSetup;
     runPassFn: typeof runPass;
     timings?: Timings;
+    signal?: AbortSignal;
 }): Promise<GateResult> {
     const setup = await measure(timings, "setup check", () =>
         checkSetupFn({ startDir: repoRoot }),
     );
     const results = await measure(timings, "no-fix pass", () =>
-        runPassFn({ mode: "no-fix", repoRoot, files, timings }),
+        runPassFn({ mode: "no-fix", repoRoot, files, timings, signal }),
     );
     return buildResult({
         setup,
@@ -389,6 +837,7 @@ export async function runGate({
     files,
     presentation = "min",
     timings = false,
+    signal,
     deps = {},
 }: {
     verb: Verb;
@@ -397,6 +846,8 @@ export async function runGate({
     presentation?: Presentation;
     /** Opt-in monotonic phase/step durations on stderr (#71). */
     timings?: boolean;
+    /** Cancels the run: pending steps stop, running children are killed (#70). */
+    signal?: AbortSignal;
     deps?: RunGateDeps;
 }): Promise<void> {
     const resolved = resolveDeps(deps);
@@ -413,6 +864,7 @@ export async function runGate({
                   runPassFn: resolved.runPassFn,
                   trackedFilesFn: resolved.trackedFilesFn,
                   timings: sink,
+                  signal,
               })
             : runVerify({
                   repoRoot,
@@ -420,6 +872,7 @@ export async function runGate({
                   checkSetupFn: resolved.checkSetupFn,
                   runPassFn: resolved.runPassFn,
                   timings: sink,
+                  signal,
               }),
     );
     resolved.printFn(renderResult({ result, presentation }));
@@ -496,13 +949,26 @@ async function main(): Promise<void> {
         return;
     }
     const files = await trackedFiles({ repoRoot: ctx.repoRoot });
-    await runGate({
-        verb: ctx.verb,
-        repoRoot: ctx.repoRoot,
-        files,
-        presentation: ctx.presentation,
-        timings: ctx.timings,
-    });
+    // A cancellation (Ctrl-C / SIGTERM) stops pending steps and kills running
+    // children through the runner's AbortSignal (#70); the gate then reports and
+    // exits non-zero rather than dying mid-run.
+    const controller = new AbortController();
+    const onSignal = (): void => controller.abort();
+    process.on("SIGINT", onSignal);
+    process.on("SIGTERM", onSignal);
+    try {
+        await runGate({
+            verb: ctx.verb,
+            repoRoot: ctx.repoRoot,
+            files,
+            presentation: ctx.presentation,
+            timings: ctx.timings,
+            signal: controller.signal,
+        });
+    } finally {
+        process.off("SIGINT", onSignal);
+        process.off("SIGTERM", onSignal);
+    }
 }
 
 if (import.meta.main) {

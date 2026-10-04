@@ -120,6 +120,21 @@ indicative, not a benchmark contract: image pull, a cold named-volume cache and
 a busy host all land in them. Cache hit/miss metrics follow once the caches
 exist.
 
+### Concurrency and cancellation
+
+Repair (`comply`'s fix pass) is strictly sequential. Verification (the no-fix
+pass) runs independent steps together, bounded by `DEFINED_CONCURRENCY` (default
+4); a step waits for its prerequisites, and steps that run consumer code take a
+shared lock so their outputs are never written concurrently. The result is
+assembled in step order whatever the completion order, and `blocked` means a
+prerequisite did not pass. A cancellation (Ctrl-C or `SIGTERM`) stops pending
+steps and kills running children; the gate still prints its JSON result and
+exits non-zero.
+
+```bash
+DEFINED_CONCURRENCY=8 defined comply   # widen the verification bound
+```
+
 The launcher is a bash script needing git + podman/docker (plus the standard
 coreutils any bash environment has); it prefers podman, mounts the repo
 read-write for `comply` and read-only for `verify`, and runs the exact image
@@ -133,9 +148,10 @@ and offline mode avoids podman's pasta backend, which fails on hosts without the
 `tun` kernel module; dependency restore then uses the named volumes' cache, so
 the image must already be present locally.
 
-The gate detects the stack (steps run in order `naming → node-deps → node →
-eslint → node-checks → node-coverage → dotnet → dotnet-coverage → shell →
-smoke → yaml → workflow → tofu`), skips cleanly when an ecosystem is absent, and fails loudly
+The gate detects the stack (steps are named in the order `naming → node-deps →
+node → eslint → node-checks → node-coverage → dotnet → dotnet-coverage → shell
+→ smoke → yaml → workflow → tofu`; in the no-fix pass independent steps may run
+concurrently), skips cleanly when an ecosystem is absent, and fails loudly
 when a pinned tool is missing. `verify` never writes to the repo, so its
 write-capable steps — `node-deps`, `node`, `node-checks`, `node-coverage`, the
 `dotnet` family and `tofu` — work in a scratch copy of the git scope under the
