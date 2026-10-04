@@ -6,8 +6,8 @@ verification is the gate's own suite plus the self-host gate.
 
 ## Verified commands
 
-- `node --test` — full unit suite; 465 pass on 2026-10-04 (fixture e2e inside
-  it skips cleanly without podman).
+- `node --test` — full unit suite; 475 pass on 2026-10-04 (465 before #75;
+  fixture e2e inside it skips cleanly without podman).
 - `node --test runtime/fixture.test.mts` — the real-container e2e: builds/drives
   the gate image over a generated broken repo; needs podman or docker. Runs the
   tofu step with no registry egress since #90 (fixture is provider-free).
@@ -53,11 +53,16 @@ explain` serves `standards/` docs verbatim.
 - `defined explain <step>` docs live in `standards/`; the README is not served,
   so a path the README documents is invisible to explain until a `standards/`
   doc exists (`docRel`).
+- Anything held across a `comply` run must release before `runGate`'s
+  `process.exit` on a failing run: that exit does not unwind a `finally` and
+  once stranded the #75 lock, so the very next run reported `busy`. See
+  `mem:runtime/comply-checkout-lock`.
 
 ## Open problem
 
-None at present. The current effort is the ordered issues-attack (#69/#70 done,
-#75/#68 open) tracked in `docs/plans/PLAN_issues-attack.md`. Deep dives below.
+None at present. The ordered issues-attack stands at #69/#70/#75 done, #68 open
+— tracked in `docs/plans/PLAN_issues-attack.md`; #75 (per-checkout lock) is
+built on branch `serialize-comply-lock` (not yet merged). Deep dives below.
 
 ## Deep dives
 
@@ -65,6 +70,8 @@ None at present. The current effort is the ordered issues-attack (#69/#70 done,
   docs/runtime/async-process-runner.md
 - `mem:runtime/bounded-concurrency` — bounded concurrency + deterministic
   reports (#70): docs/runtime/bounded-concurrency.md
+- `mem:runtime/comply-checkout-lock` — the per-checkout comply lock (#75):
+  docs/runtime/comply-checkout-lock.md
 - `mem:plans/public-api-docblock-floor` — public-API docblock floor:
   docs/plans/public-api-docblock-floor.md
 - `mem:plans/explain-coverage-doc` — explain coverage-path doc + tofu fixture
