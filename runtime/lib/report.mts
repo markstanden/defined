@@ -13,6 +13,7 @@
 // rendered text — so both presentations agree by construction.
 
 import type { SetupCheck } from "../setup.mts";
+import type { LockInfo } from "./lock.mts";
 import type {
     DiagnosticKind,
     StepDiagnostic,
@@ -24,6 +25,21 @@ import type {
 export type Presentation = "min" | "full";
 
 export type ResultStatus = "compliant" | "not_compliant";
+
+/**
+ * The contended-run result (#75): another `comply` holds this checkout, so the
+ * gate did not judge the code. A deliberate third top-level status alongside the
+ * two verdicts — an agent must be able to tell "could not run" from "failed",
+ * or it will treat contention as a red gate.
+ */
+export interface BusyResult {
+    /** Contended status: the run did not happen. */
+    status: "busy";
+    /** The running invocation's identity, so a caller can judge whether to wait. */
+    lock: LockInfo;
+    /** Git-scope files edited after that run started (see lib/lock.mts). */
+    newerThanRun: string[];
+}
 
 export interface ReportedStep {
     /** Stable run-plan step id (or the synthetic `bootstrap` check). */
@@ -210,4 +226,19 @@ export function renderResult({
             ? { status, results, ...withErrors }
             : { status, ...withErrors },
     );
+}
+
+/**
+ * Render the contended-run result as one compact JSON line. There is no
+ * presentation variant: with no checks run there is nothing to expand.
+ */
+export function renderBusyResult({
+    lock,
+    newerThanRun,
+}: {
+    lock: LockInfo;
+    newerThanRun: string[];
+}): string {
+    const busy: BusyResult = { status: "busy", lock, newerThanRun };
+    return JSON.stringify(busy);
 }

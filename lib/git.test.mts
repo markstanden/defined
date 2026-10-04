@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, test } from "node:test";
 
 import { run } from "./proc.mts";
-import { trackedFiles } from "./git.mts";
+import { absoluteGitDir, trackedFiles } from "./git.mts";
 
 const tempDirs: string[] = [];
 
@@ -129,5 +129,19 @@ test("trackedFiles throws when the git inventory command fails", async () => {
     await assert.rejects(
         trackedFiles({ repoRoot: dir }),
         /git ls-files failed/u,
+    );
+});
+
+test("absoluteGitDir returns the checkout's git dir", async () => {
+    const root = await makeRepo({ committed: ["a.sh"] });
+    assert.equal(await absoluteGitDir({ repoRoot: root }), join(root, ".git"));
+});
+
+test("absoluteGitDir throws outside a git repository", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "quality-notgit-"));
+    tempDirs.push(dir);
+    await assert.rejects(
+        absoluteGitDir({ repoRoot: dir }),
+        /git rev-parse --absolute-git-dir failed/u,
     );
 });

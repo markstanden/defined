@@ -6,6 +6,9 @@
 //                                   → fresh verify (no-fix) pass → JSON result.
 //   defined verify [--min|--full] [--timings]   managed-artifact check (never
 //                                   writes) → complete no-fix pass → JSON result.
+// `comply` holds a per-checkout lock for the whole flow, so a second invocation
+// on the same checkout reports `busy` instead of racing the same files (#75);
+// read-only `verify` takes no lock.
 //
 // Exit is 0 only when the canonical result is `compliant`, 1 otherwise; the
 // exit code derives from the result, never from the rendered text. Output is a
@@ -28,12 +31,13 @@ import {
     type StepMode,
     type Verb,
 } from "./lib/ctx.mts";
-import { trackedFiles } from "../lib/git.mts";
+import { trackedFiles, absoluteGitDir } from "../lib/git.mts";
 import { run } from "../lib/proc.mts";
 import { checkSetup, runSetup } from "./setup.mts";
 import {
     buildResult,
     mergeRepairErrors,
+    renderBusyResult,
     renderResult,
     type GateResult,
     type Presentation,
@@ -60,6 +64,7 @@ import {
     type StepStatus,
 } from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
+import { acquireLock, type LockHandle } from "./lib/lock.mts";
 import { createTimings, measure, now, type Timings } from "./lib/timings.mts";
 import { explainTopic, renderExplanation } from "./lib/explain.mts";
 
@@ -881,6 +886,65 @@ export async function runGate({
     }
 }
 
+export interface ComplyLockDeps {
+    /** Lock acquisition; injected so tests need no real git dir. */
+    acquireLockFn?: typeof acquireLock;
+    /** Absolute git dir resolver; injected so tests need no real repo. */
+    absoluteGitDirFn?: typeof absoluteGitDir;
+    /** Output sink (stdout). */
+    printFn?: (line: string) => void;
+    /** Process exit; injected so tests observe the exit code. */
+    exitFn?: (code: number) => void;
+}
+
+/**
+ * Take the per-checkout `comply` lock (#75), before bootstrap touches the tree.
+ * Returns the handle to release when the run ends, or `undefined` after
+ * printing the busy result and exiting non-zero — the caller must not run the
+ * gate in that case. Every production path (installed launcher and the local
+ * runtime shim) reaches this through `main`, so both honour the same lock.
+ */
+export async function acquireComplyLock({
+    repoRoot,
+    files,
+    deps = {},
+}: {
+    repoRoot: string;
+    /** Current git-scope inventory, for the busy report's `newerThanRun`. */
+    files: string[];
+    deps?: ComplyLockDeps;
+}): Promise<LockHandle | undefined> {
+    const {
+        acquireLockFn = acquireLock,
+        absoluteGitDirFn = absoluteGitDir,
+        printFn = (line) => console.log(line),
+        exitFn = (code) => process.exit(code),
+    } = deps;
+    const gitDir = await absoluteGitDirFn({ repoRoot });
+    const acquired = acquireLockFn({
+        gitDir,
+        repoRoot,
+        files,
+        info: {
+            pid: process.pid,
+            startedAt: new Date().toISOString(),
+            checkout: repoRoot,
+            command: "comply",
+        },
+    });
+    if (acquired.kind === "busy") {
+        printFn(
+            renderBusyResult({
+                lock: acquired.lock,
+                newerThanRun: acquired.newerThanRun,
+            }),
+        );
+        exitFn(1);
+        return undefined;
+    }
+    return acquired.handle;
+}
+
 export interface RunExplainDeps {
     /** Guidance resolver; injected so tests need no image or repo. */
     explainFn?: typeof explainTopic;
@@ -956,7 +1020,20 @@ async function main(): Promise<void> {
     const onSignal = (): void => controller.abort();
     process.on("SIGINT", onSignal);
     process.on("SIGTERM", onSignal);
+    // Serialise comply runs per checkout (#75): the lock is held across
+    // bootstrap, repair and verification, so a second invocation on this
+    // checkout reports busy rather than racing the same files. Read-only verify
+    // takes no lock. A busy result is already printed, with the exit code set,
+    // so there is nothing to release.
+    let lock: LockHandle | undefined;
+    let exitCode = 0;
     try {
+        if (ctx.verb === "comply") {
+            lock = await acquireComplyLock({ repoRoot: ctx.repoRoot, files });
+            if (lock === undefined) {
+                return;
+            }
+        }
         await runGate({
             verb: ctx.verb,
             repoRoot: ctx.repoRoot,
@@ -964,10 +1041,22 @@ async function main(): Promise<void> {
             presentation: ctx.presentation,
             timings: ctx.timings,
             signal: controller.signal,
+            // Capture the exit code rather than letting runGate call
+            // process.exit: that would skip this finally and strand the lock
+            // (#75), so a failing run would block every run after it.
+            deps: {
+                exitFn: (code) => {
+                    exitCode = code;
+                },
+            },
         });
     } finally {
+        lock?.release();
         process.off("SIGINT", onSignal);
         process.off("SIGTERM", onSignal);
+    }
+    if (exitCode !== 0) {
+        process.exit(exitCode);
     }
 }
 

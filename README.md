@@ -85,6 +85,27 @@ the plan and noise on every run after that:
   stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Present with `--full`
   only.
 
+When another `comply` already holds this checkout, a run does not wait. It
+prints a third status — `busy` — carrying the running invocation's identity and
+the git-scope files edited after that run started, and exits non-zero:
+
+```json
+{
+    "status": "busy",
+    "lock": {
+        "pid": 42,
+        "startedAt": "…",
+        "checkout": "/repo",
+        "command": "comply"
+    },
+    "newerThanRun": ["src/a.ts"]
+}
+```
+
+An empty `newerThanRun` means the running gate is judging your current code, so
+wait for it; a non-empty list means your edits are not in that run, so cancel it
+and rerun. `verify` is read-only and never contends.
+
 ```bash
 defined comply          # concise: status (+ errors when present)  [default]
 defined comply --full   # adds the per-check results map
