@@ -39,7 +39,7 @@ export function recordingRunner(outcomes: Record<string, RunResult> = {}): {
     calls: RunnerCall[];
 } {
     const calls: RunnerCall[] = [];
-    const runner = ((input: RunnerCall) => {
+    const runner = (async (input: RunnerCall) => {
         calls.push(input);
         const command =
             input.cmd === "sh" ? (input.args[1] ?? "sh") : input.cmd;
@@ -48,6 +48,10 @@ export function recordingRunner(outcomes: Record<string, RunResult> = {}): {
             status: o.status,
             stdout: o.stdout ?? "",
             stderr: o.stderr ?? "",
+            signal: null,
+            timedOut: false,
+            cancelled: false,
+            truncated: false,
         } satisfies CommandResult;
     }) as typeof import("../lib/proc.mts").run;
     return { runner, calls };
@@ -173,7 +177,15 @@ function outcomeFor(
 }
 
 function toResult({ status, stdout, stderr }: RunResult): CommandResult {
-    return { status, stdout: stdout ?? "", stderr: stderr ?? "" };
+    return {
+        status,
+        stdout: stdout ?? "",
+        stderr: stderr ?? "",
+        signal: null,
+        timedOut: false,
+        cancelled: false,
+        truncated: false,
+    };
 }
 
 /**
@@ -187,7 +199,7 @@ export function fakeRunner(
     withCwd = false,
 ): { runner: typeof import("../lib/proc.mts").run; calls: string[][] } {
     const calls: string[][] = [];
-    const runner = (({
+    const runner = (async ({
         cmd,
         args,
         cwd,

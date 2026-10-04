@@ -18,7 +18,7 @@ import {
     type StepDiagnostic,
     type StepResult,
 } from "../lib/step-result.mts";
-import { run } from "../../lib/proc.mts";
+import { run, failureDetail } from "../../lib/proc.mts";
 import type { Severity } from "../lib/severities.mts";
 
 // Floor 'style' = every shellcheck finding gates (error < warning < info
@@ -101,10 +101,10 @@ export async function runShellStep({
     // Repair (#65): mutate only — shfmt -w. The format check and shellcheck
     // belong to the single authoritative no-fix verification pass.
     if (ctx.mode === "fix") {
-        const fmt = runner({ cmd: "shfmt", args: ["-w", ...scripts] });
+        const fmt = await runner({ cmd: "shfmt", args: ["-w", ...scripts] });
         if (fmt.status !== 0) {
             return errored({
-                message: `shell: shfmt -w failed: ${fmt.stderr.trim()}`,
+                message: `shell: shfmt -w failed: ${failureDetail({ result: fmt })}`,
             });
         }
         return passed({ notice: `shell: formatted ${scripts.length} file(s)` });
@@ -112,10 +112,10 @@ export async function runShellStep({
     // -l lists the files still needing formatting (and exits 0 even when it
     // lists them); treat any listed file as the diff, and a nonzero exit as a
     // genuine shfmt execution failure.
-    const check = runner({ cmd: "shfmt", args: ["-l", ...scripts] });
+    const check = await runner({ cmd: "shfmt", args: ["-l", ...scripts] });
     if (check.status !== 0) {
         return errored({
-            message: `shell: shfmt failed: ${check.stderr.trim()}`,
+            message: `shell: shfmt failed: ${failureDetail({ result: check })}`,
         });
     }
     const errors = parseShfmtFiles({ stdout: check.stdout });
@@ -126,7 +126,7 @@ export async function runShellStep({
         });
     }
 
-    const lint = runner({
+    const lint = await runner({
         cmd: "shellcheck",
         args: ["-x", "-S", floor, "-f", "gcc", ...scripts],
     });

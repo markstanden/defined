@@ -160,7 +160,7 @@ function invokeEslint({
     runner: Runner;
     /** House-config override channel (complexityMax); undefined inherits. */
     env?: NodeJS.ProcessEnv;
-}): CommandResult {
+}): Promise<CommandResult> {
     if (kind === "house") {
         return runner({
             cmd: "eslint",
@@ -336,7 +336,7 @@ function houseConfigEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
  * Exit 1 means findings were left unfixed — verification reports them — so it
  * is not a failure here; any other non-zero is a config/parse crash and is.
  */
-function repairEslint({
+async function repairEslint({
     kind,
     configPath,
     files,
@@ -350,8 +350,8 @@ function repairEslint({
     workingRoot: string;
     runner: Runner;
     env?: NodeJS.ProcessEnv;
-}): StepResult {
-    const fix = invokeEslint({
+}): Promise<StepResult> {
+    const fix = await invokeEslint({
         kind,
         configPath,
         files,
@@ -422,7 +422,7 @@ export async function runEslintStep({
             env,
         });
     }
-    const check = invokeEslint({
+    const check = await invokeEslint({
         kind,
         configPath,
         files,

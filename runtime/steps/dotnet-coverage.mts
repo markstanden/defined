@@ -262,7 +262,7 @@ export async function runDotNetCoverageStep({
     // consumer's command against a scratch copy of the git scope (shared with
     // the dotnet step via ctx.scratch) and validates the scratch report. A
     // write-capable comply instead keeps the report in the repo.
-    const { workingRoot, failure } = runScopedCommand({
+    const { workingRoot, failure } = await runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,

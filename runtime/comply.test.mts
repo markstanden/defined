@@ -141,7 +141,7 @@ test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
-            trackedFilesFn: () => [],
+            trackedFilesFn: async () => [],
             runPassFn: async () => allGreen(),
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
@@ -169,7 +169,7 @@ test("runGate_complyFindingSurvivesRepair_reportsFindingAndExits", async () => {
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
-            trackedFilesFn: () => [],
+            trackedFilesFn: async () => [],
             runPassFn: async () => oneFail(),
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
@@ -201,7 +201,7 @@ test("runGate_complyBootstrapDrift_reportsItThroughTheCanonicalResult", async ()
                 ],
                 agents: "present",
             }),
-            trackedFilesFn: () => [],
+            trackedFilesFn: async () => [],
             runPassFn: async () => allGreen(),
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
@@ -229,7 +229,7 @@ test("runGate_comply_reFetchesTrackedFilesAfterBootstrap", async () => {
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
-            trackedFilesFn: () => ["post-setup.txt"],
+            trackedFilesFn: async () => ["post-setup.txt"],
             runPassFn: async ({ files }) => {
                 passedFiles.push(files);
                 return allGreen();
@@ -253,7 +253,7 @@ test("runGate_comply_reFetchesTrackedFilesAfterRepair", async () => {
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
-            trackedFilesFn: () => {
+            trackedFilesFn: async () => {
                 fetches += 1;
                 return [fetches === 1 ? "after-setup.txt" : "after-repair.txt"];
             },
@@ -284,7 +284,7 @@ test("runGate_comply_marksBothPassesRepoWritable", async () => {
         deps: {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
-            trackedFilesFn: () => [],
+            trackedFilesFn: async () => [],
             runPassFn: async ({ repoWritable }) => {
                 flags.push(repoWritable);
                 return allGreen();
@@ -332,7 +332,7 @@ test("runGate_comply_reRenameLeavesNoStaleVerificationPath", async () => {
             runSetupFn: async () => undefined,
             checkSetupFn: async () => cleanSetup(),
             // A repair renamed Old.cs to New.cs: the second fetch reflects it.
-            trackedFilesFn: () => snapshots.shift() ?? [],
+            trackedFilesFn: async () => snapshots.shift() ?? [],
             runPassFn: async ({ mode, files }) => {
                 if (mode === "no-fix") {
                     verifyFiles.push(files);

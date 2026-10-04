@@ -116,7 +116,7 @@ export async function runNodeDepsStep({
         files: trackedFiles,
     });
     return toStepResult(
-        restoreNodePackages({
+        await restoreNodePackages({
             workingRoot,
             trackedFiles,
             packages,

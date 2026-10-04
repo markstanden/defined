@@ -172,7 +172,7 @@ export async function runSetup({
 }): Promise<void> {
     const repoRoot = await deriveRepoRoot({ startDir });
     const config = await loadConfig({ repoRoot });
-    const tracked = trackedFiles({ repoRoot });
+    const tracked = await trackedFiles({ repoRoot });
     await installManagedFiles({
         sourceDir: standardsDir(),
         files: bootstrapFiles(config, tracked),
@@ -220,7 +220,7 @@ export async function checkSetup({
     const config = await loadConfig({ repoRoot });
     const files = await checkManagedFiles({
         sourceDir: standardsDir(),
-        files: bootstrapFiles(config, trackedFiles({ repoRoot })),
+        files: bootstrapFiles(config, await trackedFiles({ repoRoot })),
         repoRoot,
     });
     const block = await readMarkedBlock({

@@ -39,7 +39,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { failed, passed, type StepResult } from "../lib/step-result.mts";
-import { run } from "../../lib/proc.mts";
+import { run, failureDetail } from "../../lib/proc.mts";
 import {
     filterFixableFiles,
     filterWorkflowAuditFiles,
@@ -156,7 +156,7 @@ export function gitleaksIgnoreArgs({
  * never applied (they encode design decisions). The gate-managed workflow is
  * excluded: the gate owns it and repairs it upstream.
  */
-function runZizmorFixes({
+async function runZizmorFixes({
     ctx,
     trackedFiles,
     runner,
@@ -164,13 +164,13 @@ function runZizmorFixes({
     ctx: WorkflowRunContext;
     trackedFiles: string[];
     runner: Runner;
-}): void {
+}): Promise<void> {
     if (ctx.mode !== "fix") {
         return;
     }
     const fixableFiles = filterFixableFiles({ files: trackedFiles });
     if (fixableFiles.length > 0) {
-        runner({
+        await runner({
             cmd: "zizmor",
             args: ["--fix", "--no-progress", ...fixableFiles],
             cwd: ctx.repoRoot,
@@ -187,7 +187,7 @@ function runZizmorFixes({
  * stderr; preferring stderr would report "failed" with no findings at all.
  * Returns the failed result, or null when both are clean (or have no files).
  */
-function runWorkflowTools({
+async function runWorkflowTools({
     ctx,
     actionlintFiles,
     auditFiles,
@@ -197,28 +197,32 @@ function runWorkflowTools({
     actionlintFiles: string[];
     auditFiles: string[];
     runner: Runner;
-}): StepResult | null {
+}): Promise<StepResult | null> {
     if (actionlintFiles.length > 0) {
-        const actionlint = runner({
+        const actionlint = await runner({
             cmd: "actionlint",
             args: actionlintFiles,
             cwd: ctx.repoRoot,
         });
         if (actionlint.status !== 0) {
             return failed({
-                notice: `workflow: actionlint failed: ${actionlint.stdout.trim() || actionlint.stderr.trim()}`,
+                notice: `workflow: actionlint failed: ${failureDetail({
+                    result: actionlint,
+                })}`,
             });
         }
     }
     if (auditFiles.length > 0) {
-        const zizmor = runner({
+        const zizmor = await runner({
             cmd: "zizmor",
             args: ["--no-progress", ...auditFiles],
             cwd: ctx.repoRoot,
         });
         if (zizmor.status !== 0) {
             return failed({
-                notice: `workflow: zizmor failed: ${zizmor.stdout.trim() || zizmor.stderr.trim()}`,
+                notice: `workflow: zizmor failed: ${failureDetail({
+                    result: zizmor,
+                })}`,
             });
         }
     }
@@ -243,20 +247,22 @@ async function runGitleaks({
     runner: Runner;
     existsSyncFn: typeof existsSync;
 }): Promise<StepResult | null> {
-    const ignoredStatus = runner({
+    const ignoredStatus = await runner({
         cmd: "git",
         args: ["status", "--porcelain", "--ignored"],
         cwd: ctx.repoRoot,
     });
     if (ignoredStatus.status !== 0) {
         return failed({
-            notice: `workflow: git status --ignored failed: ${ignoredStatus.stderr.trim() || ignoredStatus.stdout.trim()}`,
+            notice: `workflow: git status --ignored failed: ${failureDetail({
+                result: ignoredStatus,
+            })}`,
         });
     }
     const configPath = await writeGitleaksConfig({
         ignoredPaths: parseIgnoredPaths({ status: ignoredStatus.stdout }),
     });
-    const gitleaks = runner({
+    const gitleaks = await runner({
         cmd: "gitleaks",
         args: [
             "dir",
@@ -272,7 +278,9 @@ async function runGitleaks({
     });
     if (gitleaks.status !== 0) {
         return failed({
-            notice: `workflow: gitleaks found secrets: ${gitleaks.stdout.trim() || gitleaks.stderr.trim()}`,
+            notice: `workflow: gitleaks found secrets: ${failureDetail({
+                result: gitleaks,
+            })}`,
         });
     }
     return null;
@@ -321,7 +329,7 @@ export async function runWorkflowStep({
     const auditFiles = filterWorkflowAuditFiles({ files: trackedFiles });
     const actionlintFiles = filterWorkflowFiles({ files: trackedFiles });
 
-    runZizmorFixes({ ctx, trackedFiles, runner });
+    await runZizmorFixes({ ctx, trackedFiles, runner });
 
     // Repair: mutation only. The checks belong to the single authoritative
     // no-fix verification pass (#65).
@@ -329,7 +337,7 @@ export async function runWorkflowStep({
         return passed({ notice: "workflow: applied zizmor autofixes" });
     }
 
-    const toolFailure = runWorkflowTools({
+    const toolFailure = await runWorkflowTools({
         ctx,
         actionlintFiles,
         auditFiles,

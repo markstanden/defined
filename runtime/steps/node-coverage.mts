@@ -338,7 +338,7 @@ export async function runNodeCoverageStep({
     // the dotnet steps via ctx.scratch) and validates the scratch report. A
     // write-capable comply instead keeps the report in the repo (the artifact
     // SonarQube reads).
-    const { workingRoot, failure } = runScopedCommand({
+    const { workingRoot, failure } = await runScopedCommand({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,

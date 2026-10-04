@@ -27,7 +27,7 @@ import {
     type StepResult,
 } from "../lib/step-result.mts";
 import { ensureScratch, type Scratch } from "../lib/scratch.mts";
-import { run, type CommandResult } from "../../lib/proc.mts";
+import { run, failureDetail, type CommandResult } from "../../lib/proc.mts";
 import { loadConfig } from "../lib/config.mts";
 
 export interface DotNetRunContext {
@@ -115,7 +115,7 @@ function runDotNetCommand(
     runner: Runner,
     args: string[],
     cwd: string,
-): CommandResult {
+): Promise<CommandResult> {
     return runner({ cmd: "dotnet", args, cwd });
 }
 
@@ -139,27 +139,29 @@ async function runRestoreAndFormat({
 }): Promise<StepResult | null> {
     // Restore inside the container into the shadowed NuGet cache; later
     // --no-restore phases assume this succeeded.
-    const restore = runDotNetCommand(
+    const restore = await runDotNetCommand(
         runner,
         ["restore", workspace],
         workspaceRoot,
     );
     if (restore.status !== 0) {
         return failed({
-            notice: `dotnet: restore failed: ${restore.stderr.trim()}`,
+            notice: `dotnet: restore failed: ${failureDetail({ result: restore })}`,
         });
     }
     // Fix mode: format writes. No-fix runs no mutation; verification below does
     // the whole check.
     if (mode === "fix") {
-        const formatWrite = runDotNetCommand(
+        const formatWrite = await runDotNetCommand(
             runner,
             ["format", workspace],
             workspaceRoot,
         );
         if (formatWrite.status !== 0) {
             return failed({
-                notice: `dotnet: format failed: ${formatWrite.stderr.trim()}`,
+                notice: `dotnet: format failed: ${failureDetail({
+                    result: formatWrite,
+                })}`,
             });
         }
     }
@@ -180,7 +182,7 @@ async function runVerifyPhase({
     workspace: string;
     workspaceRoot: string;
 }): Promise<StepResult | null> {
-    const formatCheck = runDotNetCommand(
+    const formatCheck = await runDotNetCommand(
         runner,
         ["format", "--verify-no-changes", workspace],
         workspaceRoot,
@@ -191,25 +193,25 @@ async function runVerifyPhase({
         });
     }
 
-    const build = runDotNetCommand(
+    const build = await runDotNetCommand(
         runner,
         ["build", workspace, "--no-restore"],
         workspaceRoot,
     );
     if (build.status !== 0) {
         return failed({
-            notice: `dotnet: build failed: ${build.stderr.trim()}`,
+            notice: `dotnet: build failed: ${failureDetail({ result: build })}`,
         });
     }
 
-    const test = runDotNetCommand(
+    const test = await runDotNetCommand(
         runner,
         ["test", workspace, "--no-build", "--no-restore"],
         workspaceRoot,
     );
     if (test.status !== 0) {
         return failed({
-            notice: `dotnet: test failed: ${test.stdout.trim() || test.stderr.trim()}`,
+            notice: `dotnet: test failed: ${failureDetail({ result: test })}`,
         });
     }
     return null;
