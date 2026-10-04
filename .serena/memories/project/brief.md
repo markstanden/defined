@@ -51,8 +51,12 @@ explain` serves `standards/` docs verbatim.
   `terraform_data`, no `required_providers` (#89/#90). tflint's
   `terraform_required_providers` box only checks providers actually referenced,
   so the block's absence is clean.
-- jsdoc plugin (v65) quirks behind the documentation floor: see
-  `mem:plans/public-api-docblock-floor`.
+- jsdoc plugin (v65) quirks behind the documentation floor: its fixers must
+  stay disabled (`enableFixer: false`) — they manufacture empty `@param` stubs;
+  `require-param-name` checks tag presence only; `publicOnly` misses exported
+  class members (explicit `MethodDefinition`/`PropertyDefinition` contexts are
+  needed), and `require-description` catches empty/whitespace blocks only, not
+  junk summaries.
 - `defined explain <step>` docs live in `standards/`; the README is not served,
   so a path the README documents is invisible to explain until a `standards/`
   doc exists (`docRel`).
@@ -65,13 +69,12 @@ explain` serves `standards/` docs verbatim.
   no longer trips it: on this repo the job runs a host-repo validation step and
   concludes `success`. See `mem:runtime/managed-workflow-self-audit`.
 
-## Open problem
+## Status
 
-All fifteen roadmap issues are addressed. #68 (content caches) is committed on
-`add-content-format-lint-caches` (@ `20c73b1`) and awaits a PR/merge; the branch
-also carries the managed-workflow doc capture (`0395bfc`). Next agent: open the
-PR and run the gates — see `mem:runtime/content-caches` and
-`docs/plans/PLAN_issues-attack.md`. Deep dives below.
+The fifteen-issue `issues-attack` roadmap is landed: #68 (content caches) was
+squash-merged as #99 (`83695b8`, 2026-10-04) and the effort's plan record is
+closed. Two backlog issues remain open: #92 (Tailwind CSS check or a documented
+non-goal) and #91 (lint `.astro` files in the eslint step). Deep dives below.
 
 ## Deep dives
 
@@ -86,7 +89,3 @@ PR and run the gates — see `mem:runtime/content-caches` and
 - `mem:runtime/managed-workflow-self-audit` — why this repo keeps its managed
   workflow (and how the host-repo step made it green):
   docs/runtime/managed-workflow-self-audit.md
-- `mem:plans/public-api-docblock-floor` — public-API docblock floor:
-  docs/plans/public-api-docblock-floor.md
-- `mem:plans/explain-coverage-doc` — explain coverage-path doc + tofu fixture
-  flake: docs/plans/explain-coverage-doc.md
