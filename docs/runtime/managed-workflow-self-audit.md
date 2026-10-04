@@ -78,12 +78,15 @@ post-merge verdict scale counts `skipped` as a failing conclusion.
 was by design. Two fixes were open: treat `skipped` as neutral in the verdict
 scale, or expect and ignore it here.
 
-`[FACT]` Resolved at source instead: the job now runs the host-repo validation
-step and skips the gate steps individually, so the run concludes `success` and
-the false positive cannot recur. A `skipped` run still proves GitHub accepted the
-workflow file — an invalid one concludes `startup_failure`, not `skipped` — but a
-green run states it plainly.
+`[FACT]` Resolved at source: the job now runs the host-repo validation step and
+skips the gate steps individually, so the run concludes `success` and the false
+positive cannot recur. Observed in the post-merge rollup for the PR #98 merge
+`f17b0f9`: `Defined Gate #37188692926:completed/success`. A `skipped` run still
+proves GitHub accepted the workflow file — an invalid one concludes
+`startup_failure`, not `skipped` — but a green run states it plainly.
 
-`[INFERRED]` The `pr-prep` scale still counts `skipped` as failing, so any other
+`[FACT]` The `pr-prep` scale still counts `skipped` as failing, so any other
 workflow that legitimately skips on a push will still read red; that is a
-`pr-prep` concern, not this repo's.
+`pr-prep` concern, not this repo's. Its two verdicts disagree: pre-merge
+`judgeChecks` treats `SKIPPED` as green, while post-merge `judgeRuns` marks any
+non-`success` conclusion failed (`lib/pr-prep.mts` in the pr-prep source).

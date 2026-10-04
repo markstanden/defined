@@ -92,10 +92,11 @@ PR was green on checks and the SonarCloud gate `OK`.
 
 ## Traps
 
-- `[FACT]` a `Defined Gate` workflow run on a `main` push concludes `skipped`
-  (its job guard excludes `markstanden/defined`; `Defined Tests` covers it), so
-  the pr-flow `post-merge` verdict reads `red`. That skip is expected noise, not
-  a failure.
+- `[FACT]` a `Defined Gate` workflow run on a `main` push concluded `skipped`
+  (its job guard excluded `markstanden/defined`; `Defined Tests` covers it), so
+  the pr-flow `post-merge` verdict read `red` — expected noise at the time, not
+  a failure. Superseded: the job now runs a host-repo validation step and
+  concludes `success` (see Corrections).
 - `[FACT]` recreating `docs/plans/explain-coverage-doc.md` after the #90 merge
   reproduced the merge-time loss: the doc is now tracked, but a branch cut from
   before the commit and rebased on `main` can drop it in a later merge (see
@@ -112,6 +113,11 @@ PR was green on checks and the SonarCloud gate `OK`.
   now the open item and #89/#90 is closed.
 - The `plans/explain-coverage-doc` index card likewise lived only on
   `add-coverage-doc` and is re-added here.
+- The `Defined Gate` `skipped` trap above was fixed after this doc: PR #98
+  dropped the whole-job guard, skipped the three gate steps individually and
+  added a host-repo validation step, so the run concludes `success` (observed
+  `Defined Gate #37188692926:completed/success` on `f17b0f9`). See
+  `docs/runtime/managed-workflow-self-audit.md`.
 
 ## Open work
 
