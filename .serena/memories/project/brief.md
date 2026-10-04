@@ -57,12 +57,16 @@ explain` serves `standards/` docs verbatim.
   `process.exit` on a failing run: that exit does not unwind a `finally` and
   once stranded the #75 lock, so the very next run reported `busy`. See
   `mem:runtime/comply-checkout-lock`.
+- `pr-flow`'s `pr-prep.sh post-merge` counts a `skipped` run as a failing
+  conclusion, so `Defined Gate` (skipped by design on this repo) turns the
+  post-merge verdict red. Expected here, not a regression — see
+  `mem:runtime/managed-workflow-self-audit`.
 
 ## Open problem
 
 None at present. The ordered issues-attack stands at #69/#70/#75 done, #68 open
-— tracked in `docs/plans/PLAN_issues-attack.md`; #75 (per-checkout lock) is
-built on branch `serialize-comply-lock` (not yet merged). Deep dives below.
+— tracked in `docs/plans/PLAN_issues-attack.md`; #75 (per-checkout lock) merged
+as PR #96 (`e2de0f1`). Deep dives below.
 
 ## Deep dives
 
@@ -72,6 +76,8 @@ built on branch `serialize-comply-lock` (not yet merged). Deep dives below.
   reports (#70): docs/runtime/bounded-concurrency.md
 - `mem:runtime/comply-checkout-lock` — the per-checkout comply lock (#75):
   docs/runtime/comply-checkout-lock.md
+- `mem:runtime/managed-workflow-self-audit` — why this repo keeps its skipped
+  managed workflow: docs/runtime/managed-workflow-self-audit.md
 - `mem:plans/public-api-docblock-floor` — public-API docblock floor:
   docs/plans/public-api-docblock-floor.md
 - `mem:plans/explain-coverage-doc` — explain coverage-path doc + tofu fixture
