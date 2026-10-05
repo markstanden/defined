@@ -1,0 +1,19 @@
+---
+version: 2
+updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: monthly
+      cooldown:
+          default-days: 7
+      groups:
+          github-actions:
+              patterns:
+                  - "*"
+      exclude-patterns:
+          # Gate-managed plumbing. standards/workflows/defined--verify.yml is
+          # the single source and `comply` byte-checks the repo copy against it,
+          # so Dependabot may only bump this file's pin by hand, in both copies
+          # together — a lone bump here fails with "differs from gate copy".
+          - ".github/workflows/defined--verify.yml"

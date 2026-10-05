@@ -162,6 +162,15 @@ test("explainTopic_dotnetCoverage_noticeNamesTheCoberturaPaths", async () => {
     assert.match(e.notice!, /coverage\.cobertura\.xml/u);
 });
 
+test("explainTopic_bootstrap_routesToTheDependabotDoc", async () => {
+    const e = await explainTopic({
+        topic: "bootstrap",
+        repoRoot: "/repo",
+        deps: fakeDeps(),
+    });
+    assert.equal(e.doc, "standards/dependabot.md");
+});
+
 test("explainTopic_unknownTopic_throwsAConciseError", async () => {
     await assert.rejects(
         explainTopic({ topic: "SC99999", repoRoot: "/repo", deps: fakeDeps() }),
