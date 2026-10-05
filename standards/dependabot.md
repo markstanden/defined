@@ -18,9 +18,13 @@ version: 2
 updates:
     - package-ecosystem: github-actions
       directory: /
-      exclude-patterns:
+      exclude-paths:
           - ".github/workflows/defined--verify.yml"
 ```
+
+`exclude-paths` is the update-level key for files or directories, relative to
+`directory`; the similarly named `exclude-patterns` is group-level and matches
+dependency names, not file paths.
 
 Managed pins are adopted the same way as the rest of the gate: bump the
 `.defined.json` `version` to the new gate tag (or run `defined update`) and run

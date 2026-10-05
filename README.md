@@ -514,7 +514,7 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     updates:
         - package-ecosystem: github-actions
           directory: /
-          exclude-patterns:
+          exclude-paths:
               - ".github/workflows/defined--verify.yml"
     ```
 
