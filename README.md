@@ -501,6 +501,23 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
    is managed — change it upstream, never by hand. A host that cannot run GitHub
    Actions opts out with `"workflow": { "disable": true }`.
 
+    **Using Dependabot?** Exclude the managed workflow from its `github-actions`
+    updates: Dependabot scans `.github/workflows/`, so it would otherwise propose
+    bumping a pin inside the managed file — a change `comply` rejects as
+    `differs from gate copy` and reinstalls. Adopt managed pins by bumping the
+    `.defined.json` `version` (or running `defined update`) and `comply`. See
+    [`standards/dependabot.md`](standards/dependabot.md).
+
+    ```yaml
+    # .github/dependabot.yml
+    version: 2
+    updates:
+        - package-ecosystem: github-actions
+          directory: /
+          exclude-patterns:
+              - ".github/workflows/defined--verify.yml"
+    ```
+
 ### Windows hosts (WSL2)
 
 The launcher is a bash script: on Windows, run it **inside WSL**. Install it

@@ -224,7 +224,7 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
     },
     bootstrap: {
         kind: "step",
-        docRel: null,
+        docRel: "dependabot.md",
         notice: "seeds house defaults and manages the workflow + AGENTS block; see the README adoption section",
         owner: house("seeded defaults + managed files (README)"),
     },
