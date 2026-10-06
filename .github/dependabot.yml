@@ -11,7 +11,7 @@ updates:
           github-actions:
               patterns:
                   - "*"
-      exclude-patterns:
+      exclude-paths:
           # Gate-managed plumbing. standards/workflows/defined--verify.yml is
           # the single source and `comply` byte-checks the repo copy against it,
           # so Dependabot may only bump this file's pin by hand, in both copies
