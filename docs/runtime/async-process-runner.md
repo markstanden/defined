@@ -10,9 +10,8 @@ Summary: Why the gate's runner became async (#69) — the `CommandResult` contra
 
 Issue #69 replaced the gate's blocking `spawnSync` runner with an injectable
 asynchronous one. This doc records the contract, the mechanics worth not
-re-deriving, and the traps hit along the way. Claims are graded by section:
-**Facts** (observed, cited), **Inferred** (reasoned), **Tested** (reproduced),
-**Open questions**.
+re-deriving, and the traps hit along the way. Claim sections follow
+[`standards/documentation.md`](../../standards/documentation.md).
 
 ## Why it changed
 

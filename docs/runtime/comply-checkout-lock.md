@@ -7,9 +7,8 @@ Summary: Serialises concurrent `comply` runs on one checkout (#75) via an exclus
 # Serializing `comply` per checkout (the checkout lock)
 
 Issue #75: two `comply` runs sharing one checkout could rewrite the same files
-and make each other's verdicts unreproducible. Claims are graded by section:
-**Facts** (observed, cited), **Inferred** (reasoned), **Tested** (reproduced),
-**Open questions**.
+and make each other's verdicts unreproducible. Claim sections follow
+[`standards/documentation.md`](../../standards/documentation.md).
 
 ## The problem
 

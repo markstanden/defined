@@ -74,6 +74,12 @@ test("the block points at the offline explain surface for lookups", async () => 
     assert.match(text, /offline/u);
 });
 
+test("the block points at the knowledge-docs convention", async () => {
+    const text = await block();
+    assert.match(text, /Knowledge is documented/u);
+    assert.match(text, /standards\/documentation\.md/u);
+});
+
 test("the block preserves project content above and below on re-install", async () => {
     const template = await block();
     const root = await mkdtemp(join(tmpdir(), "quality-agents-prompt-"));
