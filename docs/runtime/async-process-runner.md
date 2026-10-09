@@ -160,7 +160,7 @@ re-deriving, and the traps hit along the way. Claim sections follow
 - The old sync path rarely signalled, so the hole was latent rather than observed
   in the field.
 
-## Verification (2026-10-04, `main @ acd605a` + #69 working tree)
+## Verification (`main @ acd605a` + #69 working tree)
 
 ### Facts
 

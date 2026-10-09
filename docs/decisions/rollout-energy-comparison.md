@@ -166,7 +166,7 @@ All` (plus the consumer's `TreatWarningsAsErrors` tightening), the template's
       pre-bootstrap snapshot cannot contain (the old whole-tree walk saw them
       at runtime; a file-list snapshot would not).
 
-## Disposition (2026-09-26)
+## Disposition
 
 Status of each finding against the current plan of record (`PLAN.md`):
 

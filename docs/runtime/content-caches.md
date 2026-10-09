@@ -83,7 +83,7 @@ sections follow [`standards/documentation.md`](../../standards/documentation.md)
   `runtime/lib/cache.mts:257`). The sink is threaded as `StepInput.notify` and
   passed to the passes only when `timings` is on (`runtime/comply.mts:917`, `:927`).
 
-## Measured effect (2026-10-04, `add-content-format-lint-caches` @ `20c73b1`)
+## Measured effect (`add-content-format-lint-caches` @ `20c73b1`)
 
 ### Facts
 

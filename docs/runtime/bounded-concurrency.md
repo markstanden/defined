@@ -115,7 +115,7 @@ dependent or conflicting work race. Claim sections follow
 
 - `--timings` on a real polyglot repo is the measurement to take.
 
-## Verification (2026-10-04, #70 working tree)
+## Verification (#70 working tree)
 
 ### Facts
 
