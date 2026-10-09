@@ -7,8 +7,9 @@ Summary: How the gate's verification pass fans out (#70) — repair stays sequen
 # Bounded concurrency and deterministic reports (`runtime/comply.mts`)
 
 Issue #70 let independent verification steps run together without letting
-dependent or conflicting work race. Claim sections follow
-`~/.config/opencode/KNOWLEDGE.md`.
+dependent or conflicting work race. Claims are graded by section: **Facts**
+(observed, cited), **Inferred** (reasoned), **Tested** (reproduced), **Open
+questions**.
 
 ## What changed
 

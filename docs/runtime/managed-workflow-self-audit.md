@@ -6,7 +6,8 @@ Summary: Why this repo keeps its managed `.github/workflows/defined--verify.yml`
 
 # Why this repo keeps its managed workflow
 
-Claim sections follow `~/.config/opencode/KNOWLEDGE.md`.
+Claims are graded by section: **Facts** (observed, cited), **Inferred**
+(reasoned), **Tested** (reproduced), **Open questions**.
 
 This repo installs `.github/workflows/defined--verify.yml` even though its gate
 steps are skipped on `markstanden/defined` (a host-repo validation step runs

@@ -7,8 +7,9 @@ Summary: How the gate reuses per-file prettier/eslint verdicts across iterations
 # Content-based format/lint caches (`runtime/lib/cache.mts`, #68)
 
 Issue #68 memoises the prettier (node) and eslint no-fix verdicts per file, so a
-repeated gate iteration over a large checkout re-runs only what changed. Claim
-sections follow `~/.config/opencode/KNOWLEDGE.md`.
+repeated gate iteration over a large checkout re-runs only what changed. Claims
+are graded by section: **Facts** (observed, cited), **Inferred** (reasoned),
+**Tested** (reproduced), **Open questions**.
 
 ## What changed
 

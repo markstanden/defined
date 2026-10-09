@@ -6,13 +6,13 @@ Summary: Superseded plan recording Tailwind as a documented non-goal for the gat
 
 # PLAN: Tailwind CSS — position, not a step (#92)
 
-**Status:** resolved — superseded, kept as history. The position it argued
-(documented non-goal) is the decision; the _mechanism_ here (an `explain`
-notice) is superseded by
+**Status:** superseded — kept as history; the GitHub issue remains open. The
+position it argued (documented non-goal) is the decision; the _mechanism_ here
+(an `explain` notice) is superseded by
 [`plugin-free-and-consumer-extensions.md`](../decisions/plugin-free-and-consumer-extensions.md):
 no Tailwind capability in the gate, class sorting stays consumer prettier's job,
 a conflict check is a consumer task if ever wanted.
-**Issue:** #92 (resolved as "non-goal").
+**Issue:** #92 — open; the design resolves as "non-goal".
 
 ## 1. The decision
 
