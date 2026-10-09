@@ -1,10 +1,13 @@
 ---
 Area: runtime
 Date: 2026-10-04
-Keywords: proc.mts, async runner, spawnSync, child_process, CommandResult, timeout, cancellation, AbortSignal, bounded capture, truncation, process group, SIGKILL, failureDetail, issue 69, issue 70
+Keywords: proc.mts, async runner, spawnSync, child_process, CommandResult, timeout, cancellation, AbortSignal, bounded capture, truncation, process group, SIGKILL, failureDetail, invokeEslint, S7503, issue 69, issue 70
+Summary: Why the gate's runner became async (#69) — the `CommandResult` contract, process-group kill, head+tail capture, failure classification, the async ripple, and the "gate doesn't typecheck" trap.
 ---
 
 # The async process runner (`lib/proc.mts`)
+
+> Split plan: the runner contract and kill semantics; the async ripple and the "gate doesn't typecheck" trap.
 
 Issue #69 replaced the gate's blocking `spawnSync` runner with an injectable
 asynchronous one. This doc records the contract, the mechanics worth not

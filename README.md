@@ -625,7 +625,7 @@ defined/
 ├── standards/                       # house standards and tools
 │   └── workflows/defined--verify.yml # managed gate workflow (installed by setup)
 ├── practices/                       # architecture + working-style guidance
-├── records/                         # historical session records (not guidance)
+├── docs/                            # knowledge: brief, deep dives, decisions, issues
 └── .github/workflows/                # defined--verify/test/publish
 ```
 

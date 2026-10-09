@@ -2,6 +2,7 @@
 Area: runtime
 Date: 2026-10-04
 Keywords: comply lock, defined.lock, busy, newerThanRun, exclusive create, heartbeat, stale lock, git dir, worktree, WSL, process.exit, finally, issue 75
+Summary: Serialises concurrent `comply` runs on one checkout (#75) via an exclusive-create lock in the checkout's absolute git dir, a 30 s heartbeat / 3 min stale window, and a `busy` refusal carrying `newerThanRun`.
 ---
 
 # Serializing `comply` per checkout (the checkout lock)

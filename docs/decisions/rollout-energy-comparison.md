@@ -1,4 +1,12 @@
+---
+Area: decisions
+Keywords: rollout, energy-comparison, consumer adoption, launcher drift, bootstrap, template alignment, first consumer, product validation
+Summary: The first real consumer rollout of the gate into `energy-comparison` — the friction found (stale launcher, byte-identical bootstrap refusal) and the fixes fed back into `defined`.
+---
+
 # Rollout — first consumer adoption: energy-comparison
+
+> Split plan: launcher drift and the lifecycle verbs; bootstrap adoption friction; template alignment.
 
 Working log of the first real rollout of the `defined` gate into a consumer
 repo (`markstanden/energy-comparison`, cloned from the `csharp-template`,

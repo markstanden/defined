@@ -1,4 +1,12 @@
+---
+Area: decisions
+Keywords: actionlint, workflow step, tofu, per-directory, gate defects, rdd-astro, consumer adoption
+Summary: Two producer-side gate defects found adopting `defined` into `rdd-astro` — actionlint receiving non-workflow files, and the tofu step silently scanning an empty root — and their fixes.
+---
+
 # Plan — `workflow` actionlint scope and per-directory `tofu`
+
+> Split plan: actionlint must receive only `.github/workflows/*`; per-directory `tofu` roots.
 
 Two producer-side defects in the gate, found while adopting `defined` into
 `rdd-astro` (Astro monorepo: OpenTofu module under `infrastructure/`). Both are

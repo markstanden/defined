@@ -15,7 +15,8 @@ Where to look:
   Read the relevant file when a task touches that area.
 - **Working-style preferences** —
   [`practices/architecture.md`](practices/architecture.md).
-- **History** — [`records/`](records/): session records, not guidance.
+- **Knowledge** — [`docs/`](docs/): the brief, area deep dives, decisions and
+  issue analyses; [`docs/plans/`](docs/plans/) is scratch.
 
 ## Non-obvious structure
 

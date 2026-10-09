@@ -1,3 +1,9 @@
+---
+Area: decisions
+Keywords: astro lint, tailwind, plugin-free, extension seam, consumer tasks, issue 91, issue 92, eslint fixers
+Summary: Review of backlog #91/#92 that rejected baking Astro/Tailwind support into the gate and named consumer tasks as the extension seam instead.
+---
+
 # Plugin-free for now, and consumer tasks as the extension seam
 
 Review of the two open backlog issues — #91 (Astro linting in the ESLint step)
@@ -60,7 +66,7 @@ repos get nothing.
   (docs match behaviour); until then the decision lives here, in
   `practices/architecture.md`, and in the plan.
 - **History (kept, resolved):** the two superseded design drafts —
-  [`2026-10-04_astro-lint-plan.md`](2026-10-04_astro-lint-plan.md) (#91) and
-  [`2026-10-04_tailwind-position-plan.md`](2026-10-04_tailwind-position-plan.md)
+  [`91-astro-lint.md`](../issues/91-astro-lint.md) (#91) and
+  [`92-tailwind-position.md`](../issues/92-tailwind-position.md)
   (#92) — retain the per-rule fixer pricing and the attribute-sorting analysis
   behind the decisions.

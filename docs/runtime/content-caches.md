@@ -2,6 +2,7 @@
 Area: runtime
 Date: 2026-10-04
 Keywords: content cache, per-file cache, FileCache, partitionByHash, identityHash, hashFile, prettier, eslint, node step, verifyEslint, DEFINED_CACHE_DIR, named volume, read-only verify, timings, cache metrics, issue 68
+Summary: How the gate reuses per-file prettier/eslint verdicts across iterations (#68) — identity is tool versions + house config + ignore/editorconfig + `.defined.json` overrides; the cache lives on a pin+repo named volume outside the read-only checkout, and hits report under `--timings`.
 ---
 
 # Content-based format/lint caches (`runtime/lib/cache.mts`, #68)
