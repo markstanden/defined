@@ -35,6 +35,12 @@ review work: the gate proves the sections exist, reviewers prove the words
 match the behaviour (`defined explain jsdoc/require-jsdoc`,
 `standards/documentation.md`).
 
+**Knowledge is documented.** Durable knowledge lives under `docs/` — short,
+sectioned docs with `Area`/`Keywords`/`Summary` front-matter, the `Date`
+derived from git and never hand-maintained. Group claims by section (Facts,
+Inferred, Tested, Open questions) so a reader knows how much to rely on each;
+the full convention and scrub checklist are in `standards/documentation.md`.
+
 **Looking things up.** For what a step or rule means, run `defined explain
 <step-or-rule>`. It serves the house guidance straight from the pinned image —
 offline, no repo writes — and names whether the configuration is house-owned or

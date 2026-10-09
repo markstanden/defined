@@ -1,11 +1,18 @@
+---
+Area: issues
+Keywords: astro, eslint, lint, issue 91, plugin-free, superseded, consumer task
+Summary: Superseded plan for linting `.astro` files in the eslint step — the bake was rejected; Astro linting arrives as a consumer task.
+---
+
 # PLAN: lint `.astro` files in the eslint step (#91)
 
-**Status:** resolved — superseded, kept as history. The bake this plan proposed
-was rejected; the outcome is recorded in
-[`2026-10-04_plugin-free-and-consumer-extensions.md`](2026-10-04_plugin-free-and-consumer-extensions.md):
+**Status:** superseded — kept as history; the GitHub issue remains open. The
+bake this plan proposed was rejected; the outcome is recorded in
+[`plugin-free-and-consumer-extensions.md`](../decisions/plugin-free-and-consumer-extensions.md):
 no astro bake, Astro linting arrives as a consumer task (or a repo-owned config
 today).
-**Issue:** #91 (resolved as "no bake"). Proving ground: `markstanden/rdd-astro`.
+**Issue:** #91 — open; the design resolves as "no bake". Proving ground:
+`markstanden/rdd-astro`.
 
 ## 1. The idea
 

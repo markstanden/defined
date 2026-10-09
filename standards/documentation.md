@@ -6,6 +6,9 @@ documentation checks. One question, one answer:
 > **Public APIs describe their contract; everything else documents itself or
 > stays quiet. Never write a comment to satisfy a linter.**
 
+The other half is durable knowledge: how to write the docs under `docs/` — see
+[Knowledge docs](#knowledge-docs).
+
 ## The contract
 
 - **Public surface (exported JS/TS, publicly visible C#):** every type,
@@ -53,3 +56,30 @@ documentation checks. One question, one answer:
   (`eslint.config.defined.mjs`) shows the current default.
 - Pinned consumers see the new floor only after `defined update` — read the
   release notes before bumping the pin.
+
+## Knowledge docs
+
+Durable knowledge lives under `docs/<area>/<title>.md`. A doc serves two
+readers at once — the human skimming subtitles and the model that pays for the
+`Summary` line instead of a full read — so write short, sectioned,
+self-describing docs and both are served by the same artefact.
+
+- **Front-matter.** `Area` (from the path), `Keywords` (search terms) and
+  `Summary` (a self-contained one-line TL;DR). `Date` is **not** front-matter:
+  it is derived from the doc's last git commit, else its mtime. Never
+  hand-maintain a date, in front-matter or in a heading.
+- **Sectioned with subtitles.** An H1, then H2 sections a reader can navigate
+  from the catalogue line alone. Tables, bullets and code blocks over prose.
+- **Grade claims by section.** Group a problem domain's claims (an H2) by how
+  much a reader may rely on them: **Facts** (directly observed; each bullet
+  cited with a `file:line`, command + output, hash or quoted log), **Inferred**
+  (reasoned from the facts, naming the evidence and the gap), **Tested** (proven
+  by a reproduction, steps shown) and **Open questions** (answerable, naming
+  what is blocked). A claim with no citation is not a Fact.
+- **Link, don't restate.** Link a definition (this file, a source file); never
+  copy a table or this grading legend into a new doc.
+- **Short.** ~400 words a doc; past ~1,200 words add a `> Split plan:` line
+  under the H1 and split it at the next close-out, repointing inbound links.
+- **Scrub before committing.** No personal data, org or tenant identifiers,
+  secret values or paths, or machine-specific absolute home paths. Keep version
+  numbers, commit SHAs and scratch paths — they make a doc reproducible.

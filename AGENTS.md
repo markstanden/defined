@@ -15,7 +15,8 @@ Where to look:
   Read the relevant file when a task touches that area.
 - **Working-style preferences** —
   [`practices/architecture.md`](practices/architecture.md).
-- **History** — [`records/`](records/): session records, not guidance.
+- **Knowledge** — [`docs/`](docs/): the brief, area deep dives, decisions and
+  issue analyses; [`docs/plans/`](docs/plans/) is scratch.
 
 ## Non-obvious structure
 
@@ -90,6 +91,12 @@ rule; small, well-named private helpers need no block. Meaningfulness is
 review work: the gate proves the sections exist, reviewers prove the words
 match the behaviour (`defined explain jsdoc/require-jsdoc`,
 `standards/documentation.md`).
+
+**Knowledge is documented.** Durable knowledge lives under `docs/` — short,
+sectioned docs with `Area`/`Keywords`/`Summary` front-matter, the `Date`
+derived from git and never hand-maintained. Group claims by section (Facts,
+Inferred, Tested, Open questions) so a reader knows how much to rely on each;
+the full convention and scrub checklist are in `standards/documentation.md`.
 
 **Looking things up.** For what a step or rule means, run `defined explain
 <step-or-rule>`. It serves the house guidance straight from the pinned image —

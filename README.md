@@ -593,7 +593,7 @@ image tag and `defined update latest` always resolves to a pullable SHA.
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)
 - [`standards/node-eslint.md`](standards/node-eslint.md) — the house ESLint step: what it owns, how to override, the v1→v2 growth plan
-- [`standards/documentation.md`](standards/documentation.md) — the API-documentation doctrine behind the gate's doc floors
+- [`standards/documentation.md`](standards/documentation.md) — the API-documentation doctrine and the durable knowledge-doc convention
 - [`practices/architecture.md`](practices/architecture.md) — delivery, structure, code and working-style preferences
 - [`standards/.editorconfig`](standards/.editorconfig) — editor + dotnet code style (installed by gate setup)
 - [`standards/Directory.Build.props`](standards/Directory.Build.props) — common MSBuild properties (installed by gate setup)
@@ -625,7 +625,7 @@ defined/
 ├── standards/                       # house standards and tools
 │   └── workflows/defined--verify.yml # managed gate workflow (installed by setup)
 ├── practices/                       # architecture + working-style guidance
-├── records/                         # historical session records (not guidance)
+├── docs/                            # knowledge: brief, deep dives, decisions, issues
 └── .github/workflows/                # defined--verify/test/publish
 ```
 

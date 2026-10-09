@@ -1,3 +1,9 @@
+---
+Area: decisions
+Keywords: actionlint, zizmor, self-repository, autofix, toolchain conflict, reusable workflow, rdd-astro
+Summary: The zizmor 1.30.1 `self-repository` audit across 24 reusable-workflow calls, and the toolchain conflict that made its autofix unsafe in `comply`.
+---
+
 # Plan — actionlint upstream, and zizmor autofix in `comply`
 
 Found while adopting the gate into `rdd-astro` (Astro monorepo). Repinning to a

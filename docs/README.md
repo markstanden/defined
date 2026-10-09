@@ -1,3 +1,9 @@
+---
+Area: root
+Keywords: defined gate, project brief, verified commands, layout, traps, deep dives, container image, quality gate
+Summary: The `defined` project brief — what the repo is, the commands that prove it, the layout, and the traps worth not re-deriving.
+---
+
 # Project brief
 
 Portable quality gate: one container image (the "defined gate") that detects a
@@ -29,7 +35,8 @@ verification is the gate's own suite plus the self-host gate.
   seeded copies after install; managed files get restored by comply).
 - `runtime/lib/explain.mts` — step/rule → house-doc map (`docRel`); `defined
 explain` serves `standards/` docs verbatim.
-- `docs/plans/PLAN_*.md` — session plans; gitignored via `.git/info/exclude`
+- `docs/` — knowledge: this brief, `<area>/` deep dives, `decisions/`, `issues/`.
+  `docs/plans/PLAN_*.md` is session scratch, gitignored via `.git/info/exclude`
   (pattern `PLAN_*.md`), never committed.
 
 ## Traps
@@ -63,29 +70,31 @@ explain` serves `standards/` docs verbatim.
 - Anything held across a `comply` run must release before `runGate`'s
   `process.exit` on a failing run: that exit does not unwind a `finally` and
   once stranded the #75 lock, so the very next run reported `busy`. See
-  `mem:runtime/comply-checkout-lock`.
+  [`runtime/comply-checkout-lock.md`](runtime/comply-checkout-lock.md).
 - `pr-flow`'s `pr-prep.sh post-merge` counts a `skipped` run as a failing
   conclusion — a trap for any workflow that legitimately skips. `Defined Gate`
   no longer trips it: on this repo the job runs a host-repo validation step and
-  concludes `success`. See `mem:runtime/managed-workflow-self-audit`.
+  concludes `success`. See
+  [`runtime/managed-workflow-self-audit.md`](runtime/managed-workflow-self-audit.md).
 
 ## Status
 
 The fifteen-issue `issues-attack` roadmap is landed: #68 (content caches) was
 squash-merged as #99 (`83695b8`, 2026-10-04) and the effort's plan record is
-closed. Two backlog issues remain open: #92 (Tailwind CSS check or a documented
-non-goal) and #91 (lint `.astro` files in the eslint step). Deep dives below.
+closed. Two backlog issues remain open: [#91 (lint `.astro` files in the eslint
+step)](issues/91-astro-lint.md) and [#92 (Tailwind CSS check or a documented
+non-goal)](issues/92-tailwind-position.md). Deep dives below.
 
 ## Deep dives
 
-- `mem:runtime/async-process-runner` — the async process runner (#69):
-  docs/runtime/async-process-runner.md
-- `mem:runtime/content-caches` — per-file prettier/eslint verdict caches (#68):
-  docs/runtime/content-caches.md
-- `mem:runtime/bounded-concurrency` — bounded concurrency + deterministic
-  reports (#70): docs/runtime/bounded-concurrency.md
-- `mem:runtime/comply-checkout-lock` — the per-checkout comply lock (#75):
-  docs/runtime/comply-checkout-lock.md
-- `mem:runtime/managed-workflow-self-audit` — why this repo keeps its managed
-  workflow (and how the host-repo step made it green):
-  docs/runtime/managed-workflow-self-audit.md
+- [`runtime/async-process-runner.md`](runtime/async-process-runner.md) — the
+  async process runner (#69).
+- [`runtime/content-caches.md`](runtime/content-caches.md) — per-file
+  prettier/eslint verdict caches (#68).
+- [`runtime/bounded-concurrency.md`](runtime/bounded-concurrency.md) — bounded
+  concurrency + deterministic reports (#70).
+- [`runtime/comply-checkout-lock.md`](runtime/comply-checkout-lock.md) — the
+  per-checkout comply lock (#75).
+- [`runtime/managed-workflow-self-audit.md`](runtime/managed-workflow-self-audit.md)
+  — why this repo keeps its managed workflow (and how the host-repo step made
+  it green).
