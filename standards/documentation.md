@@ -59,15 +59,17 @@ The other half is durable knowledge: how to write the docs under `docs/` — see
 
 ## Knowledge docs
 
-Durable knowledge lives under `docs/<area>/<title>.md`. A doc serves two
-readers at once — the human skimming subtitles and the model that pays for the
-`Summary` line instead of a full read — so write short, sectioned,
-self-describing docs and both are served by the same artefact.
+Durable knowledge lives under `docs/<area>/<title>.md`. Its generic convention —
+the front-matter metadata, the doc's identity and the near-twin audit, and the
+claim-section requirement — is owned by the `docs` plugin, shipped as
+`CONVENTION.md` in the `@markstanden/opencode-docs-plugin` package and restated
+as the runtime `docs` skill. Read it there; never restate it here. The house
+writing rules below sit on top.
 
-- **Front-matter.** `Area` (from the path), `Keywords` (search terms) and
-  `Summary` (a self-contained one-line TL;DR). `Date` is **not** front-matter:
-  it is derived from the doc's last git commit, else its mtime. Never
-  hand-maintain a date, in front-matter or in a heading.
+A doc serves two readers at once — the human skimming subtitles and the model
+that pays for the `Summary` line instead of a full read — so write short,
+sectioned, self-describing docs.
+
 - **Sectioned with subtitles.** An H1, then H2 sections a reader can navigate
   from the catalogue line alone. Tables, bullets and code blocks over prose.
 - **Grade claims by section.** Group a problem domain's claims (an H2) by how
