@@ -12,16 +12,18 @@
 // The floor grows deliberately over time: the super-linear-regex floor that
 // motivated the step (the local reproduction of Sonar typescript:S8786), the
 // cyclomatic-complexity floor, the public-API documentation floor, and then
-// (2026-10-12) the typescript-eslint *recommended* set and the
-// naming-convention rule — ported from opencode-docs-plugin's repo config so
-// that repo (and any repo like it) can drop its own eslint.config.*. Add rules
-// as they earn their place, and date each addition. A repo is expected to be
-// brought into line rather than the floor held back; a rule with a per-repo
-// tunable carries an env-door opt-out (see below) for a deliberate, temporary
-// exception.
+// (2026-10-12) the core @eslint/js and typescript-eslint *recommended* sets
+// plus the naming-convention rule — the latter two ported from
+// opencode-docs-plugin's repo config so that repo (and any repo like it) can
+// drop its own eslint.config.*. Add rules as they earn their place, and date
+// each addition. A repo is expected to be brought into line rather than the
+// floor held back; a rule with a per-repo tunable carries an env-door opt-out
+// (see below) for a deliberate, temporary exception.
 //
 // Canonical copy:
 // https://github.com/markstanden/defined/blob/main/runtime/config/eslint.config.mjs
+import js from "@eslint/js";
+import globals from "globals";
 import tseslint from "typescript-eslint";
 import regexp from "eslint-plugin-regexp";
 import jsdoc from "eslint-plugin-jsdoc";
@@ -67,13 +69,13 @@ function requireJsdocFromEnv() {
 
 const requireJsdoc = requireJsdocFromEnv();
 
-// The typescript-eslint recommended set (2026-10-12): the house's first
-// imported rule set, ported from opencode-docs-plugin's repo config. A baked
-// config cannot read the consumer's .defined.json, so the eslint step forwards
-// an override as DEFINED_ESLINT_RECOMMENDED: "off" drops the whole set,
-// anything else (or unset) keeps it. The door is for a deliberate, temporary
-// exception, not a way to stay loose. A repo-owned config never sees this — it
-// governs itself.
+// The recommended sets (2026-10-12): core @eslint/js plus the
+// typescript-eslint set, the latter ported from opencode-docs-plugin's repo
+// config. A baked config cannot read the consumer's .defined.json, so the
+// eslint step forwards an override as DEFINED_ESLINT_RECOMMENDED: "off" drops
+// both sets, anything else (or unset) keeps them. The door is for a deliberate,
+// temporary exception, not a way to stay loose. A repo-owned config never sees
+// this — it governs itself.
 function recommendedFromEnv() {
     return process.env.DEFINED_ESLINT_RECOMMENDED !== "off";
 }
@@ -232,15 +234,23 @@ const NAMING_CONVENTION = {
 const NAMING_EXEMPT_FILES = ["*.config.{mjs,ts,mts}", "**/*.d.ts"];
 
 export default [
-    // 2026-10-12: the typescript-eslint recommended set. Spread first so
-    // the floor's own rules below win on conflict; `prettierConfig` still last.
+    // 2026-10-12: the recommended sets, behind the one
+    // DEFINED_ESLINT_RECOMMENDED door. Core @eslint/js first, then
+    // typescript-eslint's — its eslint-recommended overrides switch off the
+    // core rules that duplicate or conflict for TS. Spread first so the
+    // floor's own rules below win on conflict; `prettierConfig` still last.
+    ...(recommended ? [js.configs.recommended] : []),
     ...(recommended ? tseslint.configs.recommended : []),
     {
         files: LINT_FILES,
         // typescript-eslint's parser sees the AST of a .ts/.mts file at all;
         // its plugin is registered here too (the recommended base registers it
         // globally) so the naming rule works even when the set is opted out.
-        languageOptions: { parser: tseslint.parser },
+        // Node's ambient globals (process, console, module, require…) so the
+        // core no-undef rule does not flag them in .js/.mjs/.cjs; TS files need
+        // no map — typescript-eslint switches no-undef off for TS and the
+        // compiler does the checking (2026-10-12).
+        languageOptions: { parser: tseslint.parser, globals: globals.node },
         plugins: { regexp, jsdoc, "@typescript-eslint": tseslint.plugin },
         rules: {
             // 2026-09-26: the regexp floor. no-super-linear-move is the rule

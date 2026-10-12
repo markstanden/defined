@@ -272,12 +272,14 @@ test(
             await writeFile(workflowPath, repaired);
 
             // Repair the ESLint findings: the post-fix regex from
-            // system-config PR #62 (exclude `[` from the class), and the
-            // documentation floor's real prose — written by hand, never
-            // autofilled, matching the seeded style (4-space indent).
+            // system-config PR #62 (exclude `[` from the class, written
+            // `[^[\]]` — the spelling the core no-useless-escape rule
+            // accepts), and the documentation floor's real prose — written by
+            // hand, never autofilled, matching the seeded style (4-space
+            // indent).
             await writeFile(
                 join(root, "lib/healthcheck.mts"),
-                "export const MARKDOWN_LINK = /\\[[^\\[\\]]*\\]\\(([^)]*)\\)/g;\n",
+                "export const MARKDOWN_LINK = /\\[[^[\\]]*\\]\\(([^)]*)\\)/g;\n",
             );
             await writeFile(
                 join(root, "lib/contracts.mts"),
