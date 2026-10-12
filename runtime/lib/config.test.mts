@@ -525,6 +525,23 @@ test("loadConfig rejects a malformed eslint complexityMax", async () => {
     }
 });
 
+test("loadConfig parses the eslint recommended override", async () => {
+    for (const recommended of [true, false] as const) {
+        const dir = await makeTempDir("quality-config-");
+        await writeConfig(dir, JSON.stringify({ eslint: { recommended } }));
+        const config = await loadConfig({ repoRoot: dir });
+        assert.equal(config.eslint?.recommended, recommended);
+    }
+});
+
+test("loadConfig rejects a non-boolean eslint recommended", async () => {
+    await rejectsLoad({
+        dir: await makeTempDir("quality-config-"),
+        config: { eslint: { recommended: "off" } },
+        re: /"eslint\.recommended" must be a boolean/u,
+    });
+});
+
 test("loadConfig parses the workflow disable flag", async () => {
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ workflow: { disable: true } }));

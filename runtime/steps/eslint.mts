@@ -9,7 +9,10 @@
 //           written beside it as eslint.config.defined.mjs (example sidecar).
 //           `.defined.json` "eslint": { "disable": true } switches the step off;
 //           "eslint": { "complexityMax": N | false } tunes the house config's
-//           cyclomatic-complexity ceiling (forwarded as an env var).
+//           cyclomatic-complexity ceiling; "eslint": { "requireJsdoc": false }
+//           drops the documentation floor; "eslint": { "recommended": false }
+//           drops the typescript-eslint recommended set. Each tunable is
+//           forwarded as an env var.
 // Fix:      --fix only. This is the repair pass (#65): the check runs once in
 //           the authoritative no-fix verification pass, where a fix that leaves
 //           findings can never read as success. --fix rewrites repo code (that
@@ -339,32 +342,58 @@ async function manageExample({
 }
 
 /**
+ * Set an env override when the config value is defined, mapping it to its
+ * string form; a defined value of `false` still counts (it means "off").
+ */
+function setOverride<T>(
+    overrides: Record<string, string>,
+    name: string,
+    value: T | undefined,
+    toEnv: (value: T) => string,
+): void {
+    if (value !== undefined) {
+        overrides[name] = toEnv(value);
+    }
+}
+
+/**
  * The house config's overrides as an env overlay: `.defined.json`
  * "eslint": { "complexityMax": N | false } forwarded as
- * DEFINED_ESLINT_COMPLEXITY_MAX and
+ * DEFINED_ESLINT_COMPLEXITY_MAX,
  * "eslint": { "requireJsdoc": false } forwarded as
- * DEFINED_ESLINT_REQUIRE_JSDOC (a baked config cannot read the repo).
- * Undefined when neither is set — the baked config keeps its own defaults; a
- * repo-owned config governs itself and must not see either variable.
+ * DEFINED_ESLINT_REQUIRE_JSDOC, and "eslint": { "recommended": false }
+ * forwarded as DEFINED_ESLINT_RECOMMENDED (a baked config cannot read the
+ * repo). Undefined when none is set — the baked config keeps its own defaults;
+ * a repo-owned config governs itself and must not see any of them.
  */
 function houseConfigEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
-    const max = config.eslint?.complexityMax;
-    const requireJsdoc = config.eslint?.requireJsdoc;
-    if (max === undefined && requireJsdoc === undefined) {
+    const eslint = config.eslint;
+    if (eslint === undefined) {
         return undefined;
     }
-    return {
-        ...process.env,
-        ...(max === undefined
-            ? {}
-            : {
-                  DEFINED_ESLINT_COMPLEXITY_MAX:
-                      max === false ? "off" : String(max),
-              }),
-        ...(requireJsdoc === undefined
-            ? {}
-            : { DEFINED_ESLINT_REQUIRE_JSDOC: requireJsdoc ? "on" : "off" }),
-    };
+    const overrides: Record<string, string> = {};
+    setOverride(
+        overrides,
+        "DEFINED_ESLINT_COMPLEXITY_MAX",
+        eslint.complexityMax,
+        (max) => (max === false ? "off" : String(max)),
+    );
+    setOverride(
+        overrides,
+        "DEFINED_ESLINT_REQUIRE_JSDOC",
+        eslint.requireJsdoc,
+        (value) => (value ? "on" : "off"),
+    );
+    setOverride(
+        overrides,
+        "DEFINED_ESLINT_RECOMMENDED",
+        eslint.recommended,
+        (value) => (value ? "on" : "off"),
+    );
+    if (Object.keys(overrides).length === 0) {
+        return undefined;
+    }
+    return { ...process.env, ...overrides };
 }
 
 /**
@@ -639,6 +668,7 @@ function eslintFileCache({
                 // same values it forwards: a change is a new identity.
                 complexity: complexityEnvValue(config),
                 requireJsdoc: jsdocEnvValue(config),
+                recommended: recommendedEnvValue(config),
             },
         }),
     });
@@ -660,6 +690,17 @@ function jsdocEnvValue(config: DefinedConfig): string {
         return "default";
     }
     return requireJsdoc ? "on" : "off";
+}
+
+/**
+ * Effective recommended as the house config sees it ("default" when unset).
+ */
+function recommendedEnvValue(config: DefinedConfig): string {
+    const recommended = config.eslint?.recommended;
+    if (recommended === undefined) {
+        return "default";
+    }
+    return recommended ? "on" : "off";
 }
 
 /**

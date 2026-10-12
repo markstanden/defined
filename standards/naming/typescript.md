@@ -29,11 +29,14 @@ user. Test files are colocated `*.test.mts`.
 
 ## Enforcement
 
-TypeScript naming is not enforced by a built-in gate step. The gate's ESLint
-step runs (see [`../node-eslint.md`](../node-eslint.md)), but its v1 rule set is
-the super-linear-regex floor only — it does **not** check naming. Projects
-declare their own rules command under the `.defined.json` `naming` key (see
-[`../naming.md`](../naming.md)); ESLint's
-`@typescript-eslint/naming-convention` rule (camelCase functions, PascalCase
-types, UPPER_CASE constants; looser properties for env-var and wire-format
-names) is the reference implementation, and the likely v2 addition.
+TypeScript naming is enforced by the gate's ESLint step: the baked house config
+runs `@typescript-eslint/naming-convention` as `error` (selectors and oracle
+notes in [`../node-eslint.md`](../node-eslint.md)), so a repo with no
+`eslint.config.*` of its own inherits the table above as a gate check. A
+repo-owned config governs itself.
+
+Projects may still declare their own rules command under the `.defined.json`
+`naming` key (see [`../naming.md`](../naming.md)) for names the
+naming-convention rule cannot see — shell functions, workflow filenames and
+other non-TypeScript identifiers; the gate's `naming` step provides that
+framework and the workflow-filename grammar.

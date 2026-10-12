@@ -740,7 +740,6 @@ export interface RunGateDeps {
 /** The comply flow: bootstrap → repair (fix) pass → fresh no-fix pass → result. */
 async function runComply({
     repoRoot,
-    files,
     runSetupFn,
     checkSetupFn,
     runPassFn,
@@ -751,7 +750,6 @@ async function runComply({
     notify,
 }: {
     repoRoot: string;
-    files: string[];
     runSetupFn: typeof runSetup;
     checkSetupFn: typeof checkSetup;
     runPassFn: typeof runPass;
@@ -905,7 +903,6 @@ export async function runGate({
         verb === "comply"
             ? runComply({
                   repoRoot,
-                  files,
                   runSetupFn: resolved.runSetupFn,
                   checkSetupFn: resolved.checkSetupFn,
                   runPassFn: resolved.runPassFn,

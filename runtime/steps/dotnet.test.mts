@@ -204,7 +204,7 @@ test("restore failure fails the step before any build", async () => {
 });
 
 test("format failure in fix mode fails the step", async () => {
-    const { runner, calls } = fakeRunner(
+    const { runner } = fakeRunner(
         { "dotnet format": { status: 1, stderr: "format error" } },
         true,
     );

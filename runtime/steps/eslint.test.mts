@@ -152,6 +152,25 @@ test("a requireJsdoc override reaches the house config as an env var", async () 
     assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, undefined);
 });
 
+test("a recommended override reaches the house config as an env var", async () => {
+    const root = await makeTempDir("quality-eslint-rec-");
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "recommended": false } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const { runner, calls } = recordingRunner();
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root },
+        trackedFiles: [".defined.json", "src/a.ts"],
+        runner,
+    });
+    assert.equal(result.status, "pass");
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_RECOMMENDED, "off");
+    // The other doors stay unset when only recommended is declared.
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, undefined);
+    assert.equal(calls[0]!.env?.DEFINED_ESLINT_REQUIRE_JSDOC, undefined);
+});
+
 test("complexityMax false drops the rule via the off sentinel", async () => {
     const root = await makeTempDir("quality-eslint-cx-off-");
     await writeTree(root, {
@@ -691,6 +710,34 @@ test("a changed effective config invalidates every entry", async () => {
     });
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "complexityMax": 14 } }\n',
+    });
+    const changed = lintRunner(new Map());
+    await runEslintStep({ ctx, trackedFiles, runner: changed.runner });
+    assert.deepEqual(changed.calls, [["src/a.ts"]], "new identity: all miss");
+});
+
+test("a changed recommended override invalidates every entry", async () => {
+    const root = await makeTempDir("quality-eslint-cache-rec-");
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "recommended": false } }\n',
+        "src/a.ts": "export const a = 1;\n",
+    });
+    const cacheDir = await makeTempDir("quality-eslint-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const trackedFiles = [".defined.json", "src/a.ts"];
+
+    await runEslintStep({
+        ctx,
+        trackedFiles,
+        runner: lintRunner(new Map()).runner,
+    });
+    await writeTree(root, {
+        ".defined.json": '{ "eslint": { "recommended": true } }\n',
     });
     const changed = lintRunner(new Map());
     await runEslintStep({ ctx, trackedFiles, runner: changed.runner });
