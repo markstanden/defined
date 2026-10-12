@@ -42,11 +42,17 @@ opt-out its entry names so a repo can take a deliberate, temporary exception.
 - the **public-API documentation floor** (2026-10-03): the `jsdoc/*` rules
   below. Per-repo tunable: `"eslint": { "requireJsdoc": false }` drops the
   floor (forwarded as `DEFINED_ESLINT_REQUIRE_JSDOC=off`);
-- the **typescript-eslint recommended set** (2026-10-12):
-  `tseslint.configs.recommended`, ported from `opencode-docs-plugin`'s repo
-  config so that repo (and any repo like it) can drop its own
-  `eslint.config.*`. Per-repo tunable: `"eslint": { "recommended": false }`
-  (forwarded as `DEFINED_ESLINT_RECOMMENDED=off`);
+- the **recommended sets** (2026-10-12): core `@eslint/js`
+  (`js.configs.recommended`) first, then `tseslint.configs.recommended` — the
+  latter ported from `opencode-docs-plugin`'s repo config so that repo (and any
+  repo like it) can drop its own `eslint.config.*`. `languageOptions.globals` is
+  `globals.node`, so the core `no-undef` rule does not flag
+  `process`/`console`/`module` in `.js`/`.mjs`/`.cjs` (typescript-eslint
+  switches `no-undef` off for TS — the compiler does the checking there).
+  Per-repo tunable: `"eslint": { "recommended": false }` drops both sets
+  (forwarded as `DEFINED_ESLINT_RECOMMENDED=off`). Oracle: the core set adds
+  nothing beyond `no-undef` across the house repos and the fixture except
+  `no-useless-escape` (a redundant `\[` inside a character class);
 - the **naming floor** (2026-10-12): `@typescript-eslint/naming-convention`
   (see below);
 - `eslint-config-prettier` last, so ESLint never votes on formatting.
@@ -174,9 +180,9 @@ the content hash of that file, so a pin change rebuilds. Oracle-verify a new
 rule on the pinned versions first and record the findings here, as the naming
 and jsdoc entries do.
 
-Still unadopted: `@eslint/js`'s recommended set and the typed
-(`recommendedTypeChecked`) rules — the baked config has no tsconfig, so typed
-rules wait until the step can resolve one.
+Still unadopted: the typed (`recommendedTypeChecked`/`strictTypeChecked`) rules
+— they need type information (`parserOptions.projectService` and every linted
+file inside a tsconfig), which the baked config does not have.
 
 ## Why baked, not seeded
 

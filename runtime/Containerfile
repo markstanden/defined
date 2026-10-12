@@ -55,6 +55,8 @@ RUN set -eux; \
         "eslint-plugin-regexp@${ESLINT_PLUGIN_REGEXP_VERSION}" \
         "eslint-config-prettier@${ESLINT_CONFIG_PRETTIER_VERSION}" \
         "eslint-plugin-jsdoc@${ESLINT_PLUGIN_JSDOC_VERSION}" \
+        "@eslint/js@${ESLINT_JS_VERSION}" \
+        "globals@${GLOBALS_VERSION}" \
         "typescript@${ESLINT_TYPESCRIPT_VERSION}"; \
     arch="$(uname -m)"; \
     case "${arch}" in \
