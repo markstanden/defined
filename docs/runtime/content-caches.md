@@ -130,7 +130,7 @@ flush swallowed, `partitionByHash`, metric gating, and the launcher volume.
 - Cache metrics must not go in `notice`: for a passing or skipped step it
   is not rendered, and only a failing step with no diagnostics surfaces it
   (`runtime/lib/report.mts`).
-- House v1 rules are file-local, which is what makes per-file reuse
+- House rules are file-local, which is what makes per-file reuse
   sound. A future eslint rule that lints one file in the context of others (an
   import graph, a project-wide budget) would make per-file caching unsound without
   widening the unit or the identity.

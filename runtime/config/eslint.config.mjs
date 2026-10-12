@@ -9,12 +9,16 @@
 // eslint.config.defined.mjs beside it as an example of this file. Nothing is
 // installed into, or written to, a repo that has no config.
 //
-// v1 is deliberately narrow: the super-linear-regex floor that motivated the
-// step (the local reproduction of Sonar typescript:S8786), the cyclomatic-
-// complexity floor, and the public-API documentation floor. The full @eslint/js
-// and typescript-eslint *recommended* rule sets are deferred to v2 so a pin bump
-// cannot turn every consumer red at once. Add rules as they earn their place,
-// and date each addition.
+// The floor grows deliberately over time: the super-linear-regex floor that
+// motivated the step (the local reproduction of Sonar typescript:S8786), the
+// cyclomatic-complexity floor, the public-API documentation floor, and then
+// (2026-10-12) the typescript-eslint *recommended* set and the
+// naming-convention rule — ported from opencode-docs-plugin's repo config so
+// that repo (and any repo like it) can drop its own eslint.config.*. Add rules
+// as they earn their place, and date each addition. A repo is expected to be
+// brought into line rather than the floor held back; a rule with a per-repo
+// tunable carries an env-door opt-out (see below) for a deliberate, temporary
+// exception.
 //
 // Canonical copy:
 // https://github.com/markstanden/defined/blob/main/runtime/config/eslint.config.mjs
@@ -62,6 +66,19 @@ function requireJsdocFromEnv() {
 }
 
 const requireJsdoc = requireJsdocFromEnv();
+
+// The typescript-eslint recommended set (2026-10-12): the house's first
+// imported rule set, ported from opencode-docs-plugin's repo config. A baked
+// config cannot read the consumer's .defined.json, so the eslint step forwards
+// an override as DEFINED_ESLINT_RECOMMENDED: "off" drops the whole set,
+// anything else (or unset) keeps it. The door is for a deliberate, temporary
+// exception, not a way to stay loose. A repo-owned config never sees this — it
+// governs itself.
+function recommendedFromEnv() {
+    return process.env.DEFINED_ESLINT_RECOMMENDED !== "off";
+}
+
+const recommended = recommendedFromEnv();
 
 // Test files are exempt from the complexity ceiling and the documentation
 // floor: complexity gates production logic, and a linear test script (a table
@@ -151,16 +168,83 @@ const JSDOC_OFF = Object.fromEntries(
     Object.keys(JSDOC_RULES).map((rule) => [rule, "off"]),
 );
 
+// The naming floor (2026-10-12): the reference implementation named in
+// standards/naming/typescript.md, ported from opencode-docs-plugin's repo
+// config. Selector order matters — a later, more specific selector wins — and
+// the looser property/typeProperty forms cover wire-format and env-var names,
+// and the docs convention's PascalCase front-matter keys (Area/Keywords/
+// Summary). `requiresQuotes` clears the format for a quoted object key (a path
+// literal as a key is not an identifier to style).
+//
+// Oracle notes (ESLint 10.12.0 / typescript-eslint 8.71.1 / @typescript-eslint
+// parser 6.0.3, 2026-10-12) follow the jsdoc floor's shape; see
+// standards/node-eslint.md.
+const NAMING_CONVENTION = {
+    "@typescript-eslint/naming-convention": [
+        "error",
+        {
+            selector: "default",
+            format: ["camelCase"],
+            leadingUnderscore: "allow",
+        },
+        { selector: "variable", format: ["camelCase", "UPPER_CASE"] },
+        // An import binding names a value OR a type. Without this selector the
+        // `variable` format applies and every PascalCase class/component import
+        // fails — a rule defect, not a code smell (2026-10-12 oracle).
+        { selector: "import", format: ["camelCase", "PascalCase"] },
+        { selector: "function", format: ["camelCase"] },
+        { selector: "typeLike", format: ["PascalCase"] },
+        {
+            selector: "property",
+            format: ["camelCase", "UPPER_CASE", "snake_case", "PascalCase"],
+        },
+        {
+            selector: "typeProperty",
+            format: ["camelCase", "snake_case", "PascalCase"],
+        },
+        // Quoted keys are data, not identifiers: a path literal or a wire event
+        // name (`"session.created"`) carries no style to enforce. The modifier
+        // must be repeated per key-bearing selector — `property` alone does not
+        // cover object-literal members (2026-10-12 oracle).
+        {
+            selector: "property",
+            modifiers: ["requiresQuotes"],
+            format: null,
+        },
+        {
+            selector: "objectLiteralProperty",
+            modifiers: ["requiresQuotes"],
+            format: null,
+        },
+        {
+            selector: "objectLiteralMethod",
+            modifiers: ["requiresQuotes"],
+            format: null,
+        },
+    ],
+};
+
+// Tool-config files are not source: a rule key such as
+// "@typescript-eslint/naming-convention" is data, not an identifier to style.
+// Declaration files describe shapes dictated by a framework or library (e.g.
+// Astro's ambient `const Component`), so their identifiers are not the repo's
+// to rename (2026-10-12 oracle).
+const NAMING_EXEMPT_FILES = ["*.config.{mjs,ts,mts}", "**/*.d.ts"];
+
 export default [
+    // 2026-10-12: the typescript-eslint recommended set. Spread first so
+    // the floor's own rules below win on conflict; `prettierConfig` still last.
+    ...(recommended ? tseslint.configs.recommended : []),
     {
         files: LINT_FILES,
-        // Only typescript-eslint's parser is used in v1: it is needed to see the
-        // AST of a .ts/.mts file at all. Its rules are deferred to v2.
+        // typescript-eslint's parser sees the AST of a .ts/.mts file at all;
+        // its plugin is registered here too (the recommended base registers it
+        // globally) so the naming rule works even when the set is opted out.
         languageOptions: { parser: tseslint.parser },
-        plugins: { regexp, jsdoc },
+        plugins: { regexp, jsdoc, "@typescript-eslint": tseslint.plugin },
         rules: {
-            // 2026-09-26: v1 floor. no-super-linear-move is the rule that
-            // catches the motivating system-config spelling
+            // 2026-09-26: the regexp floor. no-super-linear-move is the rule
+            // that catches the motivating system-config spelling
             // /\[[^\]]*\]\(([^)]*)\)/g (fixed in its PR #62); the sibling
             // no-super-linear-backtracking covers the classic exponential cases.
             "regexp/no-super-linear-backtracking": "error",
@@ -172,7 +256,27 @@ export default [
             // 2026-10-03: the public-API documentation floor (see the header
             // and FUNCTION_CONTEXTS above).
             ...(requireJsdoc ? JSDOC_RULES : {}),
+            // 2026-10-12: the naming floor (see NAMING_CONVENTION above).
+            ...NAMING_CONVENTION,
+            // 2026-10-12: the naming rule allows a leading underscore, so an
+            // intentionally-unused binding may carry one (`_input`); without
+            // this the recommended no-unused-vars flags it (2026-10-12 oracle,
+            // system-config).
+            "@typescript-eslint/no-unused-vars": [
+                "error",
+                {
+                    argsIgnorePattern: "^_",
+                    varsIgnorePattern: "^_",
+                    caughtErrorsIgnorePattern: "^_",
+                },
+            ],
         },
+    },
+    // Tool-config and declaration files keep every other floor rule but not
+    // naming (see NAMING_EXEMPT_FILES above).
+    {
+        files: NAMING_EXEMPT_FILES,
+        rules: { "@typescript-eslint/naming-convention": "off" },
     },
     // Test files keep the house rules but not the complexity ceiling or the
     // documentation floor: a linear test script (a table of cases, a fixture

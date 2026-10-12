@@ -117,6 +117,13 @@ export interface EslintConfig {
      * house config honours it — a repo-owned config governs itself.
      */
     requireJsdoc?: boolean;
+    /**
+     * False drops the house config's typescript-eslint recommended rule set
+     * (`tseslint.configs.recommended`): a repo not yet brought into line can
+     * silence it deliberately. Absent = the set is on. Only the house config
+     * honours it — a repo-owned config governs itself.
+     */
+    recommended?: boolean;
 }
 
 /** Consumer managed-workflow configuration (`.defined.json` `workflow` key). */
@@ -489,7 +496,12 @@ function validateTofu(raw: unknown): TofuConfig | undefined {
     };
 }
 
-const ESLINT_KEYS = new Set(["disable", "complexityMax", "requireJsdoc"]);
+const ESLINT_KEYS = new Set([
+    "disable",
+    "complexityMax",
+    "requireJsdoc",
+    "recommended",
+]);
 
 /** The complexity ceiling: a positive integer, or `false` to drop the rule. */
 function validateComplexityMax(value: unknown): number | false {
@@ -504,6 +516,21 @@ function validateComplexityMax(value: unknown): number | false {
     return value;
 }
 
+/** A boolean `.defined.json` field: validated when present, absent otherwise. */
+function optionalBoolean(
+    entry: Record<string, unknown>,
+    key: "disable" | "requireJsdoc" | "recommended",
+): boolean | undefined {
+    const value = entry[key];
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== "boolean") {
+        throw new TypeError(`.defined.json: "eslint.${key}" must be a boolean`);
+    }
+    return value;
+}
+
 function validateEslint(raw: unknown): EslintConfig | undefined {
     if (raw === undefined || raw === null) {
         return undefined;
@@ -511,24 +538,20 @@ function validateEslint(raw: unknown): EslintConfig | undefined {
     const entry = expectObject("eslint", raw);
     rejectUnknownKeys(entry, ESLINT_KEYS, "eslint");
     const result: EslintConfig = {};
-    if (entry.disable !== undefined) {
-        if (typeof entry.disable !== "boolean") {
-            throw new TypeError(
-                `.defined.json: "eslint.disable" must be a boolean`,
-            );
-        }
-        result.disable = entry.disable;
+    const disable = optionalBoolean(entry, "disable");
+    if (disable !== undefined) {
+        result.disable = disable;
     }
     if (entry.complexityMax !== undefined) {
         result.complexityMax = validateComplexityMax(entry.complexityMax);
     }
-    if (entry.requireJsdoc !== undefined) {
-        if (typeof entry.requireJsdoc !== "boolean") {
-            throw new TypeError(
-                `.defined.json: "eslint.requireJsdoc" must be a boolean`,
-            );
-        }
-        result.requireJsdoc = entry.requireJsdoc;
+    const requireJsdoc = optionalBoolean(entry, "requireJsdoc");
+    if (requireJsdoc !== undefined) {
+        result.requireJsdoc = requireJsdoc;
+    }
+    const recommended = optionalBoolean(entry, "recommended");
+    if (recommended !== undefined) {
+        result.recommended = recommended;
     }
     // `eslint` present but nothing declared: the house step still runs.
     return Object.keys(result).length === 0 ? undefined : result;

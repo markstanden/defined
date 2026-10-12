@@ -16,15 +16,17 @@ repo.
   `eslint.config.defined.mjs` beside it as an example of the current default and
   adds it to `.git/info/exclude`.
 - `"eslint": { "disable": true }` in `.defined.json` turns the step off;
-  `"eslint": { "complexityMax": N | false }` tunes the complexity ceiling
-  below (house config only — a repo-owned config governs itself).
+  `complexityMax`, `requireJsdoc` and `recommended` tune the house floor below
+  (house config only — a repo-owned config governs itself).
 
 The step runs after `node` and before `node-checks`; `comply` runs `--fix` then
 always re-checks, `verify` never writes.
 
-## v1 rule set
+## The floor
 
-Deliberately narrow, so a pin bump cannot fail every consumer at once:
+Grown deliberately, each addition dated. A rule that flags conforming code is
+a defect to fix, not a floor to hold back; a new rule ships with the env-door
+opt-out its entry names so a repo can take a deliberate, temporary exception.
 
 - `regexp/no-super-linear-backtracking` and `regexp/no-super-linear-move` — the
   super-linear-regex floor (the local reproduction of Sonar
@@ -39,9 +41,54 @@ Deliberately narrow, so a pin bump cannot fail every consumer at once:
   `DEFINED_ESLINT_COMPLEXITY_MAX`;
 - the **public-API documentation floor** (2026-10-03): the `jsdoc/*` rules
   below. Per-repo tunable: `"eslint": { "requireJsdoc": false }` drops the
-  floor (forwarded as `DEFINED_ESLINT_REQUIRE_JSDOC=off`); a repo-owned
-  config governs itself and sees neither variable;
+  floor (forwarded as `DEFINED_ESLINT_REQUIRE_JSDOC=off`);
+- the **typescript-eslint recommended set** (2026-10-12):
+  `tseslint.configs.recommended`, ported from `opencode-docs-plugin`'s repo
+  config so that repo (and any repo like it) can drop its own
+  `eslint.config.*`. Per-repo tunable: `"eslint": { "recommended": false }`
+  (forwarded as `DEFINED_ESLINT_RECOMMENDED=off`);
+- the **naming floor** (2026-10-12): `@typescript-eslint/naming-convention`
+  (see below);
 - `eslint-config-prettier` last, so ESLint never votes on formatting.
+
+Every tunable above is honoured only by the baked house config; a repo-owned
+config governs itself and sees none of the variables.
+
+## The naming floor (2026-10-12)
+
+`@typescript-eslint/naming-convention` as `error` — the reference
+implementation named in [`naming/typescript.md`](naming/typescript.md).
+Selectors, in order (a later, more specific selector wins):
+
+- `default` camelCase (a leading underscore is allowed);
+- `variable` camelCase or UPPER_CASE;
+- `import` camelCase or PascalCase — an import binding names a value _or_ a
+  type, so a PascalCase class/component import must pass;
+- `function` camelCase;
+- `typeLike` PascalCase;
+- `property` camelCase, UPPER_CASE, snake_case or PascalCase;
+- `typeProperty` camelCase, snake_case or PascalCase;
+- `property`, `objectLiteralProperty` and `objectLiteralMethod` with the
+  `requiresQuotes` modifier — format `null`: a quoted key is data (a path
+  literal, a wire event name such as `"session.created"`), not an identifier
+  to style.
+
+Oracle-verified on ESLint 10.12.0 / typescript-eslint 8.71.1 /
+@typescript-eslint parser 6.0.3 (2026-10-12):
+
+- without the `import` selector the `variable` format applies and every
+  PascalCase class import reports — a rule defect, not a code smell
+  (`rdd-astro`: 29 findings, all correct imports);
+- `requiresQuotes` must be repeated per key-bearing selector — `property` alone
+  does not cover object-literal members (`system-config`: 3 wire event names);
+- `*.config.{mjs,ts,mts}` and `**/*.d.ts` are exempt: a tool config's keys are
+  data, and a declaration file describes a framework's shapes (Astro's ambient
+  `const Component`), not the repo's to rename.
+
+The recommended set's `@typescript-eslint/no-unused-vars` is overridden with
+`argsIgnorePattern`, `varsIgnorePattern` and `caughtErrorsIgnorePattern` `^_`,
+so an intentionally-unused binding may carry the leading underscore the naming
+rule already allows.
 
 ## The public-API documentation floor (2026-10-03)
 
@@ -85,8 +132,8 @@ signature. Rules:
 What the floor deliberately does NOT catch: a non-empty junk summary
 (`/** silence */`) passes `require-description` everywhere — prose quality is
 review work, and no shipped rule separates a junk word from a real one.
-(`jsdoc/informative-docs` is the candidate if v2 wants this enforced; it
-needs a false-positive audit across consumers first.)
+(`jsdoc/informative-docs` is the candidate if a future rule wants this
+enforced; it needs a false-positive audit across consumers first.)
 
 Test files are exempt from the whole floor: a fixture firehose is not
 machinery a future consumer calls into.
@@ -96,9 +143,9 @@ Deliberately outside the floor: `jsdoc/require-param` and
 options-object parameter needs `@param root0` boilerplate for each destructured
 member — hundreds of ceremonial tags across these modules and consumers (the
 2026-10-03 adoption audit priced this repo alone at ~500 entries). Summary +
-described-when-present tags is the v1 floor; the doctrine's "describe every
-parameter" stays a documentation and review standard. Revisit in v2 once
-repos converge.
+described-when-present tags is the floor; the doctrine's "describe every
+parameter" stays a documentation and review standard. Revisit once repos
+converge.
 
 ## The floor never manufactures docs
 
@@ -118,13 +165,18 @@ explanation, and write `@param`/`@returns` text that a caller cannot guess
 from the signature (accepted ranges, null/empty behaviour, thrown failures).
 House doctrine lives in [`documentation.md`](documentation.md).
 
-## Adding a rule (v1 → v2 growth plan)
+## Adding a rule
 
-Append to the `rules` block in `runtime/config/eslint.config.mjs`, dated, once
-the repos that will run it are clean. `@eslint/js` and the `typescript-eslint`
-recommended sets are the intended v2 additions; typed rules wait until then.
-Bump the ESLint pins in `runtime/tool-versions.env` in the same change that uses
-them — the image tag is the content hash of that file, so a pin change rebuilds.
+Append to `runtime/config/eslint.config.mjs`, dated, and bring the repos that
+run it into line rather than holding the rule back. Bump the ESLint pins in
+`runtime/tool-versions.env` in the same change that uses them — the image tag is
+the content hash of that file, so a pin change rebuilds. Oracle-verify a new
+rule on the pinned versions first and record the findings here, as the naming
+and jsdoc entries do.
+
+Still unadopted: `@eslint/js`'s recommended set and the typed
+(`recommendedTypeChecked`) rules — the baked config has no tsconfig, so typed
+rules wait until the step can resolve one.
 
 ## Why baked, not seeded
 
