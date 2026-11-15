@@ -30,13 +30,11 @@ rule:
   pretending the phases split. A body with no setup has no Arrange phase: omit
   the label rather than inventing one, and do not add ceremony to satisfy a
   scanner count.
-- **`and` in a name is a flag, not a defect.** Read the test: split it when the
+- **"and" in a name is a flag, not a defect.** Read the test: split it when the
   halves sit on different code paths or different moments, so a red test would
-  blame the wrong half (status plumbing versus cleanup; an arrange-time
-  invariant versus an after-the-fact side effect; any two `Act` steps). Leave
-  the commonplace pairing alone — one act that produces one outcome plus its
-  echo (`reportsFindingAndExits`, `fails and logs`, `lists tracked and
-  untracked`) is a single behaviour.
+  blame the wrong half — status plumbing versus cleanup, an arrange-time
+  invariant versus an after-the-fact side effect, any two `Act` steps. Leave
+  the commonplace pairing alone: one act with one outcome plus its echo.
 - **Assertion helpers carry the verb**: name a helper `assertX(...)` (e.g.
   `assertLoadRejects`), never `rejectsLoad(...)`. The reader and the review
   scanner both look for the verb; without it a helper reads as "no assertions".

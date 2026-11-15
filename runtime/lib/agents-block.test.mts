@@ -192,16 +192,17 @@ test("checkMarkedBlock reports absent, present, drift or corrupt", async () => {
     // Arrange — one row per state: no file, the block verbatim, a body that has
     // moved on, and an end marker with no start. The absent row must run first.
     const drifted = [BLOCK_START, "Out-of-date pointer.", BLOCK_END].join("\n");
-    const cases: Array<{ state: string; content?: string; expected: string }> = [
-        { state: "absent", expected: "absent" },
-        { state: "present", content: BLOCK, expected: "present" },
-        { state: "drift", content: drifted, expected: "drift" },
-        {
-            state: "corrupt",
-            content: `${BLOCK_END} without its start\n`,
-            expected: "corrupt",
-        },
-    ];
+    const cases: Array<{ state: string; content?: string; expected: string }> =
+        [
+            { state: "absent", expected: "absent" },
+            { state: "present", content: BLOCK, expected: "present" },
+            { state: "drift", content: drifted, expected: "drift" },
+            {
+                state: "corrupt",
+                content: `${BLOCK_END} without its start\n`,
+                expected: "corrupt",
+            },
+        ];
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
