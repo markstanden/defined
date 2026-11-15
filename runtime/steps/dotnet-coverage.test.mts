@@ -1,6 +1,6 @@
 // Tests for steps/dotnet-coverage.mts: Cobertura parser + minimum gate.
 // Runner injected, so no host binaries are needed here.
-// Run: node --test steps/dotnet-coverage.test.mts
+// Run: node --test runtime/steps/dotnet-coverage.test.mts
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -84,27 +84,43 @@ const SAMPLE_XML = `<?xml version="1.0" encoding="utf-8"?>
 // --- parseCobertura ---
 
 test("parseCobertura extracts line and branch rates", () => {
+    // Act
     const summary = parseCobertura({ content: SAMPLE_XML });
+
+    // Assert
     assert.equal(summary.lineRate, 0.85);
     assert.equal(summary.branchRate, 0.7);
 });
 
 test("parseCobertura handles integer-style rates", () => {
+    // Arrange
     const xml = '<coverage line-rate="1" branch-rate="0.5"></coverage>';
+
+    // Act
     const summary = parseCobertura({ content: xml });
+
+    // Assert
     assert.equal(summary.lineRate, 1);
     assert.equal(summary.branchRate, 0.5);
 });
 
 test("parseCobertura returns zero when rates absent", () => {
+    // Arrange
     const xml = "<coverage></coverage>";
+
+    // Act
     const summary = parseCobertura({ content: xml });
+
+    // Assert
     assert.equal(summary.lineRate, 0);
     assert.equal(summary.branchRate, undefined);
 });
 
 test("parseCobertura returns zero for empty content", () => {
+    // Act
     const summary = parseCobertura({ content: "" });
+
+    // Assert
     assert.equal(summary.lineRate, 0);
     assert.equal(summary.branchRate, undefined);
 });
@@ -112,59 +128,77 @@ test("parseCobertura returns zero for empty content", () => {
 // --- checkMinimums ---
 
 test("checkMinimums passes when above line minimum", () => {
+    // Act
     const result = checkMinimums({
         summary: { lineRate: 0.9, branchRate: 0.8 },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, true);
     assert.equal(result.failures.length, 0);
 });
 
 test("checkMinimums fails when below line minimum", () => {
+    // Act
     const result = checkMinimums({
         summary: { lineRate: 0.7, branchRate: 0.8 },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /line:.*70\.0%.*80%/u);
 });
 
 test("checkMinimums checks branch when configured", () => {
+    // Act
     const result = checkMinimums({
         summary: { lineRate: 0.9, branchRate: 0.6 },
         minimums: { line: 80, branch: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /branch:.*60\.0%.*70%/u);
 });
 
 test("checkMinimums fails on missing branch data when branch minimum configured", () => {
+    // Act
     const result = checkMinimums({
         summary: { lineRate: 0.9, branchRate: undefined },
         minimums: { line: 80, branch: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /no branch-rate data/u);
 });
 
 test("checkMinimums fails on function minimum (no function data in Cobertura)", () => {
+    // Act
     const result = checkMinimums({
         summary: { lineRate: 0.9, branchRate: 0.8 },
         minimums: { line: 80, function: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /no function coverage/u);
 });
 
 test("checkMinimums reports multiple failures", () => {
+    // Act
     const result = checkMinimums({
         summary: { lineRate: 0.5, branchRate: 0.5 },
         minimums: { line: 80, branch: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 2);
 });
@@ -172,44 +206,60 @@ test("checkMinimums reports multiple failures", () => {
 // --- runDotNetCoverageStep ---
 
 test("skips when no coverage.dotnet in config", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({ root: dir, config: { version: TEST_SHA } });
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runDotNetCoverageStep,
         repoRoot: dir,
         trackedFiles: ["App.csproj"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("skips when no .defined.json exists", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-dc-");
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runDotNetCoverageStep,
         repoRoot: dir,
         trackedFiles: ["App.csproj"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("skips when dotnet is disabled by .defined.json", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({
         root: dir,
         config: { version: TEST_SHA, dotnet: { disable: true } },
     });
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runDotNetCoverageStep,
         repoRoot: dir,
         trackedFiles: ["App.csproj"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("fails when the coverage command fails", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-dc-");
     await setupCoverageRepo({
         root: dir,
@@ -218,6 +268,8 @@ test("fails when the coverage command fails", async () => {
             coverage: { dotnet: { command: "false" } },
         },
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runDotNetCoverageStep,
         repoRoot: dir,
@@ -225,6 +277,8 @@ test("fails when the coverage command fails", async () => {
         trackedFiles: ["App.csproj"],
         runnerOutcomes: { sh: { status: 1, stderr: "boom" } },
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /coverage command failed/u);
 });
