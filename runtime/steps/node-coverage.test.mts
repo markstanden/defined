@@ -1,6 +1,6 @@
 // Tests for steps/node-coverage.mts: lcov parser + minimum gate.
 // Runner injected, so no host binaries are needed here.
-// Run: node --test steps/node-coverage.test.mts
+// Run: node --test runtime/steps/node-coverage.test.mts
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -59,6 +59,7 @@ function reportWriterRunner({
 // --- parseLcov ---
 
 test("parseLcov extracts line totals from lcov content", () => {
+    // Arrange
     const content = [
         "SF:/src/index.ts",
         "DA:1,5",
@@ -72,7 +73,11 @@ test("parseLcov extracts line totals from lcov content", () => {
         "FNF:5",
         "FNH:4",
     ].join("\n");
+
+    // Act
     const summary = parseLcov({ content });
+
+    // Assert
     assert.equal(summary.linesFound, 3);
     assert.equal(summary.linesHit, 2);
     assert.equal(summary.branchesFound, 4);
@@ -82,6 +87,7 @@ test("parseLcov extracts line totals from lcov content", () => {
 });
 
 test("parseLcov aggregates across multiple source files", () => {
+    // Arrange
     const content = [
         "SF:/src/a.ts",
         "DA:1,5",
@@ -102,7 +108,11 @@ test("parseLcov aggregates across multiple source files", () => {
         "FNH:3",
         "end_of_record",
     ].join("\n");
+
+    // Act
     const summary = parseLcov({ content });
+
+    // Assert
     assert.equal(summary.linesFound, 5);
     assert.equal(summary.linesHit, 4);
     assert.equal(summary.branchesFound, 6);
@@ -112,7 +122,10 @@ test("parseLcov aggregates across multiple source files", () => {
 });
 
 test("parseLcov returns zeros for empty content", () => {
+    // Act
     const summary = parseLcov({ content: "" });
+
+    // Assert
     assert.equal(summary.linesFound, 0);
     assert.equal(summary.linesHit, 0);
     assert.equal(summary.branchesFound, 0);
@@ -122,6 +135,7 @@ test("parseLcov returns zeros for empty content", () => {
 });
 
 test("parseLcov rejects a malformed hit counter (the reported reproduction)", () => {
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "LF:10\nLH:garbage\n" }),
         /LH counter 'garbage' is not a non-negative integer/u,
