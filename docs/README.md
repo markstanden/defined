@@ -1,6 +1,6 @@
 ---
 Area: root
-Keywords: defined gate, project brief, verified commands, layout, traps, deep dives, container image, quality gate
+Keywords: defined gate, project brief, verified commands, layout, traps, deep dives, container image, quality gate, named volume, mount point, rootless podman
 Summary: The `defined` project brief — what the repo is, the commands that prove it, the layout, and the traps worth not re-deriving.
 ---
 
@@ -76,6 +76,16 @@ explain` serves `standards/` docs verbatim.
   no longer trips it: on this repo the job runs a host-repo validation step and
   concludes `success`. See
   [`runtime/managed-workflow-self-audit.md`](runtime/managed-workflow-self-audit.md).
+- A named volume mounted at a path _inside_ the bind-mounted repo
+  (`defined-node-<pin>-<repo_hash>:/repo/node_modules`) makes the engine create
+  that mount point on the host as the namespace root — `100000:100000` under
+  rootless podman — leaving a directory the invoking user cannot write, so a
+  host `npm install` there fails. `cli/defined` and `runtime/comply.sh` create
+  it as the invoking user before the run and drop it afterwards when empty
+  (`cli/defined.test.mts`, `runtime/comply-sh.test.mts`). A dir an earlier run
+  already poisoned is not repaired — only root can `chown` — so both warn and
+  name the one-off `rmdir`. `explain` mounts no deps volume and never creates
+  one.
 
 ## Status
 

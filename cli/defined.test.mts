@@ -14,6 +14,7 @@ import {
     mkdir,
     readFile,
     rm,
+    stat,
     symlink,
     writeFile,
 } from "node:fs/promises";
@@ -39,12 +40,21 @@ function hasLine(stdout: string, ...fragments: string[]): boolean {
         .some((line) => fragments.every((fragment) => line.includes(fragment)));
 }
 
+/** The launching user's uid, as the fake engine reports it for a mount point. */
+function hostUid(): string {
+    const uid = process.getuid?.();
+    assert.ok(uid !== undefined, "the launcher is POSIX-only");
+    return String(uid);
+}
+
 interface LauncherRun {
     status: number;
     stdout: string;
     stderr: string;
     log: string[];
     curlLog: string[];
+    /** What the fake engine saw at FAKE_RUN_OBSERVE when it was invoked. */
+    observed: string[];
 }
 
 interface Fixture {
@@ -117,6 +127,9 @@ async function withFixture<T>(
  *   FAKE_MANIFEST_ERROR=… → the failure message (default "manifest unknown")
  *   FAKE_PULL_FAIL=1      → `pull` exits 1 (offline)
  *   FAKE_NO_ENGINE=1      → `--version`/inspect succeed but do nothing
+ *   FAKE_RUN_OBSERVE=<p>  → `run` records what is at path <p> as
+ *                           present:<uid>:<entries> or absent:0:0
+ *   FAKE_RUN_EXIT=<n>     → `run` exits with status <n>
  * Every invocation is appended to <bin>/<name>.log as a single line.
  */
 async function fakeEngine(
@@ -125,6 +138,7 @@ async function fakeEngine(
     env: Record<string, string> = {},
 ): Promise<void> {
     const logPath = join(bin, `${name}.log`);
+    const observePath = join(bin, "observe.log");
     const envAssign = Object.entries(env)
         .map(([k, v]) => `export ${k}="${v}"`)
         .join("\n");
@@ -151,6 +165,18 @@ if [[ "$1" == "manifest" && "$2" == "inspect" ]]; then
 fi
 if [[ "$1" == "pull" ]]; then
     [[ "\${FAKE_PULL_FAIL:-0}" == "1" ]] && exit 1 || exit 0
+fi
+if [[ "$1" == "run" ]]; then
+    if [[ -n "\${FAKE_RUN_OBSERVE:-}" ]]; then
+        if [[ -d "\${FAKE_RUN_OBSERVE}" ]]; then
+            printf 'present:%s:%s\\n' "$(stat -c %u "\${FAKE_RUN_OBSERVE}")" "$(ls -A "\${FAKE_RUN_OBSERVE}" | wc -l)" >> "${observePath}"
+        else
+            printf 'absent:0:0\\n' >> "${observePath}"
+        fi
+    fi
+    if [[ -n "\${FAKE_RUN_EXIT:-}" ]]; then
+        exit "\${FAKE_RUN_EXIT}"
+    fi
 fi
 exit 0
 `;
@@ -305,6 +331,7 @@ async function runLauncher({
         await rm(join(fixture.bin, `${engine}.log`), { force: true });
     }
     await rm(join(fixture.bin, "curl.log"), { force: true });
+    await rm(join(fixture.bin, "observe.log"), { force: true });
 
     const path = barePath
         ? fixture.bin
@@ -337,12 +364,23 @@ async function runLauncher({
     } catch {
         // downloader not invoked
     }
+    const observed: string[] = [];
+    try {
+        const content = await readFile(
+            join(fixture.bin, "observe.log"),
+            "utf8",
+        );
+        observed.push(...content.trim().split("\n").filter(Boolean));
+    } catch {
+        // the engine was never asked to observe anything
+    }
     return {
         status: result.status ?? 1,
         stdout: result.stdout ?? "",
         stderr: result.stderr ?? "",
         log,
         curlLog,
+        observed,
     };
 }
 
@@ -442,6 +480,132 @@ test("mounts the content cache volume outside the read-only checkout", async () 
             run!,
             /-v defined-cache-abc12345-[0-9a-f]{12}:\/home\/node\/\.cache\/defined( |$)/u,
         );
+    });
+});
+
+test("creates the deps mount point as the host user, then removes it", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        // Inside the bind-mounted repo, so an engine left to create it would
+        // own it as the namespace root (rootless podman: 100000:100000) — a
+        // path the host user can no longer write, which breaks a host install.
+        const deps = join(fixture.repo, "node_modules");
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            env: { FAKE_RUN_OBSERVE: deps },
+        });
+        assert.equal(r.status, 0);
+        assert.deepEqual(r.observed, [`present:${hostUid()}:0`]);
+        await assert.rejects(
+            stat(deps),
+            "the launcher's own mount point must not persist",
+        );
+        const run = r.log.find((line) => line.startsWith("run --rm"));
+        assert.match(
+            run!,
+            /-v defined-node-abc12345-[0-9a-f]{12}:\/repo\/node_modules( |$)/u,
+        );
+    });
+});
+
+test("leaves a host node_modules and its contents in place", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const deps = join(fixture.repo, "node_modules");
+        await mkdir(deps);
+        await writeFile(join(deps, "keep.txt"), "host install\n");
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            env: { FAKE_RUN_OBSERVE: deps },
+        });
+        assert.equal(r.status, 0);
+        assert.deepEqual(r.observed, [`present:${hostUid()}:1`]);
+        assert.equal(
+            await readFile(join(deps, "keep.txt"), "utf8"),
+            "host install\n",
+        );
+    });
+});
+
+test("leaves no mount point behind after a read-only verify run", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const deps = join(fixture.repo, "node_modules");
+        const r = await runLauncher({
+            fixture,
+            args: ["verify"],
+            env: { FAKE_RUN_OBSERVE: deps },
+        });
+        assert.equal(r.status, 0);
+        // Verify still mounts the deps volume, so the mount point is needed —
+        // but a read-only run must not leave anything in the checkout.
+        assert.deepEqual(r.observed, [`present:${hostUid()}:0`]);
+        await assert.rejects(
+            stat(deps),
+            "verify must leave the tree untouched",
+        );
+    });
+});
+
+test("creates no mount point for explain, which mounts no deps volume", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const deps = join(fixture.repo, "node_modules");
+        const r = await runLauncher({
+            fixture,
+            args: ["explain", "shell"],
+            env: { FAKE_RUN_OBSERVE: deps },
+        });
+        assert.equal(r.status, 0);
+        assert.deepEqual(r.observed, ["absent:0:0"]);
+        await assert.rejects(stat(deps));
+    });
+});
+
+test("propagates the engine's exit status and still cleans up", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        const deps = join(fixture.repo, "node_modules");
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            env: { FAKE_RUN_OBSERVE: deps, FAKE_RUN_EXIT: "7" },
+        });
+        assert.equal(r.status, 7);
+        await assert.rejects(
+            stat(deps),
+            "cleanup must not depend on the run succeeding",
+        );
+    });
+});
+
+test("warns when an existing deps mount point is not writable", async (t) => {
+    if (process.getuid?.() === 0) {
+        t.skip(
+            "root writes through any mode, so the condition cannot be built",
+        );
+        return;
+    }
+    await withFixture("abc12345", async (fixture) => {
+        const deps = join(fixture.repo, "node_modules");
+        await mkdir(deps);
+        await chmod(deps, 0o555);
+        try {
+            const r = await runLauncher({ fixture, args: ["comply"] });
+            assert.equal(r.status, 0);
+            assert.match(r.stderr, /not writable/u, "say which path and why");
+            assert.match(r.stderr, /node_modules/u);
+            // Not ours to remove: the run leaves it exactly as it found it.
+            assert.equal((await stat(deps)).isDirectory(), true);
+        } finally {
+            await chmod(deps, 0o755);
+        }
+    });
+});
+
+test("says nothing when the deps mount point is already writable", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        await mkdir(join(fixture.repo, "node_modules"));
+        const r = await runLauncher({ fixture, args: ["comply"] });
+        assert.equal(r.status, 0);
+        assert.doesNotMatch(r.stderr, /node_modules/u, "no warning noise");
     });
 });
 
