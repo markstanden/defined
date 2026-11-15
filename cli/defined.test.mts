@@ -999,7 +999,10 @@ test("offline mode never pulls: a missing image fails loudly", async () => {
 
 test("version reports launcher, pin, image, engine and drift", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
@@ -1009,6 +1012,8 @@ test("version reports launcher, pin, image, engine and drift", async () => {
                 FAKE_DIGEST: "sha256:aa11bb22cc33dd44ee55",
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             hasLine(r.stdout, "launcher", launcher, `rev ${LAUNCHER_SHORT}`),
@@ -1024,13 +1029,18 @@ test("version reports launcher, pin, image, engine and drift", async () => {
 
 test("version marks a stale launcher and pin as behind", async () => {
     await withFixture(STALE_REV.slice(0, 12), async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, STALE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
             launcher,
             env: { FAKE_REMOTE_REV: REMOTE_REV },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "status", "launcher behind; pin behind"));
     });
@@ -1038,13 +1048,18 @@ test("version marks a stale launcher and pin as behind", async () => {
 
 test("version degrades the remote state to unknown offline", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
             launcher,
             env: { FAKE_REMOTE_REV: REMOTE_REV, DEFINED_OFFLINE: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "remote", "unknown"));
         assert.ok(hasLine(r.stdout, "status", "launcher unknown; pin unknown"));
@@ -1053,7 +1068,10 @@ test("version degrades the remote state to unknown offline", async () => {
 
 test("version distinguishes an absent tag from an unreachable registry", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act — an absent tag
         const absent = await runLauncher({
             fixture,
             args: ["version"],
@@ -1064,8 +1082,11 @@ test("version distinguishes an absent tag from an unreachable registry", async (
                 FAKE_MANIFEST_ERROR: "manifest unknown",
             },
         });
+
+        // Assert
         assert.ok(hasLine(absent.stdout, "remote", "absent"));
 
+        // Act — an unreachable registry
         const unreachable = await runLauncher({
             fixture,
             args: ["version"],
@@ -1076,13 +1097,18 @@ test("version distinguishes an absent tag from an unreachable registry", async (
                 FAKE_MANIFEST_ERROR: "dial tcp: connection refused",
             },
         });
+
+        // Assert
         assert.ok(hasLine(unreachable.stdout, "remote", "unknown"));
     });
 });
 
 test("version reports an invalid pin without failing", async () => {
     await withFixture("main", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["version"] });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "pin", "(invalid pin 'main')"));
         assert.ok(hasLine(r.stdout, "image", "n/a"));
@@ -1092,7 +1118,10 @@ test("version reports an invalid pin without failing", async () => {
 
 test("version works outside a repository", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
@@ -1100,6 +1129,8 @@ test("version works outside a repository", async () => {
             cwd: fixture.root,
             env: { FAKE_REMOTE_REV: REMOTE_REV, FAKE_GIT_NO_REPO: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "pin", "(no repository)"));
         assert.ok(hasLine(r.stdout, "image", "n/a"));
@@ -1109,7 +1140,10 @@ test("version works outside a repository", async () => {
 
 test("version reports no engine without failing", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
@@ -1118,6 +1152,8 @@ test("version reports no engine without failing", async () => {
             barePath: true,
             env: { FAKE_REMOTE_REV: REMOTE_REV },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "engine", "none"));
         assert.ok(hasLine(r.stdout, "local", "unknown"));
