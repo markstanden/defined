@@ -56,6 +56,9 @@ and only then unpack it into PATH.
 - Churn probe over 123 tracked `*.sh` files in four gated checkouts: shfmt
   3.8.0 → 3.14.1 reformats 0 files; shellcheck 0.10.0 → 0.11.0 adds 0 findings
   at floor `style`.
+- Corrupting one character of `SHELLCHECK_SHA256_AMD64` failed the build at the
+  verify step (`/tmp/shellcheck.tar.gz: FAILED`, `1 computed checksum did NOT
+match`, build exit 1); the pin was restored immediately.
 
 ## Inferred
 

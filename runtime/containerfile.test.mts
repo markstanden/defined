@@ -28,10 +28,7 @@ async function readContainerfile(): Promise<string> {
 }
 
 async function readPins(): Promise<Map<string, string>> {
-    const text = await readFile(
-        join(RUNTIME_DIR, "tool-versions.env"),
-        "utf8",
-    );
+    const text = await readFile(join(RUNTIME_DIR, "tool-versions.env"), "utf8");
     const pins = new Map<string, string>();
     for (const match of text.matchAll(/^(\w+)="([^"]*)"$/gmu)) {
         pins.set(match[1]!, match[2]!);
@@ -105,7 +102,6 @@ for (const download of DOWNLOADS) {
 
 test("every downloaded tool pins both architectures' sha256", async () => {
     // Arrange
-    const text = await readContainerfile();
     const pins = await readPins();
 
     // Act
