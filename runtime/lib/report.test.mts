@@ -1,5 +1,5 @@
 // Tests for lib/report.mts: the canonical result and its JSON presentations.
-// Run: node --test lib/report.test.mts
+// Run: node --test runtime/lib/report.test.mts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -25,6 +25,7 @@ function cleanSetup(): SetupCheck {
 }
 
 test("buildResult_cleanRun_isCompliantWithEveryCheckResult", () => {
+    // Act
     const result = buildResult({
         setup: cleanSetup(),
         steps: [
@@ -32,6 +33,8 @@ test("buildResult_cleanRun_isCompliantWithEveryCheckResult", () => {
             { id: "eslint", result: skipped({ notice: "no JS/TS" }) },
         ],
     });
+
+    // Assert
     assert.equal(result.status, "compliant");
     assert.deepEqual(result.results, {
         bootstrap: "pass",
@@ -42,6 +45,7 @@ test("buildResult_cleanRun_isCompliantWithEveryCheckResult", () => {
 });
 
 test("buildResult_failingStep_carriesFindingWithCheckAndMessage", () => {
+    // Act
     const result = buildResult({
         setup: cleanSetup(),
         steps: [
@@ -49,6 +53,8 @@ test("buildResult_failingStep_carriesFindingWithCheckAndMessage", () => {
             { id: "workflow", result: failed({ notice: "actionlint failed" }) },
         ],
     });
+
+    // Assert
     assert.equal(result.status, "not_compliant");
     assert.equal(result.results.workflow, "fail");
     assert.deepEqual(result.errors, [
@@ -61,6 +67,7 @@ test("buildResult_failingStep_carriesFindingWithCheckAndMessage", () => {
 });
 
 test("buildResult_stepOwnErrors_arePreservedAndStampedWithCheck", () => {
+    // Act
     const result = buildResult({
         setup: cleanSetup(),
         steps: [
@@ -82,6 +89,8 @@ test("buildResult_stepOwnErrors_arePreservedAndStampedWithCheck", () => {
             },
         ],
     });
+
+    // Assert
     assert.deepEqual(result.errors, [
         {
             check: "eslint",
@@ -96,16 +105,20 @@ test("buildResult_stepOwnErrors_arePreservedAndStampedWithCheck", () => {
 });
 
 test("buildResult_failingStepWithoutNotice_stillEmitsADiagnostic", () => {
+    // Act
     const result = buildResult({
         setup: cleanSetup(),
         steps: [{ id: "tofu", result: failed({}) }],
     });
+
+    // Assert
     assert.deepEqual(result.errors, [
         { check: "tofu", kind: "finding", message: "" },
     ]);
 });
 
 test("buildResult_errorAndBlockedStatuses_useExecutionAndBlockedKinds", () => {
+    // Act
     const result = buildResult({
         setup: cleanSetup(),
         steps: [
@@ -113,6 +126,8 @@ test("buildResult_errorAndBlockedStatuses_useExecutionAndBlockedKinds", () => {
             { id: "tests", result: blocked({ message: "restore failed" }) },
         ],
     });
+
+    // Assert
     assert.equal(result.status, "not_compliant");
     assert.deepEqual(result.results, {
         bootstrap: "pass",
@@ -126,6 +141,7 @@ test("buildResult_errorAndBlockedStatuses_useExecutionAndBlockedKinds", () => {
 });
 
 test("buildResult_bootstrapAbsenceAndDrift_leadTheErrorsAndFailBootstrap", () => {
+    // Act
     const result = buildResult({
         setup: {
             files: [
@@ -136,6 +152,8 @@ test("buildResult_bootstrapAbsenceAndDrift_leadTheErrorsAndFailBootstrap", () =>
         },
         steps: [{ id: "node", result: passed({}) }],
     });
+
+    // Assert
     assert.equal(result.results.bootstrap, "fail");
     assert.deepEqual(result.errors, [
         {
@@ -160,9 +178,12 @@ test("buildResult_bootstrapAbsenceAndDrift_leadTheErrorsAndFailBootstrap", () =>
 });
 
 test("buildResult_withoutSetup_reportsOnlyStepResults", () => {
+    // Act
     const result = buildResult({
         steps: [{ id: "yaml", result: failed({ notice: "yamllint failed" }) }],
     });
+
+    // Assert
     assert.deepEqual(result.results, { yaml: "fail" });
     assert.deepEqual(result.errors, [
         { check: "yaml", kind: "finding", message: "yamllint failed" },
@@ -170,9 +191,12 @@ test("buildResult_withoutSetup_reportsOnlyStepResults", () => {
 });
 
 test("renderResult_full_emitsStatusResultsAndErrorsWhenPresent", () => {
+    // Arrange
     const result = buildResult({
         steps: [{ id: "node", result: failed({ notice: "prettier failed" }) }],
     });
+
+    // Act & Assert
     assert.equal(
         renderResult({ result, presentation: "full" }),
         '{"status":"not_compliant","results":{"node":"fail"},"errors":[{"check":"node","kind":"finding","message":"prettier failed"}]}',
@@ -180,7 +204,10 @@ test("renderResult_full_emitsStatusResultsAndErrorsWhenPresent", () => {
 });
 
 test("renderResult_full_omitsErrorsOnSuccess", () => {
+    // Arrange
     const result = buildResult({ steps: [{ id: "node", result: passed({}) }] });
+
+    // Act & Assert
     assert.equal(
         renderResult({ result, presentation: "full" }),
         '{"status":"compliant","results":{"node":"pass"}}',
@@ -188,7 +215,10 @@ test("renderResult_full_omitsErrorsOnSuccess", () => {
 });
 
 test("renderResult_min_successIsJustTheStatus", () => {
+    // Arrange
     const result = buildResult({ steps: [{ id: "node", result: passed({}) }] });
+
+    // Act & Assert
     assert.equal(
         renderResult({ result, presentation: "min" }),
         '{"status":"compliant"}',
@@ -196,11 +226,14 @@ test("renderResult_min_successIsJustTheStatus", () => {
 });
 
 test("renderResult_min_failureKeepsEveryDiagnosticAndDropsResults", () => {
+    // Arrange
     const result = buildResult({
         steps: [
             { id: "eslint", result: failed({ notice: "eslint: 1 finding" }) },
         ],
     });
+
+    // Act & Assert
     assert.equal(
         renderResult({ result, presentation: "min" }),
         '{"status":"not_compliant","errors":[{"check":"eslint","kind":"finding","message":"eslint: 1 finding"}]}',
@@ -208,11 +241,13 @@ test("renderResult_min_failureKeepsEveryDiagnosticAndDropsResults", () => {
 });
 
 test("renderResult_bothPresentations_agreeOnStatus", () => {
+    // Arrange
     const clean = buildResult({ steps: [{ id: "node", result: passed({}) }] });
     const dirty = buildResult({
         steps: [{ id: "node", result: failed({ notice: "bad" }) }],
     });
     for (const result of [clean, dirty]) {
+        // Act & Assert — both presentations agree on the status.
         const full = JSON.parse(renderResult({ result, presentation: "full" }));
         const min = JSON.parse(renderResult({ result, presentation: "min" }));
         assert.equal(full.status, min.status);
@@ -220,10 +255,12 @@ test("renderResult_bothPresentations_agreeOnStatus", () => {
 });
 
 test("renderResult_output_isOneLineWithNoTrailingWhitespace", () => {
+    // Arrange
     const result = buildResult({
         steps: [{ id: "node", result: failed({ notice: "bad" }) }],
     });
     for (const presentation of ["min", "full"] as const) {
+        // Act & Assert — every rendering is one trimmed line.
         const line = renderResult({ result, presentation });
         assert.equal(line.includes("\n"), false);
         assert.equal(line, line.trim());
@@ -231,6 +268,7 @@ test("renderResult_output_isOneLineWithNoTrailingWhitespace", () => {
 });
 
 test("mergeRepairErrors_preservesARepairErrorVerifyReadsClean", () => {
+    // Arrange
     const repair = new Map([
         ["node", errored({ message: "prettier --write failed" })],
     ]);
@@ -238,8 +276,12 @@ test("mergeRepairErrors_preservesARepairErrorVerifyReadsClean", () => {
         ["node", passed({ notice: "formatted" })],
         ["shell", passed({})],
     ]);
+
+    // Act
     const steps = mergeRepairErrors({ repair, verify });
     const node = steps.find((step) => step.id === "node")!;
+
+    // Assert
     assert.equal(node.result.status, "error");
     assert.equal(node.result.notice, "prettier --write failed");
     // Verification's other steps are untouched.
@@ -250,14 +292,20 @@ test("mergeRepairErrors_preservesARepairErrorVerifyReadsClean", () => {
 });
 
 test("mergeRepairErrors_keepsTheAuthoritativeVerifyResultWhenItAlsoFailed", () => {
+    // Arrange
     const repair = new Map([["node", failed({ notice: "fix left diffs" })]]);
     const verify = new Map([["node", failed({ notice: "still unformatted" })]]);
+
+    // Act
     const steps = mergeRepairErrors({ repair, verify });
+
+    // Assert
     assert.equal(steps.length, 1);
     assert.equal(steps[0]!.result.notice, "still unformatted");
 });
 
 test("mergeRepairErrors_ignoresPassingAndSkippedRepairSteps", () => {
+    // Arrange
     const repair = new Map([
         ["node", passed({})],
         ["yaml", skipped({ notice: "deferred to verification" })],
@@ -268,7 +316,11 @@ test("mergeRepairErrors_ignoresPassingAndSkippedRepairSteps", () => {
         ["yaml", passed({})],
         ["coverage", passed({})],
     ]);
+
+    // Act
     const steps = mergeRepairErrors({ repair, verify });
+
+    // Assert
     assert.deepEqual(
         steps.map((step) => [step.id, step.result.status]),
         [
@@ -280,11 +332,16 @@ test("mergeRepairErrors_ignoresPassingAndSkippedRepairSteps", () => {
 });
 
 test("mergeRepairErrors_addsARepairStepVerifyDidNotRun", () => {
+    // Arrange
     const repair = new Map([
         ["shell", errored({ message: "shfmt -w failed" })],
     ]);
     const verify = new Map([["node", passed({})]]);
+
+    // Act
     const steps = mergeRepairErrors({ repair, verify });
+
+    // Assert
     assert.deepEqual(
         steps.map((step) => [step.id, step.result.status]),
         [
@@ -295,6 +352,7 @@ test("mergeRepairErrors_addsARepairStepVerifyDidNotRun", () => {
 });
 
 test("renderBusyResult_isTheThirdStatusWithTheHolderAndStaleEdits", () => {
+    // Act & Assert
     assert.equal(
         renderBusyResult({
             lock: {

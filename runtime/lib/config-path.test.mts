@@ -8,13 +8,19 @@ import { test } from "node:test";
 import { gateConfigPath, standardsDir } from "./config-path.mts";
 
 test("gateConfigPath resolves under the runtime's own config directory", () => {
+    // Act
     const path = gateConfigPath({ name: "yamllint.yml" });
+
+    // Assert
     assert.match(path, /\/config\/yamllint\.yml$/u);
     assert.equal(existsSync(path), true);
 });
 
 test("standardsDir resolves to the sibling standards directory", () => {
+    // Act
     const dir = standardsDir();
+
+    // Assert
     assert.match(dir, /\/standards$/u);
     assert.equal(existsSync(dir), true);
 });

@@ -1,5 +1,5 @@
 // Tests for lib/agents-block.mts: managed-block upsert into AGENTS.md.
-// Run: node --test lib/agents-block.test.mts
+// Run: node --test runtime/lib/agents-block.test.mts
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -27,10 +27,13 @@ async function makeTempTree(): Promise<string> {
 }
 
 test("readMarkedBlock returns the marked span, newline-terminated", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const tpl = join(root, "template.md");
         await writeFile(tpl, `lead-in\n${BLOCK}\ntrailing\n`);
+
+        // Act & Assert
         assert.equal(await readMarkedBlock({ templatePath: tpl }), BLOCK);
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -38,10 +41,13 @@ test("readMarkedBlock returns the marked span, newline-terminated", async () => 
 });
 
 test("readMarkedBlock throws when a marker is missing", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const tpl = join(root, "template.md");
         await writeFile(tpl, `only ${BLOCK_START} here\n`);
+
+        // Act & Assert
         await assert.rejects(
             () => readMarkedBlock({ templatePath: tpl }),
             /must contain/u,
@@ -52,10 +58,15 @@ test("readMarkedBlock throws when a marker is missing", async () => {
 });
 
 test("writeMarkedBlock creates AGENTS.md when absent", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
+
+        // Act
         await writeMarkedBlock({ filePath: target, block: BLOCK });
+
+        // Assert
         assert.equal(await readFile(target, "utf8"), BLOCK);
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -63,12 +74,17 @@ test("writeMarkedBlock creates AGENTS.md when absent", async () => {
 });
 
 test("writeMarkedBlock appends after unmarked content, preserving it verbatim", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
         const mine = "# My Project\n\nSome private conventions.\n";
         await writeFile(target, mine);
+
+        // Act
         await writeMarkedBlock({ filePath: target, block: BLOCK });
+
+        // Assert
         assert.equal(await readFile(target, "utf8"), `${mine}${BLOCK}`);
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -76,11 +92,16 @@ test("writeMarkedBlock appends after unmarked content, preserving it verbatim", 
 });
 
 test("writeMarkedBlock inserts a newline before the block when content lacks one", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
         await writeFile(target, "no trailing newline");
+
+        // Act
         await writeMarkedBlock({ filePath: target, block: BLOCK });
+
+        // Assert
         assert.equal(
             await readFile(target, "utf8"),
             `no trailing newline\n${BLOCK}`,
@@ -91,6 +112,7 @@ test("writeMarkedBlock inserts a newline before the block when content lacks one
 });
 
 test("writeMarkedBlock replaces only marked lines on re-run, preserving neighbours", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
@@ -102,7 +124,11 @@ test("writeMarkedBlock replaces only marked lines on re-run, preserving neighbou
             "Newer standards pointer.",
             BLOCK_END,
         ].join("\n");
+
+        // Act
         await writeMarkedBlock({ filePath: target, block: replacement });
+
+        // Assert
         assert.equal(
             await readFile(target, "utf8"),
             `${before}${replacement}${after}`,
@@ -113,13 +139,18 @@ test("writeMarkedBlock replaces only marked lines on re-run, preserving neighbou
 });
 
 test("writeMarkedBlock is idempotent: a second run leaves the file byte-identical", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
         await writeFile(target, `# Project\n\n${BLOCK}\nabove all, be kind.\n`);
+
+        // Act — installed twice in a row
         await writeMarkedBlock({ filePath: target, block: BLOCK });
         const first = await readFile(target, "utf8");
         await writeMarkedBlock({ filePath: target, block: BLOCK });
+
+        // Assert
         assert.equal(await readFile(target, "utf8"), first);
     } finally {
         await rm(root, { recursive: true, force: true });
@@ -127,10 +158,13 @@ test("writeMarkedBlock is idempotent: a second run leaves the file byte-identica
 });
 
 test("writeMarkedBlock throws on a half-written block", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
         await writeFile(target, `${BLOCK_END} without its start\n`);
+
+        // Act & Assert
         await assert.rejects(
             () => writeMarkedBlock({ filePath: target, block: BLOCK }),
             /half-written or out-of-order/u,
@@ -141,8 +175,10 @@ test("writeMarkedBlock throws on a half-written block", async () => {
 });
 
 test("readContentsOrEmpty returns empty string for a missing file", async () => {
+    // Arrange
     const root = await makeTempTree();
     try {
+        // Act & Assert
         assert.equal(
             await readContentsOrEmpty({ filePath: join(root, "nope") }),
             "",
@@ -152,36 +188,34 @@ test("readContentsOrEmpty returns empty string for a missing file", async () => 
     }
 });
 
-test("checkMarkedBlock reports present, absent, drift and corrupt", async () => {
+test("checkMarkedBlock reports absent, present, drift or corrupt", async () => {
+    // Arrange — one row per state: no file, the block verbatim, a body that has
+    // moved on, and an end marker with no start. The absent row must run first.
+    const drifted = [BLOCK_START, "Out-of-date pointer.", BLOCK_END].join("\n");
+    const cases: Array<{ state: string; content?: string; expected: string }> = [
+        { state: "absent", expected: "absent" },
+        { state: "present", content: BLOCK, expected: "present" },
+        { state: "drift", content: drifted, expected: "drift" },
+        {
+            state: "corrupt",
+            content: `${BLOCK_END} without its start\n`,
+            expected: "corrupt",
+        },
+    ];
     const root = await makeTempTree();
     try {
         const target = join(root, "AGENTS.md");
-
-        assert.equal(
-            await checkMarkedBlock({ filePath: target, block: BLOCK }),
-            "absent",
-        );
-
-        await writeFile(target, BLOCK);
-        assert.equal(
-            await checkMarkedBlock({ filePath: target, block: BLOCK }),
-            "present",
-        );
-
-        const drifted = [BLOCK_START, "Out-of-date pointer.", BLOCK_END].join(
-            "\n",
-        );
-        await writeFile(target, drifted);
-        assert.equal(
-            await checkMarkedBlock({ filePath: target, block: BLOCK }),
-            "drift",
-        );
-
-        await writeFile(target, `${BLOCK_END} without its start\n`);
-        assert.equal(
-            await checkMarkedBlock({ filePath: target, block: BLOCK }),
-            "corrupt",
-        );
+        for (const { state, content, expected } of cases) {
+            // Act & Assert — the row name lands in the failure message
+            if (content !== undefined) {
+                await writeFile(target, content);
+            }
+            assert.equal(
+                await checkMarkedBlock({ filePath: target, block: BLOCK }),
+                expected,
+                state,
+            );
+        }
     } finally {
         await rm(root, { recursive: true, force: true });
     }

@@ -1,5 +1,5 @@
 // Tests for lib/workflow-files.mts: the workflow-only and audit views.
-// Run: node --test lib/workflow-files.test.mts
+// Run: node --test runtime/lib/workflow-files.test.mts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -18,6 +18,7 @@ const FILES = [
 ];
 
 test("filterWorkflowFiles keeps only .github/workflows yml/yaml", () => {
+    // Act & Assert
     assert.deepEqual(filterWorkflowFiles({ files: FILES }), [
         ".github/workflows/ci.yml",
         ".github/workflows/cd.yaml",
@@ -25,6 +26,7 @@ test("filterWorkflowFiles keeps only .github/workflows yml/yaml", () => {
 });
 
 test("filterWorkflowAuditFiles adds dependabot.yml to the workflow set", () => {
+    // Act & Assert
     assert.deepEqual(filterWorkflowAuditFiles({ files: FILES }), [
         ".github/workflows/ci.yml",
         ".github/dependabot.yml",
