@@ -1,7 +1,7 @@
 // Tests for comply.mts: the orchestrator's pass loop, two-verb flows and exit
 // contract. The heavy tool/setup logic lives in the step modules and
 // setup.mts, each tested separately — here we drive the wiring with fakes.
-// Run: node --test comply.test.mts
+// Run: node --test runtime/comply.test.mts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

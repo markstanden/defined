@@ -21,7 +21,7 @@
 // container's namespace, which the host engine (reached via the mounted
 // socket) cannot see. Gate-in-container cannot work under act; the real
 // runner or direct podman is required.
-// Run: node --test fixture.test.mts
+// Run: node --test runtime/fixture.test.mts
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
