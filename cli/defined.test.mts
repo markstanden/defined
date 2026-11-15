@@ -1066,12 +1066,12 @@ test("version degrades the remote state to unknown offline", async () => {
     });
 });
 
-test("version distinguishes an absent tag from an unreachable registry", async () => {
+test("version reports an absent tag as absent", async () => {
     await withFixture(PIN, async (fixture) => {
         // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
 
-        // Act — an absent tag
+        // Act
         const absent = await runLauncher({
             fixture,
             args: ["version"],
@@ -1085,8 +1085,15 @@ test("version distinguishes an absent tag from an unreachable registry", async (
 
         // Assert
         assert.ok(hasLine(absent.stdout, "remote", "absent"));
+    });
+});
 
-        // Act — an unreachable registry
+test("version reports an unreachable registry as unknown", async () => {
+    await withFixture(PIN, async (fixture) => {
+        // Arrange
+        const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const unreachable = await runLauncher({
             fixture,
             args: ["version"],
