@@ -1,7 +1,7 @@
 // Tests for lib/node-packages.mts: package resolution and dependency restore
 // shared by the node-deps and node-checks steps. Runner and existsSync
 // injected; no host binaries needed.
-// Run: node --test lib/node-packages.test.mts
+// Run: node --test runtime/lib/node-packages.test.mts
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -31,6 +31,7 @@ async function writeTree(
 }
 
 test("filterPackageJsons finds package.json files at any depth", () => {
+    // Act & Assert
     assert.deepEqual(
         filterPackageJsons({
             files: ["package.json", "lib/package.json", "a.sh"],
@@ -40,6 +41,7 @@ test("filterPackageJsons finds package.json files at any depth", () => {
 });
 
 test("resolvePackageDir uses the sole tracked package.json without a dir", () => {
+    // Act & Assert
     assert.deepEqual(
         resolvePackageDir({
             files: ["lib/package.json", "a.sh"],
@@ -50,15 +52,19 @@ test("resolvePackageDir uses the sole tracked package.json without a dir", () =>
 });
 
 test("resolvePackageDir rejects several packages without a dir", () => {
+    // Act
     const resolved = resolvePackageDir({
         files: ["package.json", "lib/package.json"],
         dir: undefined,
     });
+
+    // Assert
     assert.ok("error" in resolved);
     assert.match(resolved.error, /multiple package\.json/u);
 });
 
 test("resolvePackageDir honours an explicit root dir", () => {
+    // Act & Assert
     assert.deepEqual(
         resolvePackageDir({ files: ["lib/package.json"], dir: "" }),
         { dir: "" },
@@ -66,8 +72,11 @@ test("resolvePackageDir honours an explicit root dir", () => {
 });
 
 test("defaultInstall picks the lockfile's package manager, npm as fallback", () => {
+    // Arrange
     const existsIn = (present: string[]) => (path: string) =>
         present.some((p) => path.endsWith(p));
+
+    // Act & Assert
     assert.equal(
         defaultInstall({
             packageDir: "/pkg",
@@ -93,7 +102,10 @@ test("defaultInstall picks the lockfile's package manager, npm as fallback", () 
 });
 
 test("packagesToRestore leaves the declared list alone with no consumer config", () => {
+    // Arrange
     const declared = [{ dir: "frontend" }];
+
+    // Act & Assert
     assert.deepEqual(
         packagesToRestore({
             declared,
@@ -104,6 +116,7 @@ test("packagesToRestore leaves the declared list alone with no consumer config",
 });
 
 test("packagesToRestore adds the root package when a consumer Prettier config is tracked", () => {
+    // Act & Assert
     assert.deepEqual(
         packagesToRestore({
             declared: [],
@@ -114,6 +127,7 @@ test("packagesToRestore adds the root package when a consumer Prettier config is
 });
 
 test("packagesToRestore adds the root package for a consumer ESLint config", () => {
+    // Act & Assert
     assert.deepEqual(
         packagesToRestore({
             declared: [],
@@ -128,6 +142,7 @@ test("packagesToRestore adds the root package for a consumer ESLint config", () 
 });
 
 test("packagesToRestore skips the ESLint-triggered root when ESLint is disabled", () => {
+    // Act & Assert
     assert.deepEqual(
         packagesToRestore({
             declared: [],
@@ -139,6 +154,7 @@ test("packagesToRestore skips the ESLint-triggered root when ESLint is disabled"
 });
 
 test("packagesToRestore dedupes two declarations for the same package", () => {
+    // Act & Assert
     assert.deepEqual(
         packagesToRestore({
             declared: [{ dir: "" }],
@@ -156,8 +172,11 @@ test("packagesToRestore dedupes two declarations for the same package", () => {
 });
 
 test("packagesToRestore never duplicates a declared root and honours its opt-out", () => {
+    // Arrange
     // A declared root (even install:false) owns the root: no auto-added copy.
     const declared = [{ dir: "", install: false }];
+
+    // Act & Assert
     assert.deepEqual(
         packagesToRestore({
             declared,
@@ -168,29 +187,39 @@ test("packagesToRestore never duplicates a declared root and honours its opt-out
 });
 
 test("restoreNodePackages restores each distinct directory once", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-packages-");
     await writeTree(root, { "package.json": "{}\n" });
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: root,
         trackedFiles: ["package.json"],
         packages: [{ dir: "" }, { dir: "" }],
         runner,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
     assert.equal(calls.length, 1);
     assert.equal(calls[0]!.at(-1), root);
 });
 
 test("restoreNodePackages reports a missing manifest and installs nothing", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-packages-");
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: root,
         trackedFiles: ["package.json"],
         packages: [{ dir: "" }],
         runner,
     });
+
+    // Assert
     assert.deepEqual(result.failures, ["no package.json at ."]);
     assert.equal(result.restored, 0);
     assert.equal(calls.length, 0);
@@ -231,8 +260,11 @@ async function warmFixture({
 }
 
 test("restoreNodePackages copies a matching warm tree instead of installing", async () => {
+    // Arrange
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
@@ -240,16 +272,21 @@ test("restoreNodePackages copies a matching warm tree instead of installing", as
         runner,
         warmRoot: repo,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 0, reused: 1 });
     assert.equal(calls.length, 0);
     assert.equal(existsSync(join(scratch, "node_modules/.warm")), true);
 });
 
 test("restoreNodePackages reinstalls when the warm lockfile differs", async () => {
+    // Arrange
     const { repo, scratch } = await warmFixture({
         lockfile: '{"lockfileVersion":3,"packages":{"stale":{}}}\n',
     });
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
@@ -257,13 +294,18 @@ test("restoreNodePackages reinstalls when the warm lockfile differs", async () =
         runner,
         warmRoot: repo,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
     assert.equal(calls.length, 1);
 });
 
 test("restoreNodePackages reinstalls when no warm tree exists", async () => {
+    // Arrange
     const { repo, scratch } = await warmFixture({ repoTree: false });
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
@@ -271,13 +313,18 @@ test("restoreNodePackages reinstalls when no warm tree exists", async () => {
         runner,
         warmRoot: repo,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
     assert.equal(calls.length, 1);
 });
 
 test("restoreNodePackages falls back to an install when the copy fails", async () => {
+    // Arrange
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
@@ -288,13 +335,18 @@ test("restoreNodePackages falls back to an install when the copy fails", async (
             throw new Error("source vanished mid-copy");
         },
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
     assert.equal(calls.length, 1);
 });
 
 test("restoreNodePackages never reuses a declared install command", async () => {
+    // Arrange
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
@@ -302,11 +354,14 @@ test("restoreNodePackages never reuses a declared install command", async () => 
         runner,
         warmRoot: repo,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
     assert.equal(calls.length, 1);
 });
 
 test("restoreNodePackages does not reuse the no-lockfile npm install fallback", async () => {
+    // Arrange
     const repo = await makeTempDir("quality-node-packages-");
     const scratch = await makeTempDir("quality-node-packages-");
     await writeTree(repo, {
@@ -315,6 +370,8 @@ test("restoreNodePackages does not reuse the no-lockfile npm install fallback", 
     });
     await writeTree(scratch, { "package.json": MANIFEST });
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json"],
@@ -322,11 +379,14 @@ test("restoreNodePackages does not reuse the no-lockfile npm install fallback", 
         runner,
         warmRoot: repo,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
     assert.equal(calls.length, 1);
 });
 
 test("restoreNodePackages skips the install when the working root is the warm root", async () => {
+    // Arrange
     const repo = await makeTempDir("quality-node-packages-");
     await writeTree(repo, {
         "package.json": MANIFEST,
@@ -334,6 +394,8 @@ test("restoreNodePackages skips the install when the working root is the warm ro
         "node_modules/.warm": "warm tree\n",
     });
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: repo,
         trackedFiles: ["package.json", "package-lock.json"],
@@ -341,13 +403,18 @@ test("restoreNodePackages skips the install when the working root is the warm ro
         runner,
         warmRoot: repo,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 0, reused: 1 });
     assert.equal(calls.length, 0);
 });
 
 test("restoreNodePackages counts install:false as neither restored nor reused", async () => {
+    // Arrange
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await restoreNodePackages({
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
@@ -355,6 +422,8 @@ test("restoreNodePackages counts install:false as neither restored nor reused", 
         runner,
         warmRoot: repo,
     });
+
+    // Assert
     assert.deepEqual(result, { failures: [], restored: 0, reused: 0 });
     assert.equal(calls.length, 0);
 });

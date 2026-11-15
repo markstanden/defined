@@ -1,5 +1,5 @@
 // Tests for lib/config.mts: .defined.json reader and typed configuration.
-// Run: node --test lib/config.test.mts
+// Run: node --test runtime/lib/config.test.mts
 
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
@@ -30,21 +30,32 @@ async function assertLoadRejects({
 const SHA = TEST_SHA;
 
 test("loadConfig returns empty config when file is absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.version, "");
     assert.equal(config.coverage, undefined);
 });
 
 test("loadConfig parses version-only config", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ version: SHA }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.version, SHA);
     assert.equal(config.coverage, undefined);
 });
 
 test("loadConfig parses full config with coverage minimums", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         version: SHA,
@@ -60,7 +71,11 @@ test("loadConfig parses full config with coverage minimums", async () => {
         },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.version, SHA);
     assert.equal(config.coverage?.node?.command, "npm run test:coverage");
     assert.equal(config.coverage?.node?.minimums?.line, 80);
@@ -75,6 +90,7 @@ test("loadConfig parses full config with coverage minimums", async () => {
 });
 
 test("loadConfig parses coverage entry without minimums", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         version: SHA,
@@ -83,20 +99,30 @@ test("loadConfig parses coverage entry without minimums", async () => {
         },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.coverage?.node?.command, "npm run test:coverage");
     assert.equal(config.coverage?.node?.minimums, undefined);
 });
 
 test("loadConfig rejects invalid JSON", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, "{ not valid json }");
+
+    // Act & Assert
     await assert.rejects(() => loadConfig({ repoRoot: dir }), /invalid JSON/u);
 });
 
 test("loadConfig rejects non-object root", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify("just a string"));
+
+    // Act & Assert
     await assert.rejects(
         () => loadConfig({ repoRoot: dir }),
         /must be a JSON object/u,
@@ -104,8 +130,11 @@ test("loadConfig rejects non-object root", async () => {
 });
 
 test("loadConfig rejects array root", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify([1, 2, 3]));
+
+    // Act & Assert
     await assert.rejects(
         () => loadConfig({ repoRoot: dir }),
         /must be a JSON object/u,
@@ -113,6 +142,7 @@ test("loadConfig rejects array root", async () => {
 });
 
 test("loadConfig rejects invalid version values", async () => {
+    // Arrange
     const BAD_VERSIONS = [
         { label: "too short", config: { version: "abc123" } },
         {
@@ -128,7 +158,9 @@ test("loadConfig rejects invalid version values", async () => {
         { label: "null", config: { version: null } },
         { label: "latest", config: { version: "latest" } },
     ] as const;
+
     for (const { label, config } of BAD_VERSIONS) {
+        // Act & Assert
         await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config,
@@ -139,6 +171,7 @@ test("loadConfig rejects invalid version values", async () => {
 });
 
 test("loadConfig parses the flat node checks form", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         node: {
@@ -154,7 +187,11 @@ test("loadConfig parses the flat node checks form", async () => {
         },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.node?.packages.length, 1);
     const pkg = config.node!.packages[0]!;
     assert.equal(pkg.dir, undefined);
@@ -166,6 +203,7 @@ test("loadConfig parses the flat node checks form", async () => {
 });
 
 test("loadConfig parses a multi-package node config and normalises dirs", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         node: {
@@ -183,20 +221,30 @@ test("loadConfig parses a multi-package node config and normalises dirs", async 
         },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.node?.packages[0]?.dir, "packages/a");
     assert.equal(config.node?.packages[0]?.install, false);
     assert.equal(config.node?.packages[1]?.dir, "");
 });
 
 test("loadConfig treats a node key without checks as absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ node: {} }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.node, undefined);
 });
 
 test("loadConfig parses a coverage.satisfies relationship", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(
         dir,
@@ -210,7 +258,11 @@ test("loadConfig parses a coverage.satisfies relationship", async () => {
             },
         }),
     );
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.deepEqual(config.coverage?.node?.satisfies, {
         package: "",
         check: "test",
@@ -218,6 +270,7 @@ test("loadConfig parses a coverage.satisfies relationship", async () => {
 });
 
 test("loadConfig defaults satisfies.package to the repo root", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(
         dir,
@@ -227,7 +280,11 @@ test("loadConfig defaults satisfies.package to the repo root", async () => {
             },
         }),
     );
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.deepEqual(config.coverage?.node?.satisfies, {
         package: "",
         check: "test",
@@ -235,6 +292,7 @@ test("loadConfig defaults satisfies.package to the repo root", async () => {
 });
 
 test("loadConfig rejects a malformed satisfies relationship", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const bad: unknown[] = ["test", { check: "" }, { package: 1 }, {}];
     for (const satisfies of bad) {
@@ -242,18 +300,26 @@ test("loadConfig rejects a malformed satisfies relationship", async () => {
             dir,
             JSON.stringify({ coverage: { node: { command: "c", satisfies } } }),
         );
+
+        // Act & Assert
         await assert.rejects(() => loadConfig({ repoRoot: dir }), /satisfies/u);
     }
 });
 
 test("loadConfig treats a node key without checks as absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ node: {} }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.node, undefined);
 });
 
 test("loadConfig rejects malformed node configs", async () => {
+    // Arrange
     const cases: Array<{ config: unknown; re: RegExp }> = [
         { config: { node: "lint" }, re: /"node" must be an object/u },
         {
@@ -294,6 +360,7 @@ test("loadConfig rejects malformed node configs", async () => {
         },
     ];
     for (const { config, re } of cases) {
+        // Act & Assert
         await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: config as Record<string, unknown>,
@@ -303,6 +370,7 @@ test("loadConfig rejects malformed node configs", async () => {
 });
 
 test("loadConfig accepts a config with no version and keeps coverage", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         coverage: {
@@ -310,18 +378,25 @@ test("loadConfig accepts a config with no version and keeps coverage", async () 
         },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.version, "");
     assert.equal(config.coverage?.node?.command, "npm run test:coverage");
 });
 
 test("loadConfig rejects coverage with unknown ecosystem", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         version: SHA,
         coverage: { rust: { command: "cargo tarpaulin" } },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act & Assert
     await assert.rejects(
         () => loadConfig({ repoRoot: dir }),
         /unknown coverage ecosystem "rust"/u,
@@ -330,7 +405,10 @@ test("loadConfig rejects coverage with unknown ecosystem", async () => {
 
 test("loadConfig rejects coverage command that is not non-empty", async () => {
     for (const command of [undefined, "  "]) {
+        // Arrange
         const coverage = command === undefined ? {} : { command };
+
+        // Act & Assert
         await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: { version: SHA, coverage: { node: coverage } },
@@ -341,6 +419,7 @@ test("loadConfig rejects coverage command that is not non-empty", async () => {
 
 test("loadConfig rejects minimum outside 0–100", async () => {
     for (const line of [101, -5]) {
+        // Act & Assert
         await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: {
@@ -353,12 +432,15 @@ test("loadConfig rejects minimum outside 0–100", async () => {
 });
 
 test("loadConfig rejects unknown minimum metric", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         version: SHA,
         coverage: { node: { command: "npm t", minimums: { statements: 80 } } },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act & Assert
     await assert.rejects(
         () => loadConfig({ repoRoot: dir }),
         /unknown minimum metric "statements"/u,
@@ -366,24 +448,35 @@ test("loadConfig rejects unknown minimum metric", async () => {
 });
 
 test("loadConfig parses naming rules with an optional fix", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     const cfg = {
         naming: { command: "check-names.sh", fix: "fix-names.sh" },
     };
     await writeConfig(dir, JSON.stringify(cfg));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.naming?.command, "check-names.sh");
     assert.equal(config.naming?.fix, "fix-names.sh");
 });
 
 test("loadConfig treats a naming key without rules as absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ naming: {} }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.naming, undefined);
 });
 
 test("loadConfig rejects malformed naming configs", async () => {
+    // Arrange
     const cases: Array<{ config: unknown; re: RegExp }> = [
         { config: { naming: "check" }, re: /"naming" must be an object/u },
         {
@@ -404,6 +497,7 @@ test("loadConfig rejects malformed naming configs", async () => {
         },
     ];
     for (const { config, re } of cases) {
+        // Act & Assert
         await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: config as Record<string, unknown>,
@@ -413,6 +507,7 @@ test("loadConfig rejects malformed naming configs", async () => {
 });
 
 test("loadConfig parses tofu.dirs and normalises each entry", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(
         dir,
@@ -420,18 +515,28 @@ test("loadConfig parses tofu.dirs and normalises each entry", async () => {
             tofu: { dirs: ["./infrastructure", "modules/net/"] },
         }),
     );
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.deepEqual(config.tofu?.dirs, ["infrastructure", "modules/net"]);
 });
 
 test("loadConfig treats a tofu key without dirs as absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ tofu: {} }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.tofu, undefined);
 });
 
 test("loadConfig rejects malformed tofu configs", async () => {
+    // Arrange
     const cases: Array<{ config: unknown; re: RegExp }> = [
         { config: { tofu: "infra" }, re: /"tofu" must be an object/u },
         {
@@ -456,6 +561,7 @@ test("loadConfig rejects malformed tofu configs", async () => {
         },
     ];
     for (const { config, re } of cases) {
+        // Act & Assert
         await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: config as Record<string, unknown>,
@@ -466,6 +572,7 @@ test("loadConfig rejects malformed tofu configs", async () => {
 
 test("loadConfig accepts minimum at the boundary of 0 and 100", async () => {
     for (const line of [0, 100]) {
+        // Arrange
         const dir = await makeTempDir("quality-config-");
         await writeConfig(
             dir,
@@ -474,31 +581,48 @@ test("loadConfig accepts minimum at the boundary of 0 and 100", async () => {
                 coverage: { node: { command: "npm t", minimums: { line } } },
             }),
         );
+
+        // Act
         const config = await loadConfig({ repoRoot: dir });
+
+        // Assert
         assert.equal(config.coverage?.node?.minimums?.line, line);
     }
 });
 
 test("loadConfig parses the eslint disable flag", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ eslint: { disable: true } }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.eslint?.disable, true);
 });
 
 test("loadConfig treats an empty eslint key as absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ eslint: {} }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.eslint, undefined);
 });
 
 test("loadConfig rejects an unknown eslint key or non-boolean disable", async () => {
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { eslint: { rules: {} } },
         re: /unknown eslint key "rules"/,
     });
+
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { eslint: { disable: "yes" } },
@@ -508,15 +632,21 @@ test("loadConfig rejects an unknown eslint key or non-boolean disable", async ()
 
 test("loadConfig parses the eslint complexityMax override", async () => {
     for (const complexityMax of [10, 1, false] as const) {
+        // Arrange
         const dir = await makeTempDir("quality-config-");
         await writeConfig(dir, JSON.stringify({ eslint: { complexityMax } }));
+
+        // Act
         const config = await loadConfig({ repoRoot: dir });
+
+        // Assert
         assert.equal(config.eslint?.complexityMax, complexityMax);
     }
 });
 
 test("loadConfig rejects a malformed eslint complexityMax", async () => {
     for (const complexityMax of [0, -3, 2.5, "12", true]) {
+        // Act & Assert
         await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: { eslint: { complexityMax } },
@@ -527,14 +657,20 @@ test("loadConfig rejects a malformed eslint complexityMax", async () => {
 
 test("loadConfig parses the eslint recommended override", async () => {
     for (const recommended of [true, false] as const) {
+        // Arrange
         const dir = await makeTempDir("quality-config-");
         await writeConfig(dir, JSON.stringify({ eslint: { recommended } }));
+
+        // Act
         const config = await loadConfig({ repoRoot: dir });
+
+        // Assert
         assert.equal(config.eslint?.recommended, recommended);
     }
 });
 
 test("loadConfig rejects a non-boolean eslint recommended", async () => {
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { eslint: { recommended: "off" } },
@@ -543,25 +679,38 @@ test("loadConfig rejects a non-boolean eslint recommended", async () => {
 });
 
 test("loadConfig parses the workflow disable flag", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ workflow: { disable: true } }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.workflow?.disable, true);
 });
 
 test("loadConfig treats an empty workflow key as absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ workflow: {} }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.workflow, undefined);
 });
 
 test("loadConfig rejects an unknown workflow key or non-boolean disable", async () => {
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { workflow: { host: "ado" } },
         re: /unknown workflow key "host"/,
     });
+
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { workflow: { disable: "yes" } },
@@ -570,25 +719,38 @@ test("loadConfig rejects an unknown workflow key or non-boolean disable", async 
 });
 
 test("loadConfig parses the dotnet disable flag", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ dotnet: { disable: true } }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.dotnet?.disable, true);
 });
 
 test("loadConfig treats an empty dotnet key as absent", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-config-");
     await writeConfig(dir, JSON.stringify({ dotnet: {} }));
+
+    // Act
     const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
     assert.equal(config.dotnet, undefined);
 });
 
 test("loadConfig rejects an unknown dotnet key or non-boolean disable", async () => {
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { dotnet: { framework: "net10.0" } },
         re: /unknown dotnet key "framework"/,
     });
+
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { dotnet: { disable: "yes" } },
@@ -597,6 +759,7 @@ test("loadConfig rejects an unknown dotnet key or non-boolean disable", async ()
 });
 
 test("loadConfig rejects dotnet.disable combined with coverage.dotnet", async () => {
+    // Act & Assert
     await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: {

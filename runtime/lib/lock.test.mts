@@ -1,6 +1,6 @@
 // Tests for lib/lock.mts: the per-checkout comply lock (#75). Real files in a
 // temp dir, because the lock's whole job is filesystem atomicity and staleness.
-// Run: node --test lib/lock.test.mts
+// Run: node --test runtime/lib/lock.test.mts
 
 import assert from "node:assert/strict";
 import { existsSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -22,6 +22,7 @@ function info(startedAt: string = new Date().toISOString()): LockInfo {
 }
 
 test("one holder excludes a second acquire; release frees the checkout", async () => {
+    // Arrange — a temp checkout and one live holder.
     const dir = await makeTempDir("defined-lock-");
     const first = acquireLock({ gitDir: dir, info: info(), repoRoot: dir });
     assert.equal(first.kind, "acquired");
@@ -29,13 +30,17 @@ test("one holder excludes a second acquire; release frees the checkout", async (
         return;
     }
     try {
+        // Assert — the lock file is on disk while it is held.
         assert.equal(existsSync(join(dir, LOCK_FILE)), true);
 
+        // Act — a second acquire against the held lock.
         const second = acquireLock({
             gitDir: dir,
             info: info(),
             repoRoot: dir,
         });
+
+        // Assert — refused as busy, carrying the holder's details.
         assert.equal(second.kind, "busy");
         if (second.kind === "busy") {
             assert.equal(second.lock.command, "comply");
@@ -45,11 +50,14 @@ test("one holder excludes a second acquire; release frees the checkout", async (
         first.handle.release();
     }
 
+    // Assert — release removes the lock file.
     assert.equal(
         existsSync(join(dir, LOCK_FILE)),
         false,
         "release removes the lock file",
     );
+
+    // Act & Assert — the freed checkout can be acquired again.
     const third = acquireLock({ gitDir: dir, info: info(), repoRoot: dir });
     assert.equal(third.kind, "acquired");
     if (third.kind === "acquired") {
@@ -58,17 +66,21 @@ test("one holder excludes a second acquire; release frees the checkout", async (
 });
 
 test("a lock older than the stale window is reclaimed", async () => {
+    // Arrange — a lock file dated to the epoch, well past a 1s stale window.
     const dir = await makeTempDir("defined-lock-");
     const path = join(dir, LOCK_FILE);
     writeFileSync(path, JSON.stringify(info("2000-01-01T00:00:00.000Z")));
     utimesSync(path, new Date(0), new Date(0));
 
+    // Act
     const result = acquireLock({
         gitDir: dir,
         info: info(),
         repoRoot: dir,
         staleMs: 1000,
     });
+
+    // Assert
     assert.equal(result.kind, "acquired");
     if (result.kind === "acquired") {
         result.handle.release();
@@ -76,10 +88,14 @@ test("a lock older than the stale window is reclaimed", async () => {
 });
 
 test("a malformed lock file is reclaimed rather than trusted", async () => {
+    // Arrange — a lock file that is not JSON.
     const dir = await makeTempDir("defined-lock-");
     writeFileSync(join(dir, LOCK_FILE), "not json");
 
+    // Act
     const result = acquireLock({ gitDir: dir, info: info(), repoRoot: dir });
+
+    // Assert
     assert.equal(result.kind, "acquired");
     if (result.kind === "acquired") {
         result.handle.release();
@@ -87,6 +103,7 @@ test("a malformed lock file is reclaimed rather than trusted", async () => {
 });
 
 test("the holder refreshes the lock mtime so a live run is not reclaimed", async () => {
+    // Arrange — a held lock with a 10ms heartbeat.
     const dir = await makeTempDir("defined-lock-");
     const path = join(dir, LOCK_FILE);
     const result = acquireLock({
@@ -100,8 +117,11 @@ test("the holder refreshes the lock mtime so a live run is not reclaimed", async
         return;
     }
     try {
+        // Act — age the lock to the epoch, then let the heartbeat run.
         utimesSync(path, new Date(0), new Date(0));
         await new Promise((resolve) => setTimeout(resolve, 50));
+
+        // Assert
         assert.ok(
             statSync(path).mtimeMs > 0,
             "heartbeat should have refreshed the mtime",
@@ -112,6 +132,8 @@ test("the holder refreshes the lock mtime so a live run is not reclaimed", async
 });
 
 test("busy reports git-scope files edited after the run started", async () => {
+    // Arrange — a live holder plus git-scope files, one edited before it
+    // started and one after.
     const dir = await makeTempDir("defined-lock-");
     const startedAt = new Date(Date.now() - 10_000);
     const held = acquireLock({
@@ -132,12 +154,15 @@ test("busy reports git-scope files edited after the run started", async () => {
             new Date(startedAt.getTime() - 1000),
         );
 
+        // Act — a second acquire carrying the git-scope file list.
         const busyResult = acquireLock({
             gitDir: dir,
             info: info(),
             repoRoot: dir,
             files: ["old.ts", "fresh.ts", "gone.ts"],
         });
+
+        // Assert — busy, naming only the file newer than the run.
         assert.equal(busyResult.kind, "busy");
         if (busyResult.kind === "busy") {
             assert.deepEqual(busyResult.newerThanRun, ["fresh.ts"]);

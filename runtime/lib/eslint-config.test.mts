@@ -1,5 +1,5 @@
 // Tests for lib/eslint-config.mts: consumer ESLint config discovery.
-// Run: node --test lib/eslint-config.test.mts
+// Run: node --test runtime/lib/eslint-config.test.mts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -11,6 +11,7 @@ import {
 } from "./eslint-config.mts";
 
 test("CONSUMER_ESLINT_CONFIGS is the flat-config name set", () => {
+    // Act & Assert
     assert.deepEqual(
         [...CONSUMER_ESLINT_CONFIGS],
         [
@@ -25,6 +26,7 @@ test("CONSUMER_ESLINT_CONFIGS is the flat-config name set", () => {
 });
 
 test("hasConsumerEslintConfig finds a root config of any flat-config name", () => {
+    // Act & Assert — one root config of each flat-config name.
     assert.equal(
         hasConsumerEslintConfig({ files: ["eslint.config.mjs"] }),
         true,
@@ -38,6 +40,7 @@ test("hasConsumerEslintConfig finds a root config of any flat-config name", () =
 });
 
 test("hasConsumerEslintConfig ignores nested configs and the example sidecar", () => {
+    // Act & Assert — a nested config and the example sidecar are both ignored.
     assert.equal(
         hasConsumerEslintConfig({ files: ["packages/x/eslint.config.mjs"] }),
         false,
@@ -49,6 +52,7 @@ test("hasConsumerEslintConfig ignores nested configs and the example sidecar", (
 });
 
 test("hasConsumerEslintConfig is false with no config", () => {
+    // Act & Assert — no config at all, and an empty file list.
     assert.equal(
         hasConsumerEslintConfig({ files: ["package.json", "src/a.ts"] }),
         false,

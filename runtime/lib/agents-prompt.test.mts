@@ -1,7 +1,7 @@
 // Tests for the managed agent block (issue #73): the injected guidance must
 // keep the promises the gate actually makes, and must survive a round trip
 // through the installer without clobbering project content.
-// Run: node --test lib/agents-prompt.test.mts
+// Run: node --test runtime/lib/agents-prompt.test.mts
 
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -23,7 +23,10 @@ async function block(): Promise<string> {
 }
 
 test("the block is well formed and non-trivial", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.ok(text.startsWith(BLOCK_START), "block starts with the marker");
     assert.ok(text.endsWith(BLOCK_END), "block ends with the marker");
     // A guidance block that loses its substance should fail loudly.
@@ -31,30 +34,45 @@ test("the block is well formed and non-trivial", async () => {
 });
 
 test("the block states run timing: after edits, before commit or handoff", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /After a coherent set of edits/u);
     assert.match(text, /before committing or\s+handing work back/u);
 });
 
 test("the block tells the agent to inspect repairs and rerun only after a fix", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /git diff/u);
     assert.match(text, /do not repeat an unchanged\s+failing command/u);
 });
 
 test("the block tells the agent to report a blocked check, not retry it", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /could not run at all/u);
     assert.match(text, /report the failing step/u);
 });
 
 test("the block forbids weakening checks to get green", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /Do not weaken or disable a check/u);
 });
 
 test("the block distinguishes seeded (project-owned) from managed artifacts", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /seeds house defaults/u);
     assert.match(text, /this project then owns/u);
     assert.match(text, /manages plumbing/u);
@@ -62,25 +80,35 @@ test("the block distinguishes seeded (project-owned) from managed artifacts", as
 });
 
 test("the block states concise output by default and --full for context", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /one compact JSON line/u);
     assert.match(text, /`--full`/u);
     assert.match(text, /results/u);
 });
 
 test("the block points at the offline explain surface for lookups", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /defined explain/u);
     assert.match(text, /offline/u);
 });
 
 test("the block points at the knowledge-docs convention", async () => {
+    // Act
     const text = await block();
+
+    // Assert
     assert.match(text, /Knowledge is documented/u);
     assert.match(text, /standards\/documentation\.md/u);
 });
 
 test("the block preserves project content above and below on re-install", async () => {
+    // Arrange
     const template = await block();
     const root = await mkdtemp(join(tmpdir(), "quality-agents-prompt-"));
     try {
@@ -93,7 +121,10 @@ test("the block preserves project content above and below on re-install", async 
             "Tighten the floor",
             "Tighten the floor (updated)",
         );
+        // Act
         await writeMarkedBlock({ filePath: target, block: updated });
+
+        // Assert
         const result = await readFile(target, "utf8");
         assert.ok(result.startsWith(above), "content above is verbatim");
         assert.ok(result.endsWith(below), "content below is verbatim");

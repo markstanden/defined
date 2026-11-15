@@ -25,7 +25,16 @@ rule:
 - **Structure**: label the phases `// Arrange`, `// Act`, `// Assert` inside the
   test body, one behaviour per test — a failing test name should say what broke.
   This is a ratchet: required for new and changed tests, and for historical
-  tests as each area is retrofit.
+  tests as each area is retrofit. Where one statement both exercises the unit
+  and asserts on it, use the single label `// Act & Assert` rather than
+  pretending the phases split. A body with no setup has no Arrange phase: omit
+  the label rather than inventing one, and do not add ceremony to satisfy a
+  scanner count.
+- **"and" in a name is a flag, not a defect.** Read the test: split it when the
+  halves sit on different code paths or different moments, so a red test would
+  blame the wrong half — status plumbing versus cleanup, an arrange-time
+  invariant versus an after-the-fact side effect, any two `Act` steps. Leave
+  the commonplace pairing alone: one act with one outcome plus its echo.
 - **Assertion helpers carry the verb**: name a helper `assertX(...)` (e.g.
   `assertLoadRejects`), never `rejectsLoad(...)`. The reader and the review
   scanner both look for the verb; without it a helper reads as "no assertions".
