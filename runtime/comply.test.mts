@@ -404,6 +404,8 @@ test("runGate_comply_reRenameLeavesNoStaleVerificationPath", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     // Verification judges the post-repair tree: it sees the new name and never
     // the stale one, which the no-fix scratch copy would fail to find (#62).
     assert.deepEqual(verifyFiles, [["New.cs", "Keep.cs"]]);
@@ -411,9 +413,12 @@ test("runGate_comply_reRenameLeavesNoStaleVerificationPath", async () => {
 });
 
 test("runGate_verify_checksSetupThenRunsTheNoFixPass", async () => {
+    // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
     const setupCalls: string[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -428,13 +433,18 @@ test("runGate_verify_checksSetupThenRunsTheNoFixPass", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
+
+    // Assert
     assert.deepEqual(setupCalls, ["/repo"]);
     assert.equal(parsePrinted(printed).status, "compliant");
     assert.deepEqual(exits, []);
 });
 
 test("runGate_verifyFailingStep_exitsOne", async () => {
+    // Arrange
     const exits: number[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -446,11 +456,16 @@ test("runGate_verifyFailingStep_exitsOne", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
+
+    // Assert
     assert.deepEqual(exits, [1]);
 });
 
 test("runGate_defaultsToMinPresentation", async () => {
+    // Arrange
     const printed: string[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -462,12 +477,17 @@ test("runGate_defaultsToMinPresentation", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     // The default is min: no results map, just the verdict.
     assert.deepEqual(printed, ['{"status":"compliant"}']);
 });
 
 test("runGate_minGreen_printsOnlyTheStatus", async () => {
+    // Arrange
     const printed: string[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -480,11 +500,16 @@ test("runGate_minGreen_printsOnlyTheStatus", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     assert.deepEqual(printed, ['{"status":"compliant"}']);
 });
 
 test("runGate_minFailure_keepsDiagnosticsButDropsResults", async () => {
+    // Arrange
     const printed: string[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -497,6 +522,8 @@ test("runGate_minFailure_keepsDiagnosticsButDropsResults", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     const result = JSON.parse(printed[0]!);
     assert.equal(result.status, "not_compliant");
     assert.equal("results" in result, false);
@@ -506,8 +533,11 @@ test("runGate_minFailure_keepsDiagnosticsButDropsResults", async () => {
 });
 
 test("runGate_timings_writesDurationsToStderrAndLeavesStdoutAlone", async () => {
+    // Arrange
     const printed: string[] = [];
     const notified: string[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -521,6 +551,8 @@ test("runGate_timings_writesDurationsToStderrAndLeavesStdoutAlone", async () => 
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     // stdout is still exactly the one JSON result line.
     assert.deepEqual(printed, ['{"status":"compliant"}']);
     for (const line of notified) {
@@ -533,7 +565,10 @@ test("runGate_timings_writesDurationsToStderrAndLeavesStdoutAlone", async () => 
 });
 
 test("runGate_withoutTimings_writesNoTimingLines", async () => {
+    // Arrange
     const notified: string[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -546,11 +581,16 @@ test("runGate_withoutTimings_writesNoTimingLines", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     assert.deepEqual(notified, []);
 });
 
 test("runGate threads the cache dir into the no-fix pass", async () => {
+    // Arrange
     const captured: { cacheDir?: string }[] = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -566,10 +606,13 @@ test("runGate threads the cache dir into the no-fix pass", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     assert.deepEqual(captured, [{ cacheDir: "/caches/defined" }]);
 });
 
 test("runGate passes the notify sink only under --timings", async () => {
+    // Arrange
     const runVerifyWith = async (timings: boolean): Promise<boolean> => {
         let received: ((line: string) => void) | undefined;
         await runGate({
@@ -590,6 +633,8 @@ test("runGate passes the notify sink only under --timings", async () => {
         });
         return received !== undefined;
     };
+
+    // Act & Assert
     // Without --timings the cache metrics must stay silent: no notify to steps.
     assert.equal(await runVerifyWith(false), false);
     // With --timings the sink reaches the steps.
