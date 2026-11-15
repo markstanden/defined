@@ -397,11 +397,14 @@ test("skips when no .defined.json exists", async () => {
 });
 
 test("fails when the coverage command fails", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
         config: { version: TEST_SHA, coverage: { node: { command: "false" } } },
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -409,11 +412,14 @@ test("fails when the coverage command fails", async () => {
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 1, stderr: "boom" } },
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /coverage command failed/u);
 });
 
 test("fails when the command writes no lcov.info", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -422,6 +428,8 @@ test("fails when the command writes no lcov.info", async () => {
             coverage: { node: { command: "echo ok" } },
         },
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -429,11 +437,14 @@ test("fails when the command writes no lcov.info", async () => {
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /no coverage report/u);
 });
 
 test("repair skips coverage generation entirely (verification-only, #65)", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -444,18 +455,23 @@ test("repair skips coverage generation entirely (verification-only, #65)", async
         reportPath: "coverage/lcov.info",
         reportContent: ["LF:100", "LH:90"].join("\n"),
     });
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         mode: "fix",
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.match(result.notice ?? "", /deferred to verification/u);
     assert.equal(calls.length, 0);
 });
 
 test("write-capable no-fix runs in the repo so the report survives (#65)", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -466,6 +482,8 @@ test("write-capable no-fix runs in the repo so the report survives (#65)", async
         reportPath: "coverage/lcov.info",
         reportContent: ["LF:100", "LH:90"].join("\n"),
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -474,12 +492,15 @@ test("write-capable no-fix runs in the repo so the report survives (#65)", async
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });
+
+    // Assert
     // The report lives only in the repo; a discarded scratch would not find it.
     assert.equal(result.status, "pass");
     assert.match(result.notice ?? "", /90\.0%/u);
 });
 
 test("gates line coverage against the effective minimum", async () => {
+    // Arrange
     const SCENARIOS = [
         {
             label: "meets default 80%",
@@ -526,12 +547,15 @@ test("gates line coverage against the effective minimum", async () => {
             scratchDir: dir,
             trackedFiles: ["package.json"],
         });
+
+        // Act & Assert
         assert.equal(result.status, status, label);
         assert.match(result.notice ?? "", re, label);
     }
 });
 
 test("no-fix runs the coverage command in a scratch workspace, isolated from the repo", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -558,11 +582,14 @@ test("no-fix runs the coverage command in a scratch workspace, isolated from the
                 truncated: false,
             } satisfies CommandResult;
         }) as typeof import("../../lib/proc.mts").run;
+        // Act
         const result = await runNodeCoverageStep({
             ctx: { mode: "no-fix", repoRoot: dir, scratch },
             trackedFiles: ["package.json"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "fail");
         assert.match(result.notice ?? "", /no coverage report/u);
         assert.equal(calls.length, 1);
@@ -576,6 +603,7 @@ test("no-fix runs the coverage command in a scratch workspace, isolated from the
 });
 
 test("no-fix validates the report the command writes into the scratch", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -585,6 +613,7 @@ test("no-fix validates the report the command writes into the scratch", async ()
     const calls: string[][] = [];
     const scratch = { dir: null as string | null };
     try {
+        // Act
         const result = await runNodeCoverageStep({
             ctx: { mode: "no-fix", repoRoot: dir, scratch },
             trackedFiles: ["package.json"],
@@ -593,6 +622,8 @@ test("no-fix validates the report the command writes into the scratch", async ()
                 lcov: ["LF:100", "LH:90"].join("\n"),
             }),
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         assert.match(result.notice ?? "", /90\.0%/u);
         assert.equal(scratch.dir, calls[0]!.at(-1));
@@ -602,6 +633,7 @@ test("no-fix validates the report the command writes into the scratch", async ()
 });
 
 test("reports a malformed lcov report as an execution error", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-bad-");
     await setupCoverageRepo({
         root: dir,
@@ -609,17 +641,22 @@ test("reports a malformed lcov report as an execution error", async () => {
         reportPath: "coverage/lcov.info",
         reportContent: "LF:10\nLH:garbage\n",
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         scratchDir: dir,
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "error");
     assert.match(result.notice ?? "", /invalid lcov report/u);
 });
 
 test("no-fix runs the consumer command once", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -630,6 +667,8 @@ test("no-fix runs the consumer command once", async () => {
         reportPath: "coverage/lcov.info",
         reportContent: ["LF:100", "LH:90"].join("\n"),
     });
+
+    // Act
     const { calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -637,6 +676,8 @@ test("no-fix runs the consumer command once", async () => {
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });
+
+    // Assert
     assert.equal(calls.length, 1);
     assert.equal(calls[0]![0], "sh");
     assert.equal(calls[0]![1], "-c");

@@ -1,6 +1,6 @@
 // Tests for steps/naming.mts: workflow-filename grammar + consumer rules.
 // Runner injected; no host binaries needed.
-// Run: node --test steps/naming.test.mts
+// Run: node --test runtime/steps/naming.test.mts
 
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
@@ -46,6 +46,7 @@ function recordingRunner(
 }
 
 test("filterWorkflowFiles keeps only .github/workflows yml/yaml", () => {
+    // Act & Assert
     assert.deepEqual(
         filterWorkflowFiles({
             files: [
@@ -60,14 +61,18 @@ test("filterWorkflowFiles keeps only .github/workflows yml/yaml", () => {
 });
 
 test("isValidWorkflowName enforces <namespace>--<verb>[--<target>]", () => {
+    // Arrange
     for (const name of [
         "defined--verify.yml",
         "defined--publish.yml",
         "team--build--web.yml",
         "my-ns--run-tests.yaml",
     ]) {
+        // Act & Assert
         assert.ok(isValidWorkflowName({ name }), `${name} should be valid`);
     }
+
+    // Arrange
     for (const name of [
         "ci.yml",
         "defined-verify.yml",
@@ -76,11 +81,13 @@ test("isValidWorkflowName enforces <namespace>--<verb>[--<target>]", () => {
         "defined--verify.sh",
         "defined__verify.yml",
     ]) {
+        // Act & Assert
         assert.ok(!isValidWorkflowName({ name }), `${name} should be invalid`);
     }
 });
 
 test("workflowNameViolations names only the offending workflow files", () => {
+    // Act & Assert
     assert.deepEqual(
         workflowNameViolations({
             files: [
@@ -94,30 +101,43 @@ test("workflowNameViolations names only the offending workflow files", () => {
 });
 
 test("runNamingStep skips when there are no workflows and no rules", async () => {
+    // Arrange
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNamingStep({
         ctx: baseCtx,
         trackedFiles: ["a.sh"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("runNamingStep fails on a workflow filename that breaks the grammar", async () => {
+    // Arrange
     const { runner } = recordingRunner();
+
+    // Act
     const result = await runNamingStep({
         ctx: baseCtx,
         trackedFiles: [".github/workflows/ci.yml"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /\.github\/workflows\/ci\.yml/u);
     assert.match(result.notice ?? "", /<namespace>--<verb>/u);
 });
 
 test("runNamingStep passes when workflow names follow the grammar", async () => {
+    // Arrange
     const { runner } = recordingRunner();
+
+    // Act
     const result = await runNamingStep({
         ctx: baseCtx,
         trackedFiles: [
@@ -126,27 +146,35 @@ test("runNamingStep passes when workflow names follow the grammar", async () => 
         ],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
 });
 
 test("fix mode without an autofix skips (nothing to repair, #65)", async () => {
+    // Arrange
     const root = await makeTempDir("quality-naming-");
     await writeFile(
         `${root}/.defined.json`,
         `${JSON.stringify({ naming: { command: "check-names.sh" } })}\n`,
     );
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNamingStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: [],
         runner,
     });
+
+    // Assert
     // A rules command is verification, not a mutation: repair runs no commands.
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("fix mode runs the autofix only, never the rules command (repair-only, #65)", async () => {
+    // Arrange
     const root = await makeTempDir("quality-naming-");
     await writeFile(
         `${root}/.defined.json`,
@@ -155,11 +183,15 @@ test("fix mode runs the autofix only, never the rules command (repair-only, #65)
         })}\n`,
     );
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNamingStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: [],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.deepEqual(
         calls.map((c) => c.args[1]),
