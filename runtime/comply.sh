@@ -86,16 +86,46 @@ else
     USER_ARGS=(--user "$(id -u):$(id -g)")
 fi
 
-exec "${ENGINE}" run --rm \
+# Podman and docker create a nested volume's mount point *inside* the
+# bind-mounted repo, as the namespace root: rootless podman lands it as
+# 100000:100000, a path the invoking user cannot write afterwards. Create it
+# here as the invoking user, and drop it again when the run leaves it empty.
+# cli/defined carries the same logic for the launcher; comply-sh.test.mts holds
+# this file's copy honest.
+DEPS_DIR="${REPO_ROOT}/node_modules"
+DEPS_ARGS=()
+MADE_DEPS_DIR=""
+if [[ "${VERB}" != "explain" ]]; then
+    DEPS_ARGS=(-v "defined-node-${PINHASH}-${REPO_HASH}:/repo/node_modules")
+    if [[ ! -e "${DEPS_DIR}" ]]; then
+        if mkdir -p "${DEPS_DIR}"; then
+            MADE_DEPS_DIR=1
+        fi
+    elif [[ ! -w "${DEPS_DIR}" ]]; then
+        # Left by an earlier container run: only root could chown it, so name the
+        # one-off fix rather than failing the gate over it.
+        echo "WARNING: ${DEPS_DIR} is not writable by you — a host install there will fail; clear it once with: rmdir ${DEPS_DIR}" >&2
+    fi
+fi
+
+# Not exec: an empty mount point is removed whichever way the run ends, and the
+# gate's status is the shim's status.
+STATUS=0
+"${ENGINE}" run --rm \
     "${USER_ARGS[@]}" \
     -v "${REPO_ROOT}:/repo" \
     -v "${RUNTIME_DIR}:/opt/defined/runtime:ro" \
     -v "${LIB_DIR}:/opt/defined/lib:ro" \
     -v "${STANDARDS_DIR}:/opt/defined/standards:ro" \
-    -v "defined-node-${PINHASH}-${REPO_HASH}:/repo/node_modules" \
+    "${DEPS_ARGS[@]}" \
     -v "defined-npm-${REPO_HASH}:/home/node/.npm" \
     -v "defined-nuget-${REPO_HASH}:/home/node/.nuget/packages" \
     -v "defined-cache-${PINHASH}-${REPO_HASH}:/home/node/.cache/defined" \
     -e "NUGET_PACKAGES=/home/node/.nuget/packages" \
     --workdir /repo \
-    "${IMAGE}" "${VERB}" "$@"
+    "${IMAGE}" "${VERB}" "$@" || STATUS=$?
+
+if [[ -n "${MADE_DEPS_DIR}" ]]; then
+    rmdir "${DEPS_DIR}" 2>/dev/null || true
+fi
+exit "${STATUS}"

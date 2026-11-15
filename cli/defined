@@ -657,6 +657,29 @@ main() {
         net_args=()
     fi
 
+    # Podman and docker create a nested volume's mount point *inside* the
+    # bind-mounted repo, as the namespace root: rootless podman lands it as
+    # 100000:100000, a path the invoking user cannot write afterwards, so a host
+    # `npm install` there fails and the checkout carries a dir they do not own
+    # (a read-only-looking `verify` leaves one too). Create the mount point here
+    # as the invoking user instead — an existing dir is left exactly as it is —
+    # and drop it again after the run when it was ours and the run left it empty.
+    local deps_dir="${root}/node_modules" made_deps_dir=""
+    if [[ "${verb}" != "explain" ]]; then
+        if [[ ! -e "${deps_dir}" ]]; then
+            if mkdir -p "${deps_dir}"; then
+                made_deps_dir=1
+            fi
+        elif [[ ! -w "${deps_dir}" ]]; then
+            # Left by an earlier container run: only root could chown it, so name
+            # the one-off fix rather than failing the gate over it.
+            echo "${PROGRAM}: ${deps_dir} is not writable by you — a host install there will fail; clear it once with: rmdir ${deps_dir}" >&2
+        fi
+    fi
+
+    # Not exec: the mount point is cleaned up whichever way the run ends, and
+    # the engine's status is the launcher's status.
+    local status=0
     # shellcheck disable=SC2086 # mount_arg is two words by design
     "${engine}" run --rm \
         "${user_args[@]}" \
@@ -664,7 +687,12 @@ main() {
         ${mount_arg} \
         "${cache_args[@]}" \
         --workdir /repo \
-        "${image}" "${verb}" "${forward[@]}"
+        "${image}" "${verb}" "${forward[@]}" || status=$?
+
+    if [[ -n "${made_deps_dir}" ]]; then
+        rmdir "${deps_dir}" 2>/dev/null || true
+    fi
+    return "${status}"
 }
 
 # Execute only when run as a script (BASH_SOURCE matches $0); when sourced,
