@@ -67,12 +67,15 @@ function parsePrinted(printed: string[]): GateResult {
 }
 
 test("runPass initialises then records every step in order", async () => {
+    // Act
     const results = await runPass({
         mode: "no-fix",
         repoRoot: "/repo",
         files: [],
         steps: [fakeStep("node", passed({})), fakeStep("shell", failed({}))],
     });
+
+    // Assert
     assert.deepEqual(
         [...results].map(([id, r]) => [id, r.status]),
         [
@@ -83,7 +86,10 @@ test("runPass initialises then records every step in order", async () => {
 });
 
 test("runPass forwards the mode to each step", async () => {
+    // Arrange
     const modes: string[] = [];
+
+    // Act
     const results = await runPass({
         mode: "fix",
         repoRoot: "/repo",
@@ -98,11 +104,14 @@ test("runPass forwards the mode to each step", async () => {
             },
         ],
     });
+
+    // Assert
     assert.deepEqual(modes, ["fix"]);
     assert.equal(results.get("probe")?.status, "pass");
 });
 
 test("runPass_recordsAThrownStepAsAnErrorAndContinues", async () => {
+    // Act
     const results = await runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -117,6 +126,8 @@ test("runPass_recordsAThrownStepAsAnErrorAndContinues", async () => {
             fakeStep("after", passed({})),
         ],
     });
+
+    // Assert
     assert.equal(results.get("broken")?.status, "error");
     assert.deepEqual(results.get("broken")?.errors, [
         { kind: "execution", message: "cannot run 'tool': not found" },
@@ -125,8 +136,11 @@ test("runPass_recordsAThrownStepAsAnErrorAndContinues", async () => {
 });
 
 test("runPass_withTimings_recordsEachStepUnderItsMode", async () => {
+    // Arrange
     const labels: string[] = [];
     const timings: Timings = { record: (label) => labels.push(label) };
+
+    // Act
     await runPass({
         mode: "fix",
         repoRoot: "/repo",
@@ -134,12 +148,17 @@ test("runPass_withTimings_recordsEachStepUnderItsMode", async () => {
         timings,
         steps: [fakeStep("node", passed({})), fakeStep("shell", passed({}))],
     });
+
+    // Assert
     assert.deepEqual(labels, ["fix/node", "fix/shell"]);
 });
 
 test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
+    // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
+
+    // Act
     await runGate({
         verb: "comply",
         repoRoot: "/repo",
@@ -154,6 +173,8 @@ test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
+
+    // Assert
     const result = parsePrinted(printed);
     assert.equal(result.status, "compliant");
     assert.deepEqual(result.results, {
@@ -166,8 +187,11 @@ test("runGate_complyGreen_printsOneCompliantResultAndDoesNotExit", async () => {
 });
 
 test("runGate_complyFindingSurvivesRepair_reportsFindingAndExits", async () => {
+    // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
+
+    // Act
     await runGate({
         verb: "comply",
         repoRoot: "/repo",
@@ -182,6 +206,8 @@ test("runGate_complyFindingSurvivesRepair_reportsFindingAndExits", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
+
+    // Assert
     const result = parsePrinted(printed);
     assert.equal(result.status, "not_compliant");
     assert.equal(result.results.workflow, "fail");
@@ -192,8 +218,11 @@ test("runGate_complyFindingSurvivesRepair_reportsFindingAndExits", async () => {
 });
 
 test("runGate_complyBootstrapDrift_reportsItThroughTheCanonicalResult", async () => {
+    // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
+
+    // Act
     await runGate({
         verb: "comply",
         repoRoot: "/repo",
@@ -214,6 +243,8 @@ test("runGate_complyBootstrapDrift_reportsItThroughTheCanonicalResult", async ()
             exitFn: (code) => exits.push(code),
         },
     });
+
+    // Assert
     const result = parsePrinted(printed);
     assert.equal(result.results.bootstrap, "fail");
     assert.deepEqual(result.errors, [
@@ -228,7 +259,10 @@ test("runGate_complyBootstrapDrift_reportsItThroughTheCanonicalResult", async ()
 });
 
 test("runGate_comply_reFetchesTrackedFilesAfterBootstrap", async () => {
+    // Arrange
     const passedFiles: string[][] = [];
+
+    // Act
     await runGate({
         verb: "comply",
         repoRoot: "/repo",
@@ -245,14 +279,19 @@ test("runGate_comply_reFetchesTrackedFilesAfterBootstrap", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     // Both passes see the post-bootstrap snapshot, never the pre-setup one.
     assert.deepEqual(passedFiles, [["post-setup.txt"], ["post-setup.txt"]]);
 });
 
 test("runGate_comply_reFetchesTrackedFilesAfterRepair", async () => {
+    // Arrange
     const verifyFiles: string[][] = [];
     let fetches = 0;
     const passes: string[] = [];
+
+    // Act
     await runGate({
         verb: "comply",
         repoRoot: "/repo",
@@ -275,6 +314,8 @@ test("runGate_comply_reFetchesTrackedFilesAfterRepair", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     // The repair pass sees the post-setup snapshot; verification re-fetches
     // after repairs so a file created by a fixer is checked (#62).
     assert.deepEqual(passes, ["fix", "no-fix"]);
@@ -283,7 +324,10 @@ test("runGate_comply_reFetchesTrackedFilesAfterRepair", async () => {
 });
 
 test("runGate_comply_marksBothPassesRepoWritable", async () => {
+    // Arrange
     const flags: Array<boolean | undefined> = [];
+
+    // Act
     await runGate({
         verb: "comply",
         repoRoot: "/repo",
@@ -300,13 +344,18 @@ test("runGate_comply_marksBothPassesRepoWritable", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     // Comply is write-capable: both passes run report steps in the repo, so the
     // coverage artifact a scanner reads survives the run (#65).
     assert.deepEqual(flags, [true, true]);
 });
 
 test("runGate_verify_leavesPassesReadOnly", async () => {
+    // Arrange
     const flags: Array<boolean | undefined> = [];
+
+    // Act
     await runGate({
         verb: "verify",
         repoRoot: "/repo",
@@ -321,16 +370,21 @@ test("runGate_verify_leavesPassesReadOnly", async () => {
             exitFn: () => undefined,
         },
     });
+
+    // Assert
     // A read-only verify never opts into writing the repo mount.
     assert.deepEqual(flags, [undefined]);
 });
 
 test("runGate_comply_reRenameLeavesNoStaleVerificationPath", async () => {
+    // Arrange
     const verifyFiles: string[][] = [];
     const snapshots = [
         ["Old.cs", "Keep.cs"],
         ["New.cs", "Keep.cs"],
     ];
+
+    // Act
     await runGate({
         verb: "comply",
         repoRoot: "/repo",
