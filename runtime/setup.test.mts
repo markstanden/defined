@@ -1,5 +1,5 @@
 // Tests for setup.mts: bootstrap installs managed files and seeds AGENTS.md.
-// Run: node --test setup.test.mts
+// Run: node --test runtime/setup.test.mts
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -20,10 +20,15 @@ async function makeTempRepo(): Promise<string> {
 }
 
 test("runSetup installs managed files and seeds the AGENTS.md managed block", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, "App.csproj"), "<Project/>");
+
+        // Act
         await runSetup({ startDir: repo });
+
+        // Assert
         assert.ok(
             (await readFile(join(repo, ".editorconfig"), "utf8")).includes(
                 "root = true",
@@ -55,11 +60,15 @@ test("runSetup installs managed files and seeds the AGENTS.md managed block", as
 });
 
 test("runSetup seeds a pinned .defined.json when the repo has none", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
+        // Act
         await runSetup({ startDir: repo });
         const raw = await readFile(join(repo, ".defined.json"), "utf8");
         const config = JSON.parse(raw) as { version?: string };
+
+        // Assert
         assert.match(
             config.version ?? "",
             /^[0-9a-f]{12}$/u,
@@ -71,6 +80,7 @@ test("runSetup seeds a pinned .defined.json when the repo has none", async () =>
 });
 
 test("runSetup never overwrites an existing .defined.json", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         const mine = {
@@ -81,8 +91,12 @@ test("runSetup never overwrites an existing .defined.json", async () => {
             join(repo, ".defined.json"),
             `${JSON.stringify(mine)}\n`,
         );
+
+        // Act
         await runSetup({ startDir: repo });
         const raw = await readFile(join(repo, ".defined.json"), "utf8");
+
+        // Assert
         assert.deepEqual(JSON.parse(raw), mine);
     } finally {
         await rm(repo, { recursive: true, force: true });
@@ -90,12 +104,17 @@ test("runSetup never overwrites an existing .defined.json", async () => {
 });
 
 test("runSetup preserves pre-existing AGENTS.md content outside the block", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         const mine = "# My Project\n\nOnly my conventions live here.\n";
         await writeFile(join(repo, "AGENTS.md"), mine);
+
+        // Act
         await runSetup({ startDir: repo });
         const agents = await readFile(join(repo, "AGENTS.md"), "utf8");
+
+        // Assert
         assert.ok(
             agents.startsWith(mine.trimStart().slice(0, "# My Project".length)),
         );
@@ -106,11 +125,17 @@ test("runSetup preserves pre-existing AGENTS.md content outside the block", asyn
 });
 
 test("runSetup is idempotent: re-run leaves AGENTS.md byte-identical", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
+        // Act — the first bootstrap.
         await runSetup({ startDir: repo });
         const first = await readFile(join(repo, "AGENTS.md"), "utf8");
+
+        // Act — the second bootstrap must change nothing.
         await runSetup({ startDir: repo });
+
+        // Assert
         assert.equal(await readFile(join(repo, "AGENTS.md"), "utf8"), first);
     } finally {
         await rm(repo, { recursive: true, force: true });
@@ -118,10 +143,15 @@ test("runSetup is idempotent: re-run leaves AGENTS.md byte-identical", async () 
 });
 
 test("runSetup keeps a repo's own seeded default (never overwrites it)", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, ".editorconfig"), "indent_size = 2\n");
+
+        // Act
         await runSetup({ startDir: repo });
+
+        // Assert
         assert.equal(
             await readFile(join(repo, ".editorconfig"), "utf8"),
             "indent_size = 2\n",
@@ -139,6 +169,7 @@ test("runSetup keeps a repo's own seeded default (never overwrites it)", async (
 });
 
 test("runSetup brings a drifted managed workflow back to the gate copy", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         const target = join(
@@ -149,7 +180,11 @@ test("runSetup brings a drifted managed workflow back to the gate copy", async (
         );
         await mkdir(join(repo, ".github", "workflows"), { recursive: true });
         await writeFile(target, "name: Stale\n");
+
+        // Act
         await runSetup({ startDir: repo });
+
+        // Assert
         assert.doesNotMatch(
             await readFile(target, "utf8"),
             /name: Stale/u,
@@ -168,17 +203,24 @@ test("runSetup brings a drifted managed workflow back to the gate copy", async (
 });
 
 test("checkSetup reports absent artifacts and present after setup", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
+        // Act — an untouched repo has no artifacts.
         const before = await checkSetup({ startDir: repo });
+
+        // Assert
         assert.deepEqual(
             before.files.map((c) => c.status),
             ["absent"],
         );
         assert.equal(before.agents, "absent");
 
+        // Act — setup installs them.
         await runSetup({ startDir: repo });
         const after = await checkSetup({ startDir: repo });
+
+        // Assert
         assert.deepEqual(
             after.files.map((c) => c.status),
             ["present"],
@@ -190,6 +232,7 @@ test("checkSetup reports absent artifacts and present after setup", async () => 
 });
 
 test("checkSetup reports drift when the managed workflow differs", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         const target = join(
@@ -200,7 +243,11 @@ test("checkSetup reports drift when the managed workflow differs", async () => {
         );
         await mkdir(join(repo, ".github", "workflows"), { recursive: true });
         await writeFile(target, "name: Mine\n");
+
+        // Act
         const check = await checkSetup({ startDir: repo });
+
+        // Assert
         assert.equal(
             check.files.find(
                 (c) => c.name === ".github/workflows/defined--verify.yml",
@@ -213,10 +260,15 @@ test("checkSetup reports drift when the managed workflow differs", async () => {
 });
 
 test("runSetup removes the eslint example sidecar when the repo has no config", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, "eslint.config.defined.mjs"), "// stale\n");
+
+        // Act
         await runSetup({ startDir: repo });
+
+        // Assert
         await assert.rejects(
             () => readFile(join(repo, "eslint.config.defined.mjs"), "utf8"),
             { code: "ENOENT" },
@@ -228,6 +280,7 @@ test("runSetup removes the eslint example sidecar when the repo has no config", 
 });
 
 test("runSetup prunes the eslint sidecar exclusion from .git/info/exclude", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         await mkdir(join(repo, ".git", "info"), { recursive: true });
@@ -235,11 +288,15 @@ test("runSetup prunes the eslint sidecar exclusion from .git/info/exclude", asyn
             join(repo, ".git", "info", "exclude"),
             "# keep\nother\neslint.config.defined.mjs\n",
         );
+
+        // Act
         await runSetup({ startDir: repo });
         const exclude = await readFile(
             join(repo, ".git", "info", "exclude"),
             "utf8",
         );
+
+        // Assert
         assert.equal(
             exclude.split("\n").includes("eslint.config.defined.mjs"),
             false,
@@ -252,13 +309,18 @@ test("runSetup prunes the eslint sidecar exclusion from .git/info/exclude", asyn
 });
 
 test("runSetup skips the managed workflow when workflow.disable is true", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         await writeFile(
             join(repo, ".defined.json"),
             `${JSON.stringify({ version: "deadbeef", workflow: { disable: true } })}\n`,
         );
+
+        // Act
         await runSetup({ startDir: repo });
+
+        // Assert
         await assert.rejects(
             () =>
                 readFile(
@@ -282,6 +344,7 @@ test("runSetup skips the managed workflow when workflow.disable is true", async 
 });
 
 test("runSetup leaves a present workflow when disabled and warns", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         const target = join(
@@ -297,10 +360,14 @@ test("runSetup leaves a present workflow when disabled and warns", async () => {
             `${JSON.stringify({ version: "deadbeef", workflow: { disable: true } })}\n`,
         );
         const notices: string[] = [];
+
+        // Act
         await runSetup({
             startDir: repo,
             notifyFn: (line) => notices.push(line),
         });
+
+        // Assert
         assert.equal(
             await readFile(target, "utf8"),
             "name: Stale\n",
@@ -318,9 +385,13 @@ test("runSetup leaves a present workflow when disabled and warns", async () => {
 });
 
 test("runSetup skips Directory.Build.props when no .NET files are tracked", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
+        // Act
         await runSetup({ startDir: repo });
+
+        // Assert
         await assert.rejects(
             () => readFile(join(repo, "Directory.Build.props"), "utf8"),
             { code: "ENOENT" },
@@ -338,6 +409,7 @@ test("runSetup skips Directory.Build.props when no .NET files are tracked", asyn
 });
 
 test("runSetup skips Directory.Build.props when dotnet is disabled", async () => {
+    // Arrange
     const repo = await makeTempRepo();
     try {
         await writeFile(join(repo, "App.csproj"), "<Project/>");
@@ -348,7 +420,11 @@ test("runSetup skips Directory.Build.props when dotnet is disabled", async () =>
                 dotnet: { disable: true },
             })}\n`,
         );
+
+        // Act
         await runSetup({ startDir: repo });
+
+        // Assert
         await assert.rejects(
             () => readFile(join(repo, "Directory.Build.props"), "utf8"),
             { code: "ENOENT" },

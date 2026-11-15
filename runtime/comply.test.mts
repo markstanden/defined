@@ -416,7 +416,7 @@ test("runGate_verify_checksSetupThenRunsTheNoFixPass", async () => {
     // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
-    const setupCalls: string[] = [];
+    const calls: string[] = [];
 
     // Act
     await runGate({
@@ -425,17 +425,20 @@ test("runGate_verify_checksSetupThenRunsTheNoFixPass", async () => {
         files: [],
         deps: {
             checkSetupFn: async ({ startDir }) => {
-                setupCalls.push(startDir);
+                calls.push(`setup:${startDir}`);
                 return cleanSetup();
             },
-            runPassFn: async () => allGreen(),
+            runPassFn: async ({ mode }) => {
+                calls.push(`pass:${mode}`);
+                return allGreen();
+            },
             printFn: (line) => printed.push(line),
             exitFn: (code) => exits.push(code),
         },
     });
 
-    // Assert
-    assert.deepEqual(setupCalls, ["/repo"]);
+    // Assert — setup first, then exactly one no-fix pass.
+    assert.deepEqual(calls, ["setup:/repo", "pass:no-fix"]);
     assert.equal(parsePrinted(printed).status, "compliant");
     assert.deepEqual(exits, []);
 });
@@ -961,10 +964,13 @@ test("runPass_noFix_emitsTimingsInStepOrder", async () => {
     await flushMicrotasks();
     first.resolve();
     await pass;
+
+    // Assert
     assert.deepEqual(labels, ["no-fix/first", "no-fix/second"]);
 });
 
 test("runPass_fix_runsStepsSequentially", async () => {
+    // Arrange
     let active = 0;
     let peak = 0;
     const steps = ["a", "b", "c"].map((id) => ({
@@ -977,6 +983,8 @@ test("runPass_fix_runsStepsSequentially", async () => {
             return passed({});
         },
     }));
+
+    // Act
     await runPass({
         mode: "fix",
         repoRoot: "/repo",
@@ -984,13 +992,18 @@ test("runPass_fix_runsStepsSequentially", async () => {
         steps,
         concurrency: 4,
     });
+
+    // Assert
     assert.equal(peak, 1, "repair never runs steps together");
 });
 
 test("runPass_noFix_signal_cancelsUnstartedSteps", async () => {
+    // Arrange
     const controller = new AbortController();
     controller.abort();
     const touched: string[] = [];
+
+    // Act
     const results = await runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -1014,6 +1027,8 @@ test("runPass_noFix_signal_cancelsUnstartedSteps", async () => {
             },
         ],
     });
+
+    // Assert
     assert.deepEqual(touched, [], "no step starts after abort");
     assert.equal(results.get("a")?.status, "error");
     assert.match(results.get("a")?.notice ?? "", /cancelled/u);
@@ -1021,9 +1036,12 @@ test("runPass_noFix_signal_cancelsUnstartedSteps", async () => {
 });
 
 test("runPass_noFix_signal_stopsLaunchingFurtherSteps", async () => {
+    // Arrange
     const controller = new AbortController();
     const firstDone = deferred<void>();
     const started: string[] = [];
+
+    // Act
     const pass = runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -1048,16 +1066,23 @@ test("runPass_noFix_signal_stopsLaunchingFurtherSteps", async () => {
             },
         ],
     });
+
+    // Assert
     assert.deepEqual(started, ["a"], "only the first step starts at bound 1");
+
+    // Act
     controller.abort();
     firstDone.resolve();
     const results = await pass;
+
+    // Assert
     assert.deepEqual(started, ["a"], "the pending step never starts");
     assert.equal(results.get("a")?.status, "pass", "a running step completes");
     assert.match(results.get("b")?.notice ?? "", /cancelled/u);
 });
 
 test("cancellableRunner_forwardsTheSignalToTheWrappedRunner", async () => {
+    // Arrange
     const controller = new AbortController();
     const seen: Array<AbortSignal | undefined> = [];
     const fake = (async (options: {
@@ -1078,12 +1103,19 @@ test("cancellableRunner_forwardsTheSignalToTheWrappedRunner", async () => {
         runner: fake,
         signal: controller.signal,
     });
+
+    // Act
     await runner({ cmd: "true" });
+
+    // Assert
     assert.equal(seen[0], controller.signal);
 });
 
 test("resolveConcurrency_prefersOverrideThenEnvThenDefault", () => {
+    // Arrange
     const previous = process.env.DEFINED_CONCURRENCY;
+
+    // Act & Assert
     try {
         delete process.env.DEFINED_CONCURRENCY;
         assert.equal(resolveConcurrency(), DEFAULT_CONCURRENCY);
@@ -1104,6 +1136,7 @@ test("resolveConcurrency_prefersOverrideThenEnvThenDefault", () => {
 });
 
 test("acquireComplyLock_busy_printsTheBusyResultAndExits", async () => {
+    // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
     const lock: LockInfo = {
@@ -1112,6 +1145,8 @@ test("acquireComplyLock_busy_printsTheBusyResultAndExits", async () => {
         checkout: "/repo",
         command: "comply",
     };
+
+    // Act
     const handle = await acquireComplyLock({
         repoRoot: "/repo",
         files: ["src/a.ts"],
@@ -1128,6 +1163,7 @@ test("acquireComplyLock_busy_printsTheBusyResultAndExits", async () => {
         },
     });
 
+    // Assert
     assert.equal(handle, undefined, "a contended run takes no handle");
     assert.deepEqual(exits, [1], "busy is a non-zero exit, never green");
     assert.deepEqual(JSON.parse(printed[0]!), {
@@ -1138,9 +1174,12 @@ test("acquireComplyLock_busy_printsTheBusyResultAndExits", async () => {
 });
 
 test("acquireComplyLock_acquired_returnsTheHandleAndDoesNotExit", async () => {
+    // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
     let released = 0;
+
+    // Act
     const handle = await acquireComplyLock({
         repoRoot: "/repo",
         files: [],
@@ -1167,6 +1206,7 @@ test("acquireComplyLock_acquired_returnsTheHandleAndDoesNotExit", async () => {
         },
     });
 
+    // Assert
     assert.notEqual(handle, undefined);
     handle?.release();
     assert.equal(released, 1, "the caller releases the lock it was given");
