@@ -83,7 +83,7 @@ test("a nonzero shfmt exit is an execution error, not a finding", async () => {
     assert.match(result.notice ?? "", /shfmt failed/u);
 });
 
-test("parseShfmtFiles ignores blank lines and parseShellcheck reads gcc format", () => {
+test("parseShfmtFiles ignores blank lines", () => {
     // Act & Assert
     assert.deepEqual(parseShfmtFiles({ stdout: "a.sh\n\nb.sh\n" }), [
         {
@@ -97,7 +97,9 @@ test("parseShfmtFiles ignores blank lines and parseShellcheck reads gcc format",
             message: "not shfmt-formatted (run shfmt -w)",
         },
     ]);
+});
 
+test("parseShellcheck reads gcc format", () => {
     // Act & Assert
     assert.deepEqual(
         parseShellcheck({ text: "a.sh:2:5: warning: quote it [SC2086]\n" }),
@@ -164,7 +166,7 @@ test("shellcheck violations at or above the floor fail the step", async () => {
     ]);
 });
 
-test("default floor is style; a raised project floor is honoured via -S", async () => {
+test("the default shellcheck floor is style, passed to shellcheck as -S", async () => {
     // Arrange
     const { runner, calls } = fakeRunner({});
 
@@ -177,4 +179,22 @@ test("default floor is style; a raised project floor is honoured via -S", async 
     ];
     assert.equal(SHELLCHECK_DEFAULT_FLOOR, "style");
     assert.equal(floorArg, "style");
+});
+
+test("a raised project floor reaches shellcheck as -S", async () => {
+    // Arrange
+    const { runner, calls } = fakeRunner({ shellcheck: { status: 0 } });
+
+    // Act
+    const result = await runShellStep({
+        ctx: baseCtx,
+        trackedFiles: ["ok.sh"],
+        runner,
+        floor: "warning",
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    const args = calls.find((c) => c[0] === "shellcheck")!;
+    assert.equal(args[args.indexOf("-S") + 1], "warning");
 });
