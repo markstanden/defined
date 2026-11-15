@@ -109,6 +109,8 @@ function isUnsuccessful(result: GateResult, check: string): boolean {
 // unrelated to the change under test.
 test("the tofu fixture declares no provider and fetches nothing over the network", () => {
     const mainTf = brokenFixtureFiles()["main.tf"] ?? "";
+
+    // Act & Assert — the fixture source is the subject; nothing to stage.
     assert.match(mainTf, /resource "terraform_data"/u);
     assert.doesNotMatch(
         mainTf,
@@ -121,10 +123,12 @@ test(
     "check-only fails read-only on broken code; comply repairs safe findings and stays red for check-only ones",
     { skip: !hasEngine() },
     async () => {
+        // Arrange — one deliberately broken checkout, shared by both phases.
         const root = await makeTemp();
         try {
             await createBrokenFixture({ root });
 
+            // Act — the read-only pass, baselined by a hash of the tree.
             // ---- check-only: non-zero, every ecosystem picked up, no writes ----
             const before = hashTree(root);
             const checkOnly = await run({
@@ -132,6 +136,8 @@ test(
                 args: ["--check-only", "--full", "--timings"],
                 cwd: root,
             });
+
+            // Assert
             assert.equal(
                 checkOnly.status,
                 1,
@@ -181,12 +187,15 @@ test(
             );
             assertTreeUntouched(root, before);
 
+            // Act
             // ---- comply: bootstraps, repairs, workflow stays red ----
             const comply = await run({
                 cmd: gateShim(),
                 args: ["--full"],
                 cwd: root,
             });
+
+            // Assert
             assert.equal(
                 comply.status,
                 1,
@@ -236,10 +245,12 @@ test(
     "check-only and comply are both green after semantic repair",
     { skip: !hasEngine() },
     async () => {
+        // Arrange
         const root = await makeTemp();
         try {
             await createBrokenFixture({ root });
 
+            // Act
             // comply bootstraps managed files + repairs safe findings; workflow
             // stays red until a human/agent fixes the check-only finding.
             const comply = await run({
@@ -247,8 +258,10 @@ test(
                 args: ["--full"],
                 cwd: root,
             });
+            // Assert
             assert.equal(comply.status, 1, "workflow is still check-only-red");
 
+            // Arrange
             // Semantic repair: give the workflow a job-level permissions block
             // (zizmor: excessive-permissions) and a runs-on. The fix must also
             // be prettier-formatted (4-space indent, per the .editorconfig
@@ -330,6 +343,7 @@ test(
                 ].join("\n"),
             );
 
+            // Act & Assert — each variant must be green after the repair.
             for (const args of [["--check-only", "--full"], ["--full"]]) {
                 const label = args.includes("--check-only")
                     ? "--check-only"

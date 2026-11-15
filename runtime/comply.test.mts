@@ -642,8 +642,11 @@ test("runGate passes the notify sink only under --timings", async () => {
 });
 
 test("runExplain_printsOneJsonObjectAndDoesNotExit", async () => {
+    // Arrange
     const printed: string[] = [];
     const exits: number[] = [];
+
+    // Act
     await runExplain({
         topic: "shell",
         repoRoot: "/repo",
@@ -661,14 +664,19 @@ test("runExplain_printsOneJsonObjectAndDoesNotExit", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
+
+    // Assert
     assert.equal(printed.length, 1, "exactly one JSON line on stdout");
     assert.equal(JSON.parse(printed[0]!).topic, "shell");
     assert.deepEqual(exits, []);
 });
 
 test("runExplain_unknownTopic_reportsToStderrAndExitsTwo", async () => {
+    // Arrange
     const errors: string[] = [];
     const exits: number[] = [];
+
+    // Act
     await runExplain({
         topic: "wat",
         repoRoot: "/repo",
@@ -681,11 +689,14 @@ test("runExplain_unknownTopic_reportsToStderrAndExitsTwo", async () => {
             exitFn: (code) => exits.push(code),
         },
     });
+
+    // Assert
     assert.match(errors[0]!, /unknown topic 'wat'/u);
     assert.deepEqual(exits, [2]);
 });
 
 test("explainStepIds_coverEveryOrchestratorStep", () => {
+    // Act & Assert — the filter and its comparison are one statement.
     assert.deepEqual(
         EXPLAIN_STEP_IDS.filter((id) => id !== "bootstrap"),
         STEP_IDS,
@@ -693,25 +704,32 @@ test("explainStepIds_coverEveryOrchestratorStep", () => {
 });
 
 test("printUsage prints the three-verb usage line with flags", () => {
+    // Arrange
     const lines: string[] = [];
     const original = console.log;
     console.log = (line: string) => lines.push(line);
     try {
+        // Act
         printUsage();
     } finally {
         console.log = original;
     }
+
+    // Assert
     assert.deepEqual(lines, [
         "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined explain <step-or-rule>",
     ]);
 });
 
 test("runSmoke probes /usr/bin/git in the container", async () => {
+    // Act
     const result = await runSmoke({
         mode: "no-fix",
         repoRoot: "/repo",
         files: [],
     });
+
+    // Assert
     assert.equal(result.status, "pass");
 });
 
@@ -733,6 +751,7 @@ async function flushMicrotasks(): Promise<void> {
 }
 
 test("runPass_noFix_overlapsIndependentSteps", async () => {
+    // Arrange
     const a = deferred<void>();
     const b = deferred<void>();
     const started: string[] = [];
@@ -744,6 +763,8 @@ test("runPass_noFix_overlapsIndependentSteps", async () => {
             return passed({});
         },
     });
+
+    // Act
     const pass = runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -751,6 +772,8 @@ test("runPass_noFix_overlapsIndependentSteps", async () => {
         steps: [step("a", a), step("b", b)],
         concurrency: 2,
     });
+
+    // Assert
     assert.deepEqual(
         [...started].sort(),
         ["a", "b"],
@@ -762,6 +785,7 @@ test("runPass_noFix_overlapsIndependentSteps", async () => {
 });
 
 test("runPass_noFix_serialisesStepsSharingAResource", async () => {
+    // Arrange
     let active = 0;
     let peak = 0;
     const step = (id: string) => ({
@@ -775,6 +799,8 @@ test("runPass_noFix_serialisesStepsSharingAResource", async () => {
             return passed({});
         },
     });
+
+    // Act
     await runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -782,10 +808,13 @@ test("runPass_noFix_serialisesStepsSharingAResource", async () => {
         steps: [step("a"), step("b"), step("c")],
         concurrency: 4,
     });
+
+    // Assert
     assert.equal(peak, 1, "resource holders never overlap");
 });
 
 test("runPass_noFix_neverExceedsTheConcurrencyBound", async () => {
+    // Arrange
     const releases: Array<() => void> = [];
     let active = 0;
     let peak = 0;
@@ -799,6 +828,8 @@ test("runPass_noFix_neverExceedsTheConcurrencyBound", async () => {
             return passed({});
         },
     }));
+
+    // Act
     const pass = runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -806,12 +837,17 @@ test("runPass_noFix_neverExceedsTheConcurrencyBound", async () => {
         steps,
         concurrency: 2,
     });
+
+    // Assert
     assert.equal(active, 2, "two steps start at the bound");
+    // Act & Assert — free one slot at a time and check the bound holds.
     for (let i = 0; i < steps.length; i += 1) {
         assert.ok(active <= 2, `active ${active} exceeded the bound`);
         releases.shift()?.();
         await flushMicrotasks();
     }
+
+    // Assert
     const results = await pass;
     assert.equal(peak, 2);
     assert.equal(
@@ -821,7 +857,10 @@ test("runPass_noFix_neverExceedsTheConcurrencyBound", async () => {
 });
 
 test("runPass_noFix_blocksDependentsOfAFailedPrerequisite", async () => {
+    // Arrange
     let dependentRan = false;
+
+    // Act
     const results = await runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -841,6 +880,8 @@ test("runPass_noFix_blocksDependentsOfAFailedPrerequisite", async () => {
             },
         ],
     });
+
+    // Assert
     assert.equal(results.get("node-deps")?.status, "fail");
     assert.equal(results.get("node")?.status, "blocked");
     assert.match(results.get("node")?.notice ?? "", /node-deps/u);
@@ -848,8 +889,11 @@ test("runPass_noFix_blocksDependentsOfAFailedPrerequisite", async () => {
 });
 
 test("runPass_noFix_keepsStepOrderRegardlessOfCompletionOrder", async () => {
+    // Arrange
     const first = deferred<void>();
     const second = deferred<void>();
+
+    // Act
     const pass = runPass({
         mode: "no-fix",
         repoRoot: "/repo",
@@ -876,15 +920,20 @@ test("runPass_noFix_keepsStepOrderRegardlessOfCompletionOrder", async () => {
     second.resolve();
     await flushMicrotasks();
     first.resolve();
+
+    // Assert
     const results = await pass;
     assert.deepEqual([...results.keys()], ["first", "second"]);
 });
 
 test("runPass_noFix_emitsTimingsInStepOrder", async () => {
+    // Arrange
     const labels: string[] = [];
     const timings: Timings = { record: (label) => labels.push(label) };
     const first = deferred<void>();
     const second = deferred<void>();
+
+    // Act
     const pass = runPass({
         mode: "no-fix",
         repoRoot: "/repo",
