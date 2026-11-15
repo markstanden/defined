@@ -1170,6 +1170,7 @@ test("version reports no engine without failing", async () => {
 
 test("update resolves latest and moves pin, launcher and image together", async () => {
     await withFixture({ coverage: { node: {} } }, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update"],
@@ -1181,6 +1182,8 @@ test("update resolves latest and moves pin, launcher and image together", async 
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
 
         const config = JSON.parse(
@@ -1213,6 +1216,7 @@ test("update resolves latest and moves pin, launcher and image together", async 
 
 test("update accepts an explicit short SHA and replaces the pin", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1222,6 +1226,8 @@ test("update accepts an explicit short SHA and replaces the pin", async () => {
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const config = JSON.parse(
             await readFile(join(fixture.repo, ".defined.json"), "utf8"),
@@ -1235,31 +1241,41 @@ test("update accepts an explicit short SHA and replaces the pin", async () => {
 
 test("update is a no-op when everything is already current", async () => {
     await withFixture({ coverage: {} }, async (fixture) => {
+        // Arrange
         const baseEnv = {
             FAKE_REMOTE_REV: REMOTE_REV,
             FAKE_GIT_REMOTE: "origin",
             FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
             DEFINED_BIN_DIR: fixture.install,
         };
+
+        // Act
         const first = await runLauncher({
             fixture,
             args: ["update"],
             env: { ...baseEnv, FAKE_INSPECT_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(first.status, 0);
         assert.ok(
             first.log.some((line) => line === `pull ${IMAGE_REPO}:${PIN}`),
         );
 
+        // Arrange — the config the second, already-current run must leave alone.
         const before = await readFile(
             join(fixture.repo, ".defined.json"),
             "utf8",
         );
+
+        // Act
         const second = await runLauncher({
             fixture,
             args: ["update"],
             env: baseEnv,
         });
+
+        // Assert
         assert.equal(second.status, 0);
         assert.ok(hasLine(second.stdout, "launcher already current"));
         assert.ok(
@@ -1275,6 +1291,7 @@ test("update is a no-op when everything is already current", async () => {
 
 test("update refuses to pin a revision whose image is not published", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1287,6 +1304,8 @@ test("update refuses to pin a revision whose image is not published", async () =
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /no published image/u);
         const config = JSON.parse(
@@ -1303,6 +1322,7 @@ test("update refuses to pin a revision whose image is not published", async () =
 
 test("update fails when the registry cannot confirm the image", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1315,6 +1335,8 @@ test("update fails when the registry cannot confirm the image", async () => {
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /cannot confirm/u);
     });
@@ -1322,6 +1344,7 @@ test("update fails when the registry cannot confirm the image", async () => {
 
 test("update skips the registry when the image is already present locally", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1334,6 +1357,8 @@ test("update skips the registry when the image is already present locally", asyn
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             !r.log.some((line) => line.startsWith("manifest")),
@@ -1344,6 +1369,7 @@ test("update skips the registry when the image is already present locally", asyn
 
 test("update refuses the defined source repository", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update"],
@@ -1355,6 +1381,8 @@ test("update refuses the defined source repository", async () => {
                 FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /source repo/u);
         assert.ok(!r.log.some((line) => line.startsWith("pull")));
@@ -1363,6 +1391,7 @@ test("update refuses the defined source repository", async () => {
 
 test("runs the local runtime for comply and verify in the source repo", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const shimDir = join(fixture.repo, "runtime");
         await mkdir(shimDir, { recursive: true });
         const shim = join(shimDir, "comply.sh");
@@ -1378,38 +1407,50 @@ test("runs the local runtime for comply and verify in the source repo", async ()
             FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
         };
 
+        // Act
         const comply = await runLauncher({
             fixture,
             args: ["comply"],
             env: source,
         });
+
+        // Assert
         assert.equal(comply.status, 0);
         assert.match(comply.stderr, /source repo/u);
         assert.equal(comply.stdout.trim(), "shim:");
         assert.deepEqual(comply.log, [], "no engine runs in the source repo");
 
+        // Act
         const verify = await runLauncher({
             fixture,
             args: ["verify"],
             env: source,
         });
+
+        // Assert
         assert.equal(verify.status, 0);
         assert.equal(verify.stdout.trim(), "shim:--check-only");
         assert.deepEqual(verify.log, [], "no engine runs in the source repo");
 
+        // Act
         const flagged = await runLauncher({
             fixture,
             args: ["comply", "--min"],
             env: source,
         });
+
+        // Assert
         assert.equal(flagged.status, 0);
         assert.equal(flagged.stdout.trim(), "shim:--min");
 
+        // Act
         const explain = await runLauncher({
             fixture,
             args: ["explain", "shell"],
             env: source,
         });
+
+        // Assert
         assert.equal(explain.status, 0);
         assert.equal(explain.stdout.trim(), "shim:explain shell");
         assert.deepEqual(explain.log, []);
@@ -1418,6 +1459,7 @@ test("runs the local runtime for comply and verify in the source repo", async ()
 
 test("fails loudly in the source repo when the local runtime is absent", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["comply"],
@@ -1426,6 +1468,8 @@ test("fails loudly in the source repo when the local runtime is absent", async (
                 FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /runtime\/comply\.sh/u);
     });
@@ -1433,11 +1477,14 @@ test("fails loudly in the source repo when the local runtime is absent", async (
 
 test("update fails loudly offline", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update"],
             env: { DEFINED_OFFLINE: "1", FAKE_REMOTE_REV: REMOTE_REV },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /needs the network/u);
     });
@@ -1445,29 +1492,38 @@ test("update fails loudly offline", async () => {
 
 test("update rejects a malformed or too-short revision", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const env = {
             FAKE_GIT_REMOTE: "origin",
             FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
         };
+
+        // Act
         const malformed = await runLauncher({
             fixture,
             args: ["update", "not-a-sha"],
             env,
         });
+
+        // Assert
         assert.equal(malformed.status, 1);
         assert.match(malformed.stderr, /invalid revision/u);
 
+        // Act
         const tooShort = await runLauncher({
             fixture,
             args: ["update", "abc1234"],
             env,
         });
+
+        // Assert
         assert.equal(tooShort.status, 1);
         assert.match(tooShort.stderr, /too short/u);
     });
 });
 
 test("is_windows_mounted flags only Windows-drive (/mnt) launcher paths", () => {
+    // Arrange
     // Sourcing the launcher must not execute main (the BASH_SOURCE == $0
     // guard), so the predicate is probeable without a real /mnt path — which
     // only root could create.
@@ -1482,7 +1538,11 @@ test("is_windows_mounted flags only Windows-drive (/mnt) launcher paths", () => 
         .join(
             " ",
         )}; do if is_windows_mounted "$p"; then echo "yes $p"; else echo "no $p"; fi; done`;
+
+    // Act
     const r = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+
+    // Assert
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(
         r.stdout.trim().split("\n"),
