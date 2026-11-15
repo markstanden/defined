@@ -96,8 +96,12 @@ exit 1
 }
 
 /** Run the shim against a fresh fixture, always cleaning up. */
+/**
+ * Run a test body against a fresh fixture (fake bin + repo + fake git), always
+ * cleaning up. The fake engine is written by each test, since its env carries
+ * paths that only exist once the fixture root is known.
+ */
 async function withFixture(
-    env: Record<string, string>,
     fn: (fixture: Fixture) => Promise<void>,
 ): Promise<void> {
     const root = await mkdtemp(join(tmpdir(), "defined-shim-"));
@@ -105,7 +109,6 @@ async function withFixture(
     const repo = join(root, "repo");
     await mkdir(bin);
     await mkdir(repo);
-    await fakeEngine(bin, env);
     await fakeGit(bin, repo);
     try {
         await fn({ root, bin, repo });
@@ -147,10 +150,15 @@ function repoHash(repo: string): string {
 }
 
 test("creates the deps mount point as the host user, then removes it", async () => {
-    await withFixture({}, async (fixture) => {
+    await withFixture(async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
         await fakeEngine(fixture.bin, { FAKE_RUN_OBSERVE: deps });
+
+        // Act
         const r = await runShim(fixture, []);
+
+        // Assert
         assert.equal(r.status, 0, r.stderr);
         assert.deepEqual(r.observed, [`present:${hostUid()}:0`]);
         await assert.rejects(
@@ -169,10 +177,15 @@ test("creates the deps mount point as the host user, then removes it", async () 
 });
 
 test("mounts no deps volume and creates no mount point for explain", async () => {
-    await withFixture({}, async (fixture) => {
+    await withFixture(async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
         await fakeEngine(fixture.bin, { FAKE_RUN_OBSERVE: deps });
+
+        // Act
         const r = await runShim(fixture, ["explain", "shell"]);
+
+        // Assert
         assert.equal(r.status, 0, r.stderr);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "explain must invoke the engine");
@@ -182,14 +195,32 @@ test("mounts no deps volume and creates no mount point for explain", async () =>
     });
 });
 
-test("propagates the gate's exit status and still cleans up", async () => {
-    await withFixture({}, async (fixture) => {
+test("propagates the gate's exit status", async () => {
+    await withFixture(async (fixture) => {
+        // Arrange
+        await fakeEngine(fixture.bin, { FAKE_RUN_EXIT: "4" });
+
+        // Act
+        const r = await runShim(fixture, []);
+
+        // Assert
+        assert.equal(r.status, 4);
+    });
+});
+
+test("removes its mount point even when the run fails", async () => {
+    await withFixture(async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
         await fakeEngine(fixture.bin, {
             FAKE_RUN_OBSERVE: deps,
             FAKE_RUN_EXIT: "4",
         });
+
+        // Act
         const r = await runShim(fixture, []);
+
+        // Assert
         assert.equal(r.status, 4);
         await assert.rejects(
             stat(deps),
@@ -205,12 +236,17 @@ test("warns when an existing deps mount point is not writable", async (t) => {
         );
         return;
     }
-    await withFixture({}, async (fixture) => {
+    await withFixture(async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
+        await fakeEngine(fixture.bin, {});
         await mkdir(deps);
         await chmod(deps, 0o555);
         try {
+            // Act
             const r = await runShim(fixture, []);
+
+            // Assert
             assert.equal(r.status, 0, r.stderr);
             assert.match(r.stderr, /not writable/u);
             assert.match(r.stderr, /node_modules/u);

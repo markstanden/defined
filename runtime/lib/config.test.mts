@@ -14,7 +14,7 @@ async function writeConfig(dir: string, content: string): Promise<void> {
     await writeFile(`${dir}/.defined.json`, content);
 }
 
-async function rejectsLoad({
+async function assertLoadRejects({
     dir,
     config,
     re,
@@ -129,7 +129,7 @@ test("loadConfig rejects invalid version values", async () => {
         { label: "latest", config: { version: "latest" } },
     ] as const;
     for (const { label, config } of BAD_VERSIONS) {
-        await rejectsLoad({
+        await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config,
             re: /"version" must be a 7–40 character hex SHA/u,
@@ -294,7 +294,7 @@ test("loadConfig rejects malformed node configs", async () => {
         },
     ];
     for (const { config, re } of cases) {
-        await rejectsLoad({
+        await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: config as Record<string, unknown>,
             re,
@@ -331,7 +331,7 @@ test("loadConfig rejects coverage with unknown ecosystem", async () => {
 test("loadConfig rejects coverage command that is not non-empty", async () => {
     for (const command of [undefined, "  "]) {
         const coverage = command === undefined ? {} : { command };
-        await rejectsLoad({
+        await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: { version: SHA, coverage: { node: coverage } },
             re: /"coverage.node.command" must be a non-empty string/u,
@@ -341,7 +341,7 @@ test("loadConfig rejects coverage command that is not non-empty", async () => {
 
 test("loadConfig rejects minimum outside 0–100", async () => {
     for (const line of [101, -5]) {
-        await rejectsLoad({
+        await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: {
                 version: SHA,
@@ -404,7 +404,7 @@ test("loadConfig rejects malformed naming configs", async () => {
         },
     ];
     for (const { config, re } of cases) {
-        await rejectsLoad({
+        await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: config as Record<string, unknown>,
             re,
@@ -456,7 +456,7 @@ test("loadConfig rejects malformed tofu configs", async () => {
         },
     ];
     for (const { config, re } of cases) {
-        await rejectsLoad({
+        await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: config as Record<string, unknown>,
             re,
@@ -494,12 +494,12 @@ test("loadConfig treats an empty eslint key as absent", async () => {
 });
 
 test("loadConfig rejects an unknown eslint key or non-boolean disable", async () => {
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { eslint: { rules: {} } },
         re: /unknown eslint key "rules"/,
     });
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { eslint: { disable: "yes" } },
         re: /"eslint\.disable" must be a boolean/,
@@ -517,7 +517,7 @@ test("loadConfig parses the eslint complexityMax override", async () => {
 
 test("loadConfig rejects a malformed eslint complexityMax", async () => {
     for (const complexityMax of [0, -3, 2.5, "12", true]) {
-        await rejectsLoad({
+        await assertLoadRejects({
             dir: await makeTempDir("quality-config-"),
             config: { eslint: { complexityMax } },
             re: /"eslint\.complexityMax" must be a positive integer or false/u,
@@ -535,7 +535,7 @@ test("loadConfig parses the eslint recommended override", async () => {
 });
 
 test("loadConfig rejects a non-boolean eslint recommended", async () => {
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { eslint: { recommended: "off" } },
         re: /"eslint\.recommended" must be a boolean/u,
@@ -557,12 +557,12 @@ test("loadConfig treats an empty workflow key as absent", async () => {
 });
 
 test("loadConfig rejects an unknown workflow key or non-boolean disable", async () => {
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { workflow: { host: "ado" } },
         re: /unknown workflow key "host"/,
     });
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { workflow: { disable: "yes" } },
         re: /"workflow\.disable" must be a boolean/,
@@ -584,12 +584,12 @@ test("loadConfig treats an empty dotnet key as absent", async () => {
 });
 
 test("loadConfig rejects an unknown dotnet key or non-boolean disable", async () => {
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { dotnet: { framework: "net10.0" } },
         re: /unknown dotnet key "framework"/,
     });
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: { dotnet: { disable: "yes" } },
         re: /"dotnet\.disable" must be a boolean/,
@@ -597,7 +597,7 @@ test("loadConfig rejects an unknown dotnet key or non-boolean disable", async ()
 });
 
 test("loadConfig rejects dotnet.disable combined with coverage.dotnet", async () => {
-    await rejectsLoad({
+    await assertLoadRejects({
         dir: await makeTempDir("quality-config-"),
         config: {
             coverage: { dotnet: { command: "dotnet test" } },

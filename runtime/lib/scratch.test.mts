@@ -1,5 +1,6 @@
-// Tests for lib/scratch.mts: the no-fix scratch workspace for the dotnet steps.
-// Run: node --test lib/scratch.test.mts
+// Tests for runtime/lib/scratch.mts: the no-fix scratch workspace for the
+// dotnet steps.
+// Run: node --test runtime/lib/scratch.test.mts
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -111,5 +112,7 @@ test("cleanupScratch removes the dir and clears the box", async () => {
 });
 
 test("cleanupScratch is a no-op for an empty box", () => {
-    cleanupScratch({ dir: null });
+    // The contract is "no throw and no unlink attempt" for a box nothing was
+    // ever created in, so the assertion is the absence of an error.
+    assert.doesNotThrow(() => cleanupScratch({ dir: null }));
 });

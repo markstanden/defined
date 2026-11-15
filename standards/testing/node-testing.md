@@ -22,6 +22,13 @@ rule:
 - **Runner**: `node --test` (Node ≥ 26 strip-types) — zero dependencies keeps
   "drop in anywhere" honest; no vitest/jest required.
 - **Assertions**: `node:assert/strict`.
+- **Structure**: label the phases `// Arrange`, `// Act`, `// Assert` inside the
+  test body, one behaviour per test — a failing test name should say what broke.
+  This is a ratchet: required for new and changed tests, and for historical
+  tests as each area is retrofit.
+- **Assertion helpers carry the verb**: name a helper `assertX(...)` (e.g.
+  `assertLoadRejects`), never `rejectsLoad(...)`. The reader and the review
+  scanner both look for the verb; without it a helper reads as "no assertions".
 - **Colocation**: tests live next to the module as `<module>.test.mts`.
 - **No test grab-bags**: one test file per module.
 

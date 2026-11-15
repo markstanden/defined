@@ -129,6 +129,7 @@ async function withFixture<T>(
  *   FAKE_NO_ENGINE=1      → `--version`/inspect succeed but do nothing
  *   FAKE_RUN_OBSERVE=<p>  → `run` records what is at path <p> as
  *                           present:<uid>:<entries> or absent:0:0
+ *   FAKE_RUN_LEAVE=<name> → `run` writes <name> into FAKE_RUN_OBSERVE
  *   FAKE_RUN_EXIT=<n>     → `run` exits with status <n>
  * Every invocation is appended to <bin>/<name>.log as a single line.
  */
@@ -173,6 +174,9 @@ if [[ "$1" == "run" ]]; then
         else
             printf 'absent:0:0\\n' >> "${observePath}"
         fi
+    fi
+    if [[ -n "\${FAKE_RUN_LEAVE:-}" && -d "\${FAKE_RUN_OBSERVE:-}" ]]; then
+        printf 'x\\n' > "\${FAKE_RUN_OBSERVE}/\${FAKE_RUN_LEAVE}"
     fi
     if [[ -n "\${FAKE_RUN_EXIT:-}" ]]; then
         exit "\${FAKE_RUN_EXIT}"
@@ -485,15 +489,19 @@ test("mounts the content cache volume outside the read-only checkout", async () 
 
 test("creates the deps mount point as the host user, then removes it", async () => {
     await withFixture("abc12345", async (fixture) => {
-        // Inside the bind-mounted repo, so an engine left to create it would
-        // own it as the namespace root (rootless podman: 100000:100000) — a
-        // path the host user can no longer write, which breaks a host install.
+        // Arrange — inside the bind-mounted repo, so an engine left to create
+        // it would own it as the namespace root (rootless podman:
+        // 100000:100000), a path the host user can no longer write.
         const deps = join(fixture.repo, "node_modules");
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["comply"],
             env: { FAKE_RUN_OBSERVE: deps },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.deepEqual(r.observed, [`present:${hostUid()}:0`]);
         await assert.rejects(
@@ -510,14 +518,19 @@ test("creates the deps mount point as the host user, then removes it", async () 
 
 test("leaves a host node_modules and its contents in place", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
         await mkdir(deps);
         await writeFile(join(deps, "keep.txt"), "host install\n");
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["comply"],
             env: { FAKE_RUN_OBSERVE: deps },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.deepEqual(r.observed, [`present:${hostUid()}:1`]);
         assert.equal(
@@ -529,15 +542,19 @@ test("leaves a host node_modules and its contents in place", async () => {
 
 test("leaves no mount point behind after a read-only verify run", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { FAKE_RUN_OBSERVE: deps },
         });
+
+        // Assert — verify still mounts the deps volume, so the mount point is
+        // needed, but a read-only run must not leave anything in the checkout.
         assert.equal(r.status, 0);
-        // Verify still mounts the deps volume, so the mount point is needed —
-        // but a read-only run must not leave anything in the checkout.
         assert.deepEqual(r.observed, [`present:${hostUid()}:0`]);
         await assert.rejects(
             stat(deps),
@@ -548,26 +565,124 @@ test("leaves no mount point behind after a read-only verify run", async () => {
 
 test("creates no mount point for explain, which mounts no deps volume", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["explain", "shell"],
             env: { FAKE_RUN_OBSERVE: deps },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.deepEqual(r.observed, ["absent:0:0"]);
         await assert.rejects(stat(deps));
     });
 });
 
-test("propagates the engine's exit status and still cleans up", async () => {
+test("puts the mount point at the git root, not the working directory", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Arrange — the fake git resolves every invocation to fixture.repo, so
+        // running from a different cwd proves the path comes from the root.
         const deps = join(fixture.repo, "node_modules");
+
+        // Act
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            cwd: fixture.install,
+            env: { FAKE_RUN_OBSERVE: deps },
+        });
+
+        // Assert
+        assert.deepEqual(r.observed, [`present:${hostUid()}:0`]);
+        await assert.rejects(
+            stat(join(fixture.install, "node_modules")),
+            "never created relative to the cwd",
+        );
+    });
+});
+
+test("runs the engine when it cannot create the mount point", async (t) => {
+    if (process.getuid?.() === 0) {
+        t.skip(
+            "root writes through any mode, so the condition cannot be built",
+        );
+        return;
+    }
+    await withFixture("abc12345", async (fixture) => {
+        // Arrange — a checkout whose root only its owner cannot write; making
+        // the mount point is best effort, so it must not block the run.
+        const deps = join(fixture.repo, "node_modules");
+        await chmod(fixture.repo, 0o555);
+        try {
+            // Act
+            const r = await runLauncher({
+                fixture,
+                args: ["comply"],
+                env: { FAKE_RUN_OBSERVE: deps },
+            });
+
+            // Assert
+            assert.equal(r.status, 0);
+            assert.ok(
+                r.log.some((line) => line.startsWith("run --rm")),
+                "the gate still runs",
+            );
+            assert.deepEqual(r.observed, ["absent:0:0"]);
+        } finally {
+            await chmod(fixture.repo, 0o755);
+        }
+    });
+});
+
+test("leaves the mount point when the run put something in it", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        // Arrange — a mount point we created, with content arriving in it
+        // (a failed volume mount leaves the container writing to the host dir).
+        const deps = join(fixture.repo, "node_modules");
+
+        // Act
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            env: { FAKE_RUN_OBSERVE: deps, FAKE_RUN_LEAVE: "leftover.txt" },
+        });
+
+        // Assert — `rmdir` refuses a non-empty dir, so nothing is deleted.
+        assert.equal(r.status, 0);
+        assert.equal(await readFile(join(deps, "leftover.txt"), "utf8"), "x\n");
+    });
+});
+
+test("propagates the engine's exit status", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        // Arrange
+        const env = { FAKE_RUN_EXIT: "7" };
+
+        // Act
+        const r = await runLauncher({ fixture, args: ["comply"], env });
+
+        // Assert
+        assert.equal(r.status, 7);
+    });
+});
+
+test("removes its mount point even when the run fails", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        // Arrange
+        const deps = join(fixture.repo, "node_modules");
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["comply"],
             env: { FAKE_RUN_OBSERVE: deps, FAKE_RUN_EXIT: "7" },
         });
+
+        // Assert
         assert.equal(r.status, 7);
         await assert.rejects(
             stat(deps),
@@ -584,11 +699,15 @@ test("warns when an existing deps mount point is not writable", async (t) => {
         return;
     }
     await withFixture("abc12345", async (fixture) => {
+        // Arrange
         const deps = join(fixture.repo, "node_modules");
         await mkdir(deps);
         await chmod(deps, 0o555);
         try {
+            // Act
             const r = await runLauncher({ fixture, args: ["comply"] });
+
+            // Assert
             assert.equal(r.status, 0);
             assert.match(r.stderr, /not writable/u, "say which path and why");
             assert.match(r.stderr, /node_modules/u);
@@ -602,8 +721,13 @@ test("warns when an existing deps mount point is not writable", async (t) => {
 
 test("says nothing when the deps mount point is already writable", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Arrange
         await mkdir(join(fixture.repo, "node_modules"));
+
+        // Act
         const r = await runLauncher({ fixture, args: ["comply"] });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.doesNotMatch(r.stderr, /node_modules/u, "no warning noise");
     });
