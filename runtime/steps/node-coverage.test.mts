@@ -143,7 +143,9 @@ test("parseLcov rejects a malformed hit counter (the reported reproduction)", ()
 });
 
 test("parseLcov rejects negative, fractional and infinite counters", () => {
+    // Arrange
     for (const bad of ["-1", "1.5", "Infinity", "NaN", "0x10", ""]) {
+        // Act & Assert
         assert.throws(
             () => parseLcov({ content: `LF:10\nLH:${bad}\n` }),
             /is not a non-negative integer/u,
@@ -153,10 +155,13 @@ test("parseLcov rejects negative, fractional and infinite counters", () => {
 });
 
 test("parseLcov rejects a hit count exceeding found in any record", () => {
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "LF:10\nLH:11\n" }),
         /line hit count 11 exceeds found count 10/u,
     );
+
+    // Arrange
     // Aggregate is 15/15 (valid), but the second record alone is inconsistent —
     // per-record validation must not let the total hide it.
     const content = [
@@ -167,6 +172,8 @@ test("parseLcov rejects a hit count exceeding found in any record", () => {
         "LH:6",
         "end_of_record",
     ].join("\n");
+
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content }),
         /line hit count 6 exceeds found count 5/u,
@@ -174,10 +181,13 @@ test("parseLcov rejects a hit count exceeding found in any record", () => {
 });
 
 test("parseLcov rejects malformed branch and function counters too", () => {
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "BRF:4\nBRH:oops\n" }),
         /BRH counter 'oops'/u,
     );
+
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "FNF:2\nFNH:-3\n" }),
         /FNH counter '-3'/u,
@@ -187,6 +197,7 @@ test("parseLcov rejects malformed branch and function counters too", () => {
 // --- checkMinimums ---
 
 test("checkMinimums passes when above minimum", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -198,11 +209,14 @@ test("checkMinimums passes when above minimum", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, true);
     assert.equal(result.failures.length, 0);
 });
 
 test("checkMinimums fails when below minimum", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -214,12 +228,15 @@ test("checkMinimums fails when below minimum", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /line:.*70\.0%.*80%/u);
 });
 
 test("checkMinimums checks branch when configured", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -231,12 +248,15 @@ test("checkMinimums checks branch when configured", () => {
         },
         minimums: { line: 80, branch: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /branch:.*60\.0%.*70%/u);
 });
 
 test("checkMinimums checks function when configured", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -248,12 +268,15 @@ test("checkMinimums checks function when configured", () => {
         },
         minimums: { line: 80, function: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /function:.*50\.0%.*70%/u);
 });
 
 test("checkMinimums reports multiple failures", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -265,11 +288,14 @@ test("checkMinimums reports multiple failures", () => {
         },
         minimums: { line: 80, branch: 70, function: 60 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 3);
 });
 
 test("checkMinimums treats zero lines found as 0%", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 0,
@@ -281,10 +307,13 @@ test("checkMinimums treats zero lines found as 0%", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
 });
 
 test("checkMinimums rejects a non-finite summary instead of passing it", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 10,
@@ -296,11 +325,14 @@ test("checkMinimums rejects a non-finite summary instead of passing it", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.match(result.failures[0]!, /invalid counters/u);
 });
 
 test("checkMinimums rejects negative and hit-over-found summaries", () => {
+    // Arrange
     const base = {
         linesFound: 10,
         linesHit: 5,
@@ -309,6 +341,8 @@ test("checkMinimums rejects negative and hit-over-found summaries", () => {
         functionsFound: 0,
         functionsHit: 0,
     };
+
+    // Act & Assert
     assert.equal(
         checkMinimums({
             summary: { ...base, linesFound: -1 },
@@ -316,6 +350,8 @@ test("checkMinimums rejects negative and hit-over-found summaries", () => {
         }).pass,
         false,
     );
+
+    // Act & Assert
     assert.equal(
         checkMinimums({
             summary: { ...base, linesHit: 11 },
@@ -328,24 +364,34 @@ test("checkMinimums rejects negative and hit-over-found summaries", () => {
 // --- runNodeCoverageStep ---
 
 test("skips when no coverage.node in config", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({ root: dir, config: { version: TEST_SHA } });
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("skips when no .defined.json exists", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
