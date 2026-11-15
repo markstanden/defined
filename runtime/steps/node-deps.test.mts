@@ -1,6 +1,6 @@
 // Tests for steps/node-deps.mts: consumer dependency restore shared by the node
 // family. Runner injected; no host binaries needed.
-// Run: node --test steps/node-deps.test.mts
+// Run: node --test runtime/steps/node-deps.test.mts
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -37,20 +37,26 @@ async function writeConfig(
 }
 
 test("runNodeDepsStep skips when nothing is declared or implied", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, { "package.json": "{}\n" });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNodeDepsStep({
         ctx: { mode: "fix", repoRoot: root },
         trackedFiles: ["package.json"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.match(result.notice ?? "", /no dependencies to restore/u);
     assert.equal(calls.length, 0);
 });
 
 test("runNodeDepsStep restores the root package for a consumer Prettier config without a node section", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, {
         "package.json": '{ "name": "consumer" }\n',
@@ -59,6 +65,8 @@ test("runNodeDepsStep restores the root package for a consumer Prettier config w
             'export default { plugins: ["prettier-plugin-x"] };\n',
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNodeDepsStep({
         ctx: { mode: "fix", repoRoot: root },
         trackedFiles: [
@@ -68,6 +76,8 @@ test("runNodeDepsStep restores the root package for a consumer Prettier config w
         ],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.deepEqual(
         calls.map((c) => c.args[1]),
@@ -77,6 +87,7 @@ test("runNodeDepsStep restores the root package for a consumer Prettier config w
 });
 
 test("runNodeDepsStep restores a declared package with local binaries first", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, { "lib/package.json": "{}\n" });
     await writeConfig(root, {
@@ -85,11 +96,15 @@ test("runNodeDepsStep restores a declared package with local binaries first", as
         },
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNodeDepsStep({
         ctx: { mode: "fix", repoRoot: root },
         trackedFiles: ["lib/package.json"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.deepEqual(
         calls.map((c) => c.args[1]),
@@ -103,6 +118,7 @@ test("runNodeDepsStep restores a declared package with local binaries first", as
 });
 
 test("runNodeDepsStep honours a declared install command", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, { "package.json": "{}\n" });
     await writeConfig(root, {
@@ -113,16 +129,21 @@ test("runNodeDepsStep honours a declared install command", async () => {
         },
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNodeDepsStep({
         ctx: { mode: "fix", repoRoot: root },
         trackedFiles: ["package.json"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(calls[0]!.args[1], "npm ci --ignore-scripts");
 });
 
 test("install:false restores nothing and skips", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, { "package.json": "{}\n" });
     await writeConfig(root, {
@@ -132,16 +153,21 @@ test("install:false restores nothing and skips", async () => {
         },
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNodeDepsStep({
         ctx: { mode: "fix", repoRoot: root },
         trackedFiles: ["package.json"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("a failing restore fails the step naming the package", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, { "package.json": "{}\n" });
     await writeConfig(root, {
@@ -150,17 +176,22 @@ test("a failing restore fails the step naming the package", async () => {
     const { runner } = recordingRunner({
         "npm install": { status: 1, stdout: "registry unreachable" },
     });
+
+    // Act
     const result = await runNodeDepsStep({
         ctx: { mode: "fix", repoRoot: root },
         trackedFiles: ["package.json"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /\.: install failed/u);
     assert.match(result.notice ?? "", /registry unreachable/u);
 });
 
 test("a declared package dir without package.json fails loudly", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, { "package.json": "{}\n" });
     await writeConfig(root, {
@@ -170,17 +201,22 @@ test("a declared package dir without package.json fails loudly", async () => {
         },
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNodeDepsStep({
         ctx: { mode: "fix", repoRoot: root },
         trackedFiles: ["package.json"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /no package\.json at nope/u);
     assert.equal(calls.length, 0);
 });
 
 test("no-fix restores in a scratch copy, never the repo mount", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     await writeTree(root, {
         "package.json": "{}\n",
@@ -192,11 +228,14 @@ test("no-fix restores in a scratch copy, never the repo mount", async () => {
     const scratch = { dir: null };
     const { runner, calls } = recordingRunner();
     try {
+        // Act
         const result = await runNodeDepsStep({
             ctx: { mode: "no-fix", repoRoot: root, scratch },
             trackedFiles: ["package.json", "package-lock.json"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         assert.ok(scratch.dir !== null);
         assert.equal(calls[0]!.cwd, scratch.dir);
@@ -207,6 +246,7 @@ test("no-fix restores in a scratch copy, never the repo mount", async () => {
 });
 
 test("no-fix restore and formatting share one scratch working root, so a config plugin can resolve", async () => {
+    // Arrange
     // Regression for issue #40: a consumer config declaring a plugin, a fresh
     // checkout with no node_modules. Restore and prettier must use the same
     // working root, or prettier resolves plugins from the untouched checkout.
@@ -227,17 +267,20 @@ test("no-fix restore and formatting share one scratch working root, so a config 
     const scratch = { dir: null };
     const { runner, calls } = recordingRunner();
     try {
+        // Act — restore the consumer dependencies into the scratch copy.
         const deps = await runNodeDepsStep({
             ctx: { mode: "no-fix", repoRoot: root, scratch },
             trackedFiles,
             runner,
         });
+        // Act — format from that same scratch copy.
         const node = await runNodeStep({
             ctx: { mode: "no-fix", repoRoot: root, scratch },
             trackedFiles,
             runner,
         });
 
+        // Assert
         assert.equal(deps.status, "pass");
         assert.equal(node.status, "pass");
         assert.ok(scratch.dir !== null);
@@ -265,6 +308,7 @@ test("no-fix restore and formatting share one scratch working root, so a config 
 });
 
 test("runNodeDepsStep reuses the repo's warm tree in no-fix instead of reinstalling", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-deps-");
     const manifest = '{"name":"bench","private":true}\n';
     const lockfile = '{"lockfileVersion":3,"packages":{}}\n';
@@ -283,11 +327,14 @@ test("runNodeDepsStep reuses the repo's warm tree in no-fix instead of reinstall
     const { runner, calls } = recordingRunner();
     const scratch = { dir: null };
     try {
+        // Act
         const result = await runNodeDepsStep({
             ctx: { mode: "no-fix", repoRoot: root, scratch },
             trackedFiles: ["package.json", "package-lock.json"],
             runner,
         });
+
+        // Assert
         // The tree is copied from the repo, not installed: no package manager.
         assert.equal(calls.length, 0);
         assert.equal(result.notice, "node-deps: reused 1 warm tree(s)");

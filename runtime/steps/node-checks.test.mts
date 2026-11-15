@@ -181,7 +181,8 @@ test("a failing check fails the step naming the package and check", async () => 
     assert.match(result.notice ?? "", /3 problems/u);
 });
 
-test("fix mode runs the autofix only; no-fix runs the check only (#65)", async () => {
+test("fix mode runs the autofix only, never the check (#65)", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-checks-");
     await writeConfig(root, {
         node: {
@@ -191,10 +192,9 @@ test("fix mode runs the autofix only; no-fix runs the check only (#65)", async (
         },
     });
     await writeFile(`${root}/package.json`, "{}\n");
-
     const fixing = recordingRunner();
 
-    // Act — fix mode.
+    // Act
     await runNodeChecksStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["package.json"],
@@ -202,17 +202,27 @@ test("fix mode runs the autofix only; no-fix runs the check only (#65)", async (
         existsSyncFn: () => true,
     });
 
-    // Assert
-    // Repair mutation only: the autofix, never the check (#65).
+    // Assert — repair mutation only: the autofix, never the check.
     assert.deepEqual(
         fixing.calls.map((c) => c.args[1]),
         ["eslint --fix ."],
     );
+});
 
+test("no-fix mode runs the check only, never the autofix (#65)", async () => {
     // Arrange
+    const root = await makeTempDir("quality-node-checks-");
+    await writeConfig(root, {
+        node: {
+            checks: [
+                { name: "lint", command: "eslint .", fix: "eslint --fix ." },
+            ],
+        },
+    });
+    await writeFile(`${root}/package.json`, "{}\n");
     const checking = recordingRunner();
 
-    // Act — no-fix mode.
+    // Act
     await runNodeChecksStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "no-fix" },
         trackedFiles: ["package.json"],
@@ -272,12 +282,16 @@ test("a monorepo package list runs each package in its own directory", async () 
         },
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runNodeChecksStep({
         ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
         trackedFiles: ["packages/a/package.json", "packages/b/package.json"],
         runner,
         existsSyncFn: () => true,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.deepEqual(
         calls.map((c) => [c.args[1], c.cwd]),
@@ -289,6 +303,7 @@ test("a monorepo package list runs each package in its own directory", async () 
 });
 
 test("no-fix runs checks in a scratch copy, never the repo mount", async () => {
+    // Arrange
     const root = await makeTempDir("quality-node-checks-");
     await writeConfig(root, {
         node: {
@@ -300,12 +315,15 @@ test("no-fix runs checks in a scratch copy, never the repo mount", async () => {
     const scratch = { dir: null };
     const { runner, calls } = recordingRunner();
     try {
+        // Act
         const result = await runNodeChecksStep({
             ctx: { ...baseCtx, repoRoot: root, mode: "no-fix", scratch },
             trackedFiles: ["package.json"],
             runner,
             existsSyncFn: () => true,
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         assert.ok(scratch.dir !== null);
         assert.equal(calls[0]!.cwd, scratch.dir);

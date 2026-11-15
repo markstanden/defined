@@ -1,6 +1,6 @@
 // Tests for steps/dotnet.mts: .NET format, build, test via dotnet CLI.
 // Runner injected; no host binaries needed.
-// Run: node --test steps/dotnet.test.mts
+// Run: node --test runtime/steps/dotnet.test.mts
 
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
@@ -34,6 +34,7 @@ async function makeDotnetRepo(): Promise<string> {
 }
 
 test("filterDotNetFiles finds csproj, sln, slnx files", () => {
+    // Act & Assert
     assert.deepEqual(
         filterDotNetFiles({
             files: ["a.csproj", "sln.sln", "b.slnx", "c.sh", "d.yml"],
@@ -43,6 +44,7 @@ test("filterDotNetFiles finds csproj, sln, slnx files", () => {
 });
 
 test("discoverWorkspace prefers explicit env, then single slnx/sln/csproj, else repo root", () => {
+    // Act & Assert
     // explicit env
     assert.equal(
         discoverWorkspace({
@@ -54,6 +56,7 @@ test("discoverWorkspace prefers explicit env, then single slnx/sln/csproj, else 
         }),
         "/repo/explicit.slnx",
     );
+    // Act & Assert
     // single slnx
     assert.equal(
         discoverWorkspace({
@@ -64,6 +67,7 @@ test("discoverWorkspace prefers explicit env, then single slnx/sln/csproj, else 
         }),
         "/repo/proj.slnx",
     );
+    // Act & Assert
     // single sln
     assert.equal(
         discoverWorkspace({
@@ -74,6 +78,7 @@ test("discoverWorkspace prefers explicit env, then single slnx/sln/csproj, else 
         }),
         "/repo/proj.sln",
     );
+    // Act & Assert
     // single csproj (nested or root) — the CLI needs a path, not a directory
     assert.equal(
         discoverWorkspace({
@@ -84,6 +89,7 @@ test("discoverWorkspace prefers explicit env, then single slnx/sln/csproj, else 
         }),
         "/repo/src/MyApp/MyApp.csproj",
     );
+    // Act & Assert
     // none -> repo root
     assert.equal(
         discoverWorkspace({
@@ -97,6 +103,7 @@ test("discoverWorkspace prefers explicit env, then single slnx/sln/csproj, else 
 });
 
 test("discoverWorkspace throws on multiple solutions", () => {
+    // Act & Assert
     assert.throws(
         () =>
             discoverWorkspace({
@@ -110,6 +117,7 @@ test("discoverWorkspace throws on multiple solutions", () => {
 });
 
 test("discoverWorkspace throws on multiple projects with no solution", () => {
+    // Act & Assert
     assert.throws(
         () =>
             discoverWorkspace({
@@ -123,26 +131,36 @@ test("discoverWorkspace throws on multiple projects with no solution", () => {
 });
 
 test("runDotNetStep skips cleanly when no .NET files tracked", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await runDotNetStep({
         ctx: baseCtx,
         trackedFiles: ["a.sh", "b.yml"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("no-fix mode runs restore, format --verify-no-changes, build, test in a scratch workspace", async () => {
+    // Arrange
     const repoRoot = await makeDotnetRepo();
     const scratch = { dir: null as string | null };
     try {
         const { runner, calls } = fakeRunner({}, true);
+
+        // Act
         const result = await runDotNetStep({
             ctx: { mode: "no-fix", repoRoot, scratch },
             trackedFiles: ["MyProj.csproj"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         // Every command runs inside the scratch workspace, never the repo.
         const scratchDir = scratch.dir;
@@ -166,12 +184,17 @@ test("no-fix mode runs restore, format --verify-no-changes, build, test in a scr
 });
 
 test("fix mode runs restore and format (write) only, mutating", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await runDotNetStep({
         ctx: { ...baseCtx, mode: "fix" },
         trackedFiles: ["src/MyProj.csproj"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     // Repair-only (#65): restore (prerequisite) and format (mutation). No
     // re-verify, build or test — those are verification, done once in the
@@ -183,6 +206,7 @@ test("fix mode runs restore and format (write) only, mutating", async () => {
 });
 
 test("restore failure fails the step before any build", async () => {
+    // Arrange
     const repoRoot = await makeDotnetRepo();
     const scratch = { dir: null as string | null };
     try {
@@ -190,11 +214,15 @@ test("restore failure fails the step before any build", async () => {
             { "dotnet restore": { status: 1, stderr: "restore error" } },
             true,
         );
+
+        // Act
         const result = await runDotNetStep({
             ctx: { mode: "no-fix", repoRoot, scratch },
             trackedFiles: ["MyProj.csproj"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "fail");
         assert.ok((result.notice ?? "").includes("dotnet: restore"));
         assert.equal(calls.length, 1);
@@ -204,20 +232,26 @@ test("restore failure fails the step before any build", async () => {
 });
 
 test("format failure in fix mode fails the step", async () => {
+    // Arrange
     const { runner } = fakeRunner(
         { "dotnet format": { status: 1, stderr: "format error" } },
         true,
     );
+
+    // Act
     const result = await runDotNetStep({
         ctx: { ...baseCtx, mode: "fix" },
         trackedFiles: ["src/MyProj.csproj"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.ok((result.notice ?? "").includes("dotnet: format"));
 });
 
 test("build failure fails the step", async () => {
+    // Arrange
     const repoRoot = await makeDotnetRepo();
     const scratch = { dir: null as string | null };
     try {
@@ -225,11 +259,15 @@ test("build failure fails the step", async () => {
             { "dotnet build": { status: 1, stderr: "build error" } },
             true,
         );
+
+        // Act
         const result = await runDotNetStep({
             ctx: { mode: "no-fix", repoRoot, scratch },
             trackedFiles: ["MyProj.csproj"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "fail");
         assert.ok((result.notice ?? "").includes("dotnet: build"));
     } finally {
@@ -238,6 +276,7 @@ test("build failure fails the step", async () => {
 });
 
 test("test failure fails the step", async () => {
+    // Arrange
     const repoRoot = await makeDotnetRepo();
     const scratch = { dir: null as string | null };
     try {
@@ -245,11 +284,15 @@ test("test failure fails the step", async () => {
             { "dotnet test": { status: 1, stdout: "Failed: 1" } },
             true,
         );
+
+        // Act
         const result = await runDotNetStep({
             ctx: { mode: "no-fix", repoRoot, scratch },
             trackedFiles: ["MyProj.csproj"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "fail");
         assert.ok((result.notice ?? "").includes("dotnet: test"));
     } finally {
@@ -258,17 +301,22 @@ test("test failure fails the step", async () => {
 });
 
 test("runDotNetStep skips when dotnet is disabled by .defined.json", async () => {
+    // Arrange
     const repoRoot = await makeTempDir("quality-dotnet-off-");
     await writeFile(
         join(repoRoot, ".defined.json"),
         `${JSON.stringify({ dotnet: { disable: true } })}\n`,
     );
     const { runner, calls } = fakeRunner({});
+
+    // Act
     const result = await runDotNetStep({
         ctx: { ...baseCtx, repoRoot },
         trackedFiles: ["MyProj.csproj"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(
         calls.length,

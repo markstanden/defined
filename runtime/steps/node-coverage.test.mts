@@ -180,13 +180,15 @@ test("parseLcov rejects a hit count exceeding found in any record", () => {
     );
 });
 
-test("parseLcov rejects malformed branch and function counters too", () => {
+test("parseLcov rejects a malformed branch counter", () => {
     // Act & Assert
     assert.throws(
         () => parseLcov({ content: "BRF:4\nBRH:oops\n" }),
         /BRH counter 'oops'/u,
     );
+});
 
+test("parseLcov rejects a malformed function counter", () => {
     // Act & Assert
     assert.throws(
         () => parseLcov({ content: "FNF:2\nFNH:-3\n" }),
@@ -331,30 +333,36 @@ test("checkMinimums rejects a non-finite summary instead of passing it", () => {
     assert.match(result.failures[0]!, /invalid counters/u);
 });
 
-test("checkMinimums rejects negative and hit-over-found summaries", () => {
-    // Arrange
-    const base = {
-        linesFound: 10,
-        linesHit: 5,
-        branchesFound: 0,
-        branchesHit: 0,
-        functionsFound: 0,
-        functionsHit: 0,
-    };
-
+test("checkMinimums rejects a negative found count", () => {
     // Act & Assert
     assert.equal(
         checkMinimums({
-            summary: { ...base, linesFound: -1 },
+            summary: {
+                linesFound: -1,
+                linesHit: 5,
+                branchesFound: 0,
+                branchesHit: 0,
+                functionsFound: 0,
+                functionsHit: 0,
+            },
             minimums: { line: 80 },
         }).pass,
         false,
     );
+});
 
+test("checkMinimums rejects a hit count exceeding found", () => {
     // Act & Assert
     assert.equal(
         checkMinimums({
-            summary: { ...base, linesHit: 11 },
+            summary: {
+                linesFound: 10,
+                linesHit: 11,
+                branchesFound: 0,
+                branchesHit: 0,
+                functionsFound: 0,
+                functionsHit: 0,
+            },
             minimums: { line: 80 },
         }).pass,
         false,

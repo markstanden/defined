@@ -11,7 +11,6 @@ import {
     runNamingStep,
     workflowNameViolations,
 } from "./naming.mts";
-import { filterWorkflowFiles } from "../lib/workflow-files.mts";
 import { cleanupScratch } from "../lib/scratch.mts";
 import { baseCtx, cleanupTempDirs, makeTempDir } from "../test-helpers.mts";
 import type { CommandResult } from "../../lib/proc.mts";
@@ -44,21 +43,6 @@ function recordingRunner(
     }) as typeof import("../../lib/proc.mts").run;
     return { runner, calls };
 }
-
-test("filterWorkflowFiles keeps only .github/workflows yml/yaml", () => {
-    // Act & Assert
-    assert.deepEqual(
-        filterWorkflowFiles({
-            files: [
-                ".github/workflows/ci.yml",
-                ".github/workflows/cd.yaml",
-                ".github/dependabot.yml",
-                "a.sh",
-            ],
-        }),
-        [".github/workflows/ci.yml", ".github/workflows/cd.yaml"],
-    );
-});
 
 test("isValidWorkflowName enforces <namespace>--<verb>[--<target>]", () => {
     // Arrange
@@ -200,6 +184,7 @@ test("fix mode runs the autofix only, never the rules command (repair-only, #65)
 });
 
 test("a failing consumer rules command fails the step", async () => {
+    // Arrange
     const root = await makeTempDir("quality-naming-");
     await writeFile(
         `${root}/.defined.json`,
@@ -208,17 +193,22 @@ test("a failing consumer rules command fails the step", async () => {
     const { runner } = recordingRunner({
         "check-names.sh": { status: 1, out: "bad name: fooBar" },
     });
+
+    // Act
     const result = await runNamingStep({
         ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
         trackedFiles: [],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /rules failed/u);
     assert.match(result.notice ?? "", /bad name: fooBar/u);
 });
 
 test("no-fix runs the consumer rules in a scratch copy, never the repo", async () => {
+    // Arrange
     const root = await makeTempDir("quality-naming-");
     await writeFile(
         `${root}/.defined.json`,
@@ -228,11 +218,14 @@ test("no-fix runs the consumer rules in a scratch copy, never the repo", async (
     const scratch = { dir: null };
     const { runner, calls } = recordingRunner();
     try {
+        // Act
         const result = await runNamingStep({
             ctx: { ...baseCtx, repoRoot: root, mode: "no-fix", scratch },
             trackedFiles: ["a.sh"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         assert.ok(scratch.dir !== null);
         assert.equal(calls[0]!.cwd, scratch.dir);

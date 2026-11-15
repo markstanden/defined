@@ -398,7 +398,7 @@ test("passes when coverage meets default 80% minimum", async () => {
     }
 });
 
-test("gates line and branch coverage against the minimum", async () => {
+test("gates line coverage against the minimum", async () => {
     // Arrange
     const SCENARIOS = [
         {
