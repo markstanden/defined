@@ -1490,7 +1490,7 @@ test("update fails loudly offline", async () => {
     });
 });
 
-test("update rejects a malformed or too-short revision", async () => {
+test("update rejects a malformed revision", async () => {
     await withFixture(PIN, async (fixture) => {
         // Arrange
         const env = {
@@ -1508,6 +1508,16 @@ test("update rejects a malformed or too-short revision", async () => {
         // Assert
         assert.equal(malformed.status, 1);
         assert.match(malformed.stderr, /invalid revision/u);
+    });
+});
+
+test("update rejects a too-short revision", async () => {
+    await withFixture(PIN, async (fixture) => {
+        // Arrange
+        const env = {
+            FAKE_GIT_REMOTE: "origin",
+            FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
+        };
 
         // Act
         const tooShort = await runLauncher({
