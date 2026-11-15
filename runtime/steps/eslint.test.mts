@@ -35,6 +35,7 @@ function bakedConfigPath(): string {
 }
 
 test("filterEslintFiles keeps lintable extensions and drops the rest", () => {
+    // Act & Assert
     assert.deepEqual(
         filterEslintFiles({
             files: [
@@ -52,6 +53,7 @@ test("filterEslintFiles keeps lintable extensions and drops the rest", () => {
 });
 
 test("shellQuote wraps the argument and escapes embedded quotes for sh -c", () => {
+    // Act & Assert
     assert.equal(shellQuote({ arg: "plain.ts" }), "'plain.ts'");
     // Each ' becomes close-quote, \' and reopen: the classic sed dance.
     assert.equal(shellQuote({ arg: "it's.ts" }), `'it'\\''s.ts'`);
@@ -59,43 +61,57 @@ test("shellQuote wraps the argument and escapes embedded quotes for sh -c", () =
 });
 
 test("runEslintStep skips when nothing is lintable", async () => {
+    // Arrange
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: baseCtx,
         trackedFiles: ["a.json", "b.md"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("runEslintStep skips when .defined.json disables it", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-off-");
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "disable": true } }\n',
         "a.ts": "export const a = 1;\n",
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root },
         trackedFiles: [".defined.json", "a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("house config runs the baked config from the scratch root", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-house-");
     await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
     const scratch = { dir: null };
     const { runner, calls } = recordingRunner();
     try {
+        // Act
         const result = await runEslintStep({
             ctx: { ...baseCtx, repoRoot: root, scratch },
             trackedFiles: ["src/a.ts"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         assert.equal(calls.length, 1);
         const call = calls[0]!;
@@ -117,17 +133,22 @@ test("house config runs the baked config from the scratch root", async () => {
 });
 
 test("a complexityMax override reaches the house config as an env var", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-cx-");
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "complexityMax": 12 } }\n',
         "src/a.ts": "export const a = 1;\n",
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root },
         trackedFiles: [".defined.json", "src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, "12");
     // An override declared without requireJsdoc must not invent one.
@@ -135,17 +156,22 @@ test("a complexityMax override reaches the house config as an env var", async ()
 });
 
 test("a requireJsdoc override reaches the house config as an env var", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-jsdoc-");
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "requireJsdoc": false } }\n',
         "src/a.ts": "export const a = 1;\n",
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root },
         trackedFiles: [".defined.json", "src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(calls[0]!.env?.DEFINED_ESLINT_REQUIRE_JSDOC, "off");
     // complexityMax untouched when only requireJsdoc is declared.
@@ -153,17 +179,22 @@ test("a requireJsdoc override reaches the house config as an env var", async () 
 });
 
 test("a recommended override reaches the house config as an env var", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-rec-");
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "recommended": false } }\n',
         "src/a.ts": "export const a = 1;\n",
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root },
         trackedFiles: [".defined.json", "src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(calls[0]!.env?.DEFINED_ESLINT_RECOMMENDED, "off");
     // The other doors stay unset when only recommended is declared.
@@ -172,22 +203,28 @@ test("a recommended override reaches the house config as an env var", async () =
 });
 
 test("complexityMax false drops the rule via the off sentinel", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-cx-off-");
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "complexityMax": false } }\n',
         "src/a.ts": "export const a = 1;\n",
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root },
         trackedFiles: [".defined.json", "src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX, "off");
 });
 
 test("a repo config never receives the complexity override", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-cx-repo-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -195,11 +232,15 @@ test("a repo config never receives the complexity override", async () => {
         "src/a.ts": "export const a = 1;\n",
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root },
         trackedFiles: ["eslint.config.mjs", ".defined.json", "src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(
         calls[0]!.env?.DEFINED_ESLINT_COMPLEXITY_MAX,
@@ -209,6 +250,7 @@ test("a repo config never receives the complexity override", async () => {
 });
 
 test("a repo config never receives the requireJsdoc override", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-jsdoc-repo-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -216,11 +258,15 @@ test("a repo config never receives the requireJsdoc override", async () => {
         "src/a.ts": "export const a = 1;\n",
     });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root },
         trackedFiles: ["eslint.config.mjs", ".defined.json", "src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(
         calls[0]!.env?.DEFINED_ESLINT_REQUIRE_JSDOC,
@@ -230,14 +276,19 @@ test("a repo config never receives the requireJsdoc override", async () => {
 });
 
 test("house config fix mode --fixes only and never re-checks (repair-only, #65)", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-fix-");
     await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     // Repair mutation only: one eslint --fix. The lint check runs once in the
     // authoritative no-fix pass (#65).
@@ -250,19 +301,24 @@ test("house config fix mode --fixes only and never re-checks (repair-only, #65)"
 });
 
 test("fix mode passes when --fix leaves unfixable findings (verification decides, #65)", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-fix-left-");
     await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
     // eslint --fix exits 1 when findings it cannot fix remain; that is not a
     // repair failure — the no-fix check reports it.
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["src/a.ts"],
         runner: failingRunner("[]"),
     });
+
+    // Assert
     assert.equal(result.status, "pass");
 });
 
 test("a repo config runs through the repo's eslint and writes the house example", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-repo-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -271,12 +327,16 @@ test("a repo config runs through the repo's eslint and writes the house example"
     });
     const notes: string[] = [];
     const { runner, calls } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["eslint.config.mjs", "src/a.ts"],
         runner,
         notifyFn: (line) => notes.push(line),
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     // Repair runs the repo's own ESLint (sh -c) with --fix, never --config, and
     // no check pass (#65).
@@ -298,6 +358,7 @@ test("a repo config runs through the repo's eslint and writes the house example"
 });
 
 test("repo config in no-fix writes no sidecar and does not notify", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-repo-check-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -306,6 +367,7 @@ test("repo config in no-fix writes no sidecar and does not notify", async () => 
     const scratch = { dir: null };
     const { runner, calls } = recordingRunner();
     try {
+        // Act
         const result = await runEslintStep({
             ctx: { ...baseCtx, repoRoot: root, scratch },
             trackedFiles: ["eslint.config.mjs", "src/a.ts"],
@@ -314,6 +376,8 @@ test("repo config in no-fix writes no sidecar and does not notify", async () => 
                 throw new Error("no-fix must not notify");
             },
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         assert.equal(calls.length, 1);
         assert.equal(
