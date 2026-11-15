@@ -390,11 +390,14 @@ async function runLauncher({
 
 test("prefers podman over docker", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             engines: ["podman", "docker"],
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const runs = r.log.filter((line) => line.startsWith("run --rm"));
         assert.equal(
@@ -408,12 +411,15 @@ test("prefers podman over docker", async () => {
 
 test("fails loudly when no engine is available", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             engines: [],
             barePath: true,
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /no container engine found/u);
         assert.deepEqual(r.log, []);
@@ -422,7 +428,15 @@ test("fails loudly when no engine is available", async () => {
 
 test("resolves the repo root via git and mounts it for comply", async () => {
     await withFixture("abc12345", async (fixture) => {
-        const r = await runLauncher({ fixture, args: ["comply"] });
+        // Act — from a directory that is not the root, so a cwd-based answer
+        // would mount the wrong path and fail the assertion.
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            cwd: fixture.install,
+        });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "comply must invoke the engine");
@@ -434,7 +448,10 @@ test("resolves the repo root via git and mounts it for comply", async () => {
 
 test("forwards presentation flags through to the runtime", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify", "--min"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "verify must invoke the engine");
@@ -447,7 +464,10 @@ test("forwards presentation flags through to the runtime", async () => {
 
 test("mounts the repo read-only for verify", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "verify must invoke the engine");
@@ -458,7 +478,10 @@ test("mounts the repo read-only for verify", async () => {
 
 test("mounts read-only with no cache volumes for explain", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["explain", "shell"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "explain must invoke the engine");
@@ -474,7 +497,10 @@ test("mounts read-only with no cache volumes for explain", async () => {
 
 test("mounts the content cache volume outside the read-only checkout", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "verify must invoke the engine");
@@ -735,11 +761,14 @@ test("says nothing when the deps mount point is already writable", async () => {
 
 test("pulls the exact pinned image when it is not present locally", async () => {
     await withFixture("feedface", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { FAKE_INSPECT_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             r.log.some((line) =>
@@ -758,7 +787,10 @@ test("pulls the exact pinned image when it is not present locally", async () => 
 
 test("does not pull when the image is already present", async () => {
     await withFixture("feedface", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             r.log.some((line) =>
@@ -774,7 +806,10 @@ test("does not pull when the image is already present", async () => {
 
 test("refreshes a mutable latest tag even when it is present locally", async () => {
     await withFixture(undefined, async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             r.log.some((line) => line.startsWith(`pull ${IMAGE_REPO}:latest`)),
@@ -785,11 +820,14 @@ test("refreshes a mutable latest tag even when it is present locally", async () 
 
 test("offline uses a present mutable tag but warns it may be stale", async () => {
     await withFixture(undefined, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { DEFINED_OFFLINE: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(!r.log.some((line) => line.startsWith("pull")));
         assert.match(r.stderr, /mutable tag|may be stale/u);
@@ -798,11 +836,14 @@ test("offline uses a present mutable tag but warns it may be stale", async () =>
 
 test("fails when the pinned image cannot be pulled", async () => {
     await withFixture("feedface", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { FAKE_INSPECT_FAIL: "1", FAKE_PULL_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /unavailable/u);
         const run = r.log.find((line) => line.startsWith("run --rm"));
@@ -811,9 +852,13 @@ test("fails when the pinned image cannot be pulled", async () => {
 });
 
 test("rejects mutable and malformed pins", async () => {
+    // Arrange — one fixture per rejected pin.
     for (const pin of ["latest", "main", "dead-beef", "DEADBEEF", "v1.2.3"]) {
         await withFixture(pin, async (fixture) => {
+            // Act
             const r = await runLauncher({ fixture, args: ["verify"] });
+
+            // Assert
             assert.equal(r.status, 1, `pin '${pin}' must be rejected`);
             assert.match(r.stderr, /immutable|invalid pin/u);
             assert.deepEqual(r.log, [], "no engine run for a bad pin");
@@ -822,9 +867,13 @@ test("rejects mutable and malformed pins", async () => {
 });
 
 test("defaults to the latest image when config is missing, empty or versionless", async () => {
+    // Arrange — one config shape per run.
     // Missing .defined.json → default latest, no error.
     await withFixture(undefined, async (missing) => {
+        // Act
         const r = await runLauncher({ fixture: missing, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "default must still run the engine");
@@ -833,8 +882,13 @@ test("defaults to the latest image when config is missing, empty or versionless"
 
     // Empty/whitespace-only file → no version extracted → default latest.
     await withFixture("abc12345", async (blank) => {
+        // Arrange
         await writeFile(join(blank.repo, ".defined.json"), "\n  \n");
+
+        // Act
         const r = await runLauncher({ fixture: blank, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run!.endsWith(`${IMAGE_REPO}:latest verify`));
@@ -842,7 +896,10 @@ test("defaults to the latest image when config is missing, empty or versionless"
 
     // Versionless config (coverage only) → default latest, coverage preserved.
     await withFixture({ coverage: {} }, async (noVersion) => {
+        // Act
         const r = await runLauncher({ fixture: noVersion, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run!.endsWith(`${IMAGE_REPO}:latest verify`));
@@ -851,11 +908,14 @@ test("defaults to the latest image when config is missing, empty or versionless"
 
 test("reports an unknown revision for a hand-installed launcher", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["--version"],
             engines: [],
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.equal(r.stdout, "defined unknown\n");
         assert.deepEqual(r.log, [], "no engine is needed to report a version");
@@ -864,7 +924,10 @@ test("reports an unknown revision for a hand-installed launcher", async () => {
 
 test("forwards unknown verbs to usage and exits non-zero", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["setup"] });
+
+        // Assert
         assert.equal(r.status, 2);
         assert.match(r.stderr, /usage/u);
         assert.deepEqual(r.log, []);
@@ -873,12 +936,15 @@ test("forwards unknown verbs to usage and exits non-zero", async () => {
 
 test("honours DEFINED_ENGINE override", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             engines: ["podman", "docker"],
             env: { DEFINED_ENGINE: "docker" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const runs = r.log.filter((line) => line.startsWith("run --rm"));
         assert.equal(runs.length, 1);
@@ -893,11 +959,14 @@ test("honours DEFINED_ENGINE override", async () => {
 
 test("offline mode runs the container with no network", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["comply"],
             env: { DEFINED_OFFLINE: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "offline comply must still invoke the engine");
@@ -907,11 +976,14 @@ test("offline mode runs the container with no network", async () => {
 
 test("offline mode never pulls: a missing image fails loudly", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { DEFINED_OFFLINE: "1", FAKE_INSPECT_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /not present locally/u);
         assert.ok(
@@ -927,7 +999,10 @@ test("offline mode never pulls: a missing image fails loudly", async () => {
 
 test("version reports launcher, pin, image, engine and drift", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
@@ -937,6 +1012,8 @@ test("version reports launcher, pin, image, engine and drift", async () => {
                 FAKE_DIGEST: "sha256:aa11bb22cc33dd44ee55",
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             hasLine(r.stdout, "launcher", launcher, `rev ${LAUNCHER_SHORT}`),
@@ -952,13 +1029,18 @@ test("version reports launcher, pin, image, engine and drift", async () => {
 
 test("version marks a stale launcher and pin as behind", async () => {
     await withFixture(STALE_REV.slice(0, 12), async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, STALE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
             launcher,
             env: { FAKE_REMOTE_REV: REMOTE_REV },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "status", "launcher behind; pin behind"));
     });
@@ -966,22 +1048,30 @@ test("version marks a stale launcher and pin as behind", async () => {
 
 test("version degrades the remote state to unknown offline", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
             launcher,
             env: { FAKE_REMOTE_REV: REMOTE_REV, DEFINED_OFFLINE: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "remote", "unknown"));
         assert.ok(hasLine(r.stdout, "status", "launcher unknown; pin unknown"));
     });
 });
 
-test("version distinguishes an absent tag from an unreachable registry", async () => {
+test("version reports an absent tag as absent", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const absent = await runLauncher({
             fixture,
             args: ["version"],
@@ -992,8 +1082,18 @@ test("version distinguishes an absent tag from an unreachable registry", async (
                 FAKE_MANIFEST_ERROR: "manifest unknown",
             },
         });
-        assert.ok(hasLine(absent.stdout, "remote", "absent"));
 
+        // Assert
+        assert.ok(hasLine(absent.stdout, "remote", "absent"));
+    });
+});
+
+test("version reports an unreachable registry as unknown", async () => {
+    await withFixture(PIN, async (fixture) => {
+        // Arrange
+        const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const unreachable = await runLauncher({
             fixture,
             args: ["version"],
@@ -1004,13 +1104,18 @@ test("version distinguishes an absent tag from an unreachable registry", async (
                 FAKE_MANIFEST_ERROR: "dial tcp: connection refused",
             },
         });
+
+        // Assert
         assert.ok(hasLine(unreachable.stdout, "remote", "unknown"));
     });
 });
 
 test("version reports an invalid pin without failing", async () => {
     await withFixture("main", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["version"] });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "pin", "(invalid pin 'main')"));
         assert.ok(hasLine(r.stdout, "image", "n/a"));
@@ -1020,7 +1125,10 @@ test("version reports an invalid pin without failing", async () => {
 
 test("version works outside a repository", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
@@ -1028,6 +1136,8 @@ test("version works outside a repository", async () => {
             cwd: fixture.root,
             env: { FAKE_REMOTE_REV: REMOTE_REV, FAKE_GIT_NO_REPO: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "pin", "(no repository)"));
         assert.ok(hasLine(r.stdout, "image", "n/a"));
@@ -1037,7 +1147,10 @@ test("version works outside a repository", async () => {
 
 test("version reports no engine without failing", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const launcher = await bakeLauncher(fixture, REMOTE_REV);
+
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["version"],
@@ -1046,6 +1159,8 @@ test("version reports no engine without failing", async () => {
             barePath: true,
             env: { FAKE_REMOTE_REV: REMOTE_REV },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(hasLine(r.stdout, "engine", "none"));
         assert.ok(hasLine(r.stdout, "local", "unknown"));
@@ -1055,6 +1170,7 @@ test("version reports no engine without failing", async () => {
 
 test("update resolves latest and moves pin, launcher and image together", async () => {
     await withFixture({ coverage: { node: {} } }, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update"],
@@ -1066,6 +1182,8 @@ test("update resolves latest and moves pin, launcher and image together", async 
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
 
         const config = JSON.parse(
@@ -1098,6 +1216,7 @@ test("update resolves latest and moves pin, launcher and image together", async 
 
 test("update accepts an explicit short SHA and replaces the pin", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1107,6 +1226,8 @@ test("update accepts an explicit short SHA and replaces the pin", async () => {
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const config = JSON.parse(
             await readFile(join(fixture.repo, ".defined.json"), "utf8"),
@@ -1120,31 +1241,41 @@ test("update accepts an explicit short SHA and replaces the pin", async () => {
 
 test("update is a no-op when everything is already current", async () => {
     await withFixture({ coverage: {} }, async (fixture) => {
+        // Arrange
         const baseEnv = {
             FAKE_REMOTE_REV: REMOTE_REV,
             FAKE_GIT_REMOTE: "origin",
             FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
             DEFINED_BIN_DIR: fixture.install,
         };
+
+        // Act
         const first = await runLauncher({
             fixture,
             args: ["update"],
             env: { ...baseEnv, FAKE_INSPECT_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(first.status, 0);
         assert.ok(
             first.log.some((line) => line === `pull ${IMAGE_REPO}:${PIN}`),
         );
 
+        // Arrange — the config the second, already-current run must leave alone.
         const before = await readFile(
             join(fixture.repo, ".defined.json"),
             "utf8",
         );
+
+        // Act
         const second = await runLauncher({
             fixture,
             args: ["update"],
             env: baseEnv,
         });
+
+        // Assert
         assert.equal(second.status, 0);
         assert.ok(hasLine(second.stdout, "launcher already current"));
         assert.ok(
@@ -1160,6 +1291,7 @@ test("update is a no-op when everything is already current", async () => {
 
 test("update refuses to pin a revision whose image is not published", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1172,6 +1304,8 @@ test("update refuses to pin a revision whose image is not published", async () =
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /no published image/u);
         const config = JSON.parse(
@@ -1188,6 +1322,7 @@ test("update refuses to pin a revision whose image is not published", async () =
 
 test("update fails when the registry cannot confirm the image", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1200,6 +1335,8 @@ test("update fails when the registry cannot confirm the image", async () => {
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /cannot confirm/u);
     });
@@ -1207,6 +1344,7 @@ test("update fails when the registry cannot confirm the image", async () => {
 
 test("update skips the registry when the image is already present locally", async () => {
     await withFixture("olddeadbeef0", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update", PIN],
@@ -1219,6 +1357,8 @@ test("update skips the registry when the image is already present locally", asyn
                 DEFINED_BIN_DIR: fixture.install,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             !r.log.some((line) => line.startsWith("manifest")),
@@ -1229,6 +1369,7 @@ test("update skips the registry when the image is already present locally", asyn
 
 test("update refuses the defined source repository", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update"],
@@ -1240,6 +1381,8 @@ test("update refuses the defined source repository", async () => {
                 FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /source repo/u);
         assert.ok(!r.log.some((line) => line.startsWith("pull")));
@@ -1248,6 +1391,7 @@ test("update refuses the defined source repository", async () => {
 
 test("runs the local runtime for comply and verify in the source repo", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const shimDir = join(fixture.repo, "runtime");
         await mkdir(shimDir, { recursive: true });
         const shim = join(shimDir, "comply.sh");
@@ -1263,38 +1407,50 @@ test("runs the local runtime for comply and verify in the source repo", async ()
             FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
         };
 
+        // Act
         const comply = await runLauncher({
             fixture,
             args: ["comply"],
             env: source,
         });
+
+        // Assert
         assert.equal(comply.status, 0);
         assert.match(comply.stderr, /source repo/u);
         assert.equal(comply.stdout.trim(), "shim:");
         assert.deepEqual(comply.log, [], "no engine runs in the source repo");
 
+        // Act
         const verify = await runLauncher({
             fixture,
             args: ["verify"],
             env: source,
         });
+
+        // Assert
         assert.equal(verify.status, 0);
         assert.equal(verify.stdout.trim(), "shim:--check-only");
         assert.deepEqual(verify.log, [], "no engine runs in the source repo");
 
+        // Act
         const flagged = await runLauncher({
             fixture,
             args: ["comply", "--min"],
             env: source,
         });
+
+        // Assert
         assert.equal(flagged.status, 0);
         assert.equal(flagged.stdout.trim(), "shim:--min");
 
+        // Act
         const explain = await runLauncher({
             fixture,
             args: ["explain", "shell"],
             env: source,
         });
+
+        // Assert
         assert.equal(explain.status, 0);
         assert.equal(explain.stdout.trim(), "shim:explain shell");
         assert.deepEqual(explain.log, []);
@@ -1303,6 +1459,7 @@ test("runs the local runtime for comply and verify in the source repo", async ()
 
 test("fails loudly in the source repo when the local runtime is absent", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["comply"],
@@ -1311,6 +1468,8 @@ test("fails loudly in the source repo when the local runtime is absent", async (
                 FAKE_GIT_REMOTE_URL: "git@github.com:markstanden/defined.git",
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /runtime\/comply\.sh/u);
     });
@@ -1318,41 +1477,63 @@ test("fails loudly in the source repo when the local runtime is absent", async (
 
 test("update fails loudly offline", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["update"],
             env: { DEFINED_OFFLINE: "1", FAKE_REMOTE_REV: REMOTE_REV },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /needs the network/u);
     });
 });
 
-test("update rejects a malformed or too-short revision", async () => {
+test("update rejects a malformed revision", async () => {
     await withFixture(PIN, async (fixture) => {
+        // Arrange
         const env = {
             FAKE_GIT_REMOTE: "origin",
             FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
         };
+
+        // Act
         const malformed = await runLauncher({
             fixture,
             args: ["update", "not-a-sha"],
             env,
         });
+
+        // Assert
         assert.equal(malformed.status, 1);
         assert.match(malformed.stderr, /invalid revision/u);
+    });
+});
 
+test("update rejects a too-short revision", async () => {
+    await withFixture(PIN, async (fixture) => {
+        // Arrange
+        const env = {
+            FAKE_GIT_REMOTE: "origin",
+            FAKE_GIT_REMOTE_URL: "https://github.com/me/app.git",
+        };
+
+        // Act
         const tooShort = await runLauncher({
             fixture,
             args: ["update", "abc1234"],
             env,
         });
+
+        // Assert
         assert.equal(tooShort.status, 1);
         assert.match(tooShort.stderr, /too short/u);
     });
 });
 
 test("is_windows_mounted flags only Windows-drive (/mnt) launcher paths", () => {
+    // Arrange
     // Sourcing the launcher must not execute main (the BASH_SOURCE == $0
     // guard), so the predicate is probeable without a real /mnt path — which
     // only root could create.
@@ -1367,7 +1548,11 @@ test("is_windows_mounted flags only Windows-drive (/mnt) launcher paths", () => 
         .join(
             " ",
         )}; do if is_windows_mounted "$p"; then echo "yes $p"; else echo "no $p"; fi; done`;
+
+    // Act
     const r = spawnSync("bash", ["-c", script], { encoding: "utf8" });
+
+    // Assert
     assert.equal(r.status, 0, r.stderr);
     assert.deepEqual(
         r.stdout.trim().split("\n"),
