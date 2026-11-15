@@ -55,10 +55,13 @@ function spawnThat(child: FakeChild): SpawnFn {
 }
 
 test("run captures output of a successful command", async () => {
+    // Act
     const result = await run({
         cmd: "node",
         args: ["-e", "console.log('hello')"],
     });
+
+    // Assert
     assert.equal(result.status, 0);
     assert.equal(result.stdout.trim(), "hello");
     assert.equal(result.stderr, "");
@@ -69,15 +72,19 @@ test("run captures output of a successful command", async () => {
 });
 
 test("run reports a non-zero exit without throwing", async () => {
+    // Act
     const result = await run({
         cmd: "node",
         args: ["-e", "console.error('boom'); process.exit(3)"],
     });
+
+    // Assert
     assert.equal(result.status, 3);
     assert.equal(result.stderr.trim(), "boom");
 });
 
 test("run rejects loudly when the binary is missing", async () => {
+    // Act & Assert
     await assert.rejects(
         run({ cmd: "definitely-not-a-real-tool-xyz" }),
         /cannot run 'definitely-not-a-real-tool-xyz'.*not found in container/u,
@@ -85,9 +92,12 @@ test("run rejects loudly when the binary is missing", async () => {
 });
 
 test("run reports a synchronous spawn failure with its message", async () => {
+    // Arrange
     const spawnFn = (() => {
         throw new Error("EACCES: permission denied");
     }) as unknown as SpawnFn;
+
+    // Act & Assert
     await assert.rejects(
         run({ cmd: "tool" }, spawnFn),
         /cannot run 'tool': EACCES: permission denied/u,
@@ -95,24 +105,33 @@ test("run reports a synchronous spawn failure with its message", async () => {
 });
 
 test("run honours cwd for the invoked command", async () => {
+    // Act
     const result = await run({ cmd: "pwd", cwd: "/tmp" });
+
+    // Assert
     assert.equal(result.stdout.trim(), "/tmp");
 });
 
 test("run passes a supplied environment to the command", async () => {
+    // Act
     const result = await run({
         cmd: "sh",
         args: ["-c", "printf '%s' \"$DEFINED_TEST_ENV\""],
         env: { ...process.env, DEFINED_TEST_ENV: "local-bin" },
     });
+
+    // Assert
     assert.equal(result.stdout, "local-bin");
 });
 
 test("run reports the signal that terminated the child", async () => {
+    // Act
     const result = await run({
         cmd: "node",
         args: ["-e", "process.kill(process.pid, 'SIGTERM')"],
     });
+
+    // Assert
     assert.equal(result.status, null);
     assert.equal(result.signal, "SIGTERM");
     assert.equal(result.timedOut, false);
@@ -120,6 +139,7 @@ test("run reports the signal that terminated the child", async () => {
 });
 
 test("run times out and kills the whole process group", async () => {
+    // Act — start the shell and wait for the timeout to fire.
     // A shell with a long-lived descendant: if only the shell were killed the
     // still-open pipe would keep close from firing for 30s. Resolving promptly
     // proves the group (shell + sleep) was terminated.
@@ -128,19 +148,26 @@ test("run times out and kills the whole process group", async () => {
         args: ["-c", "sleep 30"],
         timeoutMs: 150,
     });
+
+    // Assert
     assert.equal(result.timedOut, true);
     assert.equal(result.status, null);
     assert.notEqual(result.signal, null);
 });
 
 test("run cancels a running child when the signal aborts", async () => {
+    // Arrange — a child held open behind the injected spawn seam.
     const child = new FakeChild();
     const controller = new AbortController();
     const promise = run(
         { cmd: "tool", signal: controller.signal },
         spawnThat(child),
     );
+
+    // Act
     controller.abort();
+
+    // Assert
     const result = await promise;
     assert.equal(result.cancelled, true);
     assert.equal(result.timedOut, false);
@@ -149,18 +176,24 @@ test("run cancels a running child when the signal aborts", async () => {
 });
 
 test("run cancels at once when the signal is already aborted", async () => {
+    // Arrange — the signal is aborted before the run is even requested.
     const child = new FakeChild();
     const controller = new AbortController();
     controller.abort();
+
+    // Act
     const result = await run(
         { cmd: "tool", signal: controller.signal },
         spawnThat(child),
     );
+
+    // Assert
     assert.equal(result.cancelled, true);
     assert.deepEqual(child.signals, ["SIGKILL"]);
 });
 
 test("run bounds captured output and flags truncation", async () => {
+    // Act
     const result = await run({
         cmd: "node",
         args: [
@@ -169,6 +202,8 @@ test("run bounds captured output and flags truncation", async () => {
         ],
         maxOutputBytes: 1000,
     });
+
+    // Assert
     assert.equal(result.truncated, true);
     assert.ok(result.stdout.startsWith("a"), "head is retained");
     assert.ok(result.stdout.includes(TRUNCATION_MARKER), "elision is marked");
@@ -176,6 +211,7 @@ test("run bounds captured output and flags truncation", async () => {
 });
 
 test("failureDetail names the outcome and keeps the output", () => {
+    // Arrange
     const cases: Array<{ label: string; input: CommandResult; re: RegExp }> = [
         {
             label: "nonzero exit",
@@ -213,6 +249,8 @@ test("failureDetail names the outcome and keeps the output", () => {
             re: /^hi$/u,
         },
     ];
+
+    // Act & Assert — one call per case, checked against its expected outcome.
     for (const { label, input, re } of cases) {
         assert.match(
             failureDetail({ result: input }),

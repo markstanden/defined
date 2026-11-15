@@ -200,7 +200,10 @@ const installedPath = (fixture: Fixture): string =>
 
 test("installs the launcher and bakes the revision", async () => {
     await withFixture(async (fixture) => {
+        // Arrange
         await fakeGit(fixture.bin);
+
+        // Act
         const r = await runInstall({
             fixture,
             script: checkoutScript(fixture),
@@ -210,6 +213,8 @@ test("installs the launcher and bakes the revision", async () => {
                 FAKE_GIT_TOPLEVEL: fixture.checkout,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0, r.stderr);
         assert.match(r.stdout, /installed launcher/u);
         assert.match(r.stdout, new RegExp(`rev ${REV_SHORT}`, "u"));
@@ -222,7 +227,10 @@ test("installs the launcher and bakes the revision", async () => {
         );
         assert.equal((await stat(target)).mode & 0o777, 0o755);
 
+        // Act
         const version = spawnSync(target, ["--version"], { encoding: "utf8" });
+
+        // Assert
         assert.equal(version.status, 0);
         assert.equal(version.stdout, `defined ${REV_SHORT}\n`);
     });
@@ -230,28 +238,38 @@ test("installs the launcher and bakes the revision", async () => {
 
 test("re-running with the same revision is a no-op", async () => {
     await withFixture(async (fixture) => {
+        // Arrange
         await fakeGit(fixture.bin);
         const env = {
             DEFINED_BIN_DIR: fixture.bin,
             FAKE_GIT_TOPLEVEL: fixture.checkout,
         };
         const args = ["--rev", REV];
+
+        // Act
         const first = await runInstall({
             fixture,
             script: checkoutScript(fixture),
             args,
             env,
         });
+
+        // Assert
         assert.equal(first.status, 0, first.stderr);
+
+        // Arrange
         const target = installedPath(fixture);
         const before = await readFile(target, "utf8");
 
+        // Act
         const second = await runInstall({
             fixture,
             script: checkoutScript(fixture),
             args,
             env,
         });
+
+        // Assert
         assert.equal(second.status, 0, second.stderr);
         assert.match(second.stdout, /already current/u);
         assert.equal(await readFile(target, "utf8"), before);
@@ -260,12 +278,15 @@ test("re-running with the same revision is a no-op", async () => {
 
 test("refuses a launcher that does not match the installer checksum", async () => {
     await withFixture(async (fixture) => {
+        // Arrange
         await fakeGit(fixture.bin);
         const tampered = join(fixture.checkout, "cli", "defined");
         await writeFile(
             tampered,
             `${await readFile(LAUNCHER, "utf8")}\n# tampered\n`,
         );
+
+        // Act
         const r = await runInstall({
             fixture,
             script: checkoutScript(fixture),
@@ -275,6 +296,8 @@ test("refuses a launcher that does not match the installer checksum", async () =
                 FAKE_GIT_TOPLEVEL: fixture.checkout,
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /checksum mismatch/u);
         await assert.rejects(stat(installedPath(fixture)));
@@ -283,10 +306,13 @@ test("refuses a launcher that does not match the installer checksum", async () =
 
 test("downloads the launcher at the latest resolved revision", async () => {
     await withFixture(async (fixture) => {
+        // Arrange
         await fakeGit(fixture.bin);
         await fakeCurl(fixture.bin);
         const served = join(fixture.remote, "defined");
         await writeFile(served, await readFile(LAUNCHER, "utf8"));
+
+        // Act
         const r = await runInstall({
             fixture,
             script: standaloneScript(fixture),
@@ -297,6 +323,8 @@ test("downloads the launcher at the latest resolved revision", async () => {
                 FAKE_REMOTE_LAUNCHER: served,
             },
         });
+
+        // Assert
         assert.equal(r.status, 0, r.stderr);
         const content = await readFile(installedPath(fixture), "utf8");
         assert.ok(content.includes(`LAUNCHER_REV="${REV_LATEST}"`));
@@ -305,8 +333,11 @@ test("downloads the launcher at the latest resolved revision", async () => {
 
 test("fails loudly when no downloader is available", async () => {
     await withFixture(async (fixture) => {
+        // Arrange
         await fakeGit(fixture.bin);
         await symlinkTools(fixture.bin);
+
+        // Act
         const r = await runInstall({
             fixture,
             script: standaloneScript(fixture),
@@ -314,6 +345,8 @@ test("fails loudly when no downloader is available", async () => {
             env: { DEFINED_BIN_DIR: fixture.bin },
             bare: true,
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /neither curl nor wget/u);
     });
@@ -321,7 +354,10 @@ test("fails loudly when no downloader is available", async () => {
 
 test("rejects a malformed revision", async () => {
     await withFixture(async (fixture) => {
+        // Arrange
         await fakeGit(fixture.bin);
+
+        // Act
         const r = await runInstall({
             fixture,
             script: checkoutScript(fixture),
@@ -331,17 +367,22 @@ test("rejects a malformed revision", async () => {
                 FAKE_GIT_TOPLEVEL: fixture.checkout,
             },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /invalid revision/u);
     });
 });
 
 test("the embedded checksum matches cli/defined", async () => {
+    // Arrange
     const expected = createHash("sha256")
         .update(await readFile(LAUNCHER))
         .digest("hex");
     const script = await readFile(INSTALL_SH, "utf8");
     const match = /^LAUNCHER_SHA256="([0-9a-f]{64})"$/mu.exec(script);
+
+    // Assert
     assert.ok(match, "install.sh must declare LAUNCHER_SHA256");
     assert.equal(
         match[1],
