@@ -761,11 +761,14 @@ test("says nothing when the deps mount point is already writable", async () => {
 
 test("pulls the exact pinned image when it is not present locally", async () => {
     await withFixture("feedface", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { FAKE_INSPECT_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             r.log.some((line) =>
@@ -784,7 +787,10 @@ test("pulls the exact pinned image when it is not present locally", async () => 
 
 test("does not pull when the image is already present", async () => {
     await withFixture("feedface", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             r.log.some((line) =>
@@ -800,7 +806,10 @@ test("does not pull when the image is already present", async () => {
 
 test("refreshes a mutable latest tag even when it is present locally", async () => {
     await withFixture(undefined, async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(
             r.log.some((line) => line.startsWith(`pull ${IMAGE_REPO}:latest`)),
@@ -811,11 +820,14 @@ test("refreshes a mutable latest tag even when it is present locally", async () 
 
 test("offline uses a present mutable tag but warns it may be stale", async () => {
     await withFixture(undefined, async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { DEFINED_OFFLINE: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.ok(!r.log.some((line) => line.startsWith("pull")));
         assert.match(r.stderr, /mutable tag|may be stale/u);
@@ -824,11 +836,14 @@ test("offline uses a present mutable tag but warns it may be stale", async () =>
 
 test("fails when the pinned image cannot be pulled", async () => {
     await withFixture("feedface", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { FAKE_INSPECT_FAIL: "1", FAKE_PULL_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /unavailable/u);
         const run = r.log.find((line) => line.startsWith("run --rm"));
@@ -837,9 +852,13 @@ test("fails when the pinned image cannot be pulled", async () => {
 });
 
 test("rejects mutable and malformed pins", async () => {
+    // Arrange — one fixture per rejected pin.
     for (const pin of ["latest", "main", "dead-beef", "DEADBEEF", "v1.2.3"]) {
         await withFixture(pin, async (fixture) => {
+            // Act
             const r = await runLauncher({ fixture, args: ["verify"] });
+
+            // Assert
             assert.equal(r.status, 1, `pin '${pin}' must be rejected`);
             assert.match(r.stderr, /immutable|invalid pin/u);
             assert.deepEqual(r.log, [], "no engine run for a bad pin");
@@ -848,9 +867,13 @@ test("rejects mutable and malformed pins", async () => {
 });
 
 test("defaults to the latest image when config is missing, empty or versionless", async () => {
+    // Arrange — one config shape per run.
     // Missing .defined.json → default latest, no error.
     await withFixture(undefined, async (missing) => {
+        // Act
         const r = await runLauncher({ fixture: missing, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "default must still run the engine");
@@ -859,8 +882,13 @@ test("defaults to the latest image when config is missing, empty or versionless"
 
     // Empty/whitespace-only file → no version extracted → default latest.
     await withFixture("abc12345", async (blank) => {
+        // Arrange
         await writeFile(join(blank.repo, ".defined.json"), "\n  \n");
+
+        // Act
         const r = await runLauncher({ fixture: blank, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run!.endsWith(`${IMAGE_REPO}:latest verify`));
@@ -868,7 +896,10 @@ test("defaults to the latest image when config is missing, empty or versionless"
 
     // Versionless config (coverage only) → default latest, coverage preserved.
     await withFixture({ coverage: {} }, async (noVersion) => {
+        // Act
         const r = await runLauncher({ fixture: noVersion, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run!.endsWith(`${IMAGE_REPO}:latest verify`));
@@ -877,11 +908,14 @@ test("defaults to the latest image when config is missing, empty or versionless"
 
 test("reports an unknown revision for a hand-installed launcher", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["--version"],
             engines: [],
         });
+
+        // Assert
         assert.equal(r.status, 0);
         assert.equal(r.stdout, "defined unknown\n");
         assert.deepEqual(r.log, [], "no engine is needed to report a version");
@@ -890,7 +924,10 @@ test("reports an unknown revision for a hand-installed launcher", async () => {
 
 test("forwards unknown verbs to usage and exits non-zero", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["setup"] });
+
+        // Assert
         assert.equal(r.status, 2);
         assert.match(r.stderr, /usage/u);
         assert.deepEqual(r.log, []);
@@ -899,12 +936,15 @@ test("forwards unknown verbs to usage and exits non-zero", async () => {
 
 test("honours DEFINED_ENGINE override", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             engines: ["podman", "docker"],
             env: { DEFINED_ENGINE: "docker" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const runs = r.log.filter((line) => line.startsWith("run --rm"));
         assert.equal(runs.length, 1);
@@ -919,11 +959,14 @@ test("honours DEFINED_ENGINE override", async () => {
 
 test("offline mode runs the container with no network", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["comply"],
             env: { DEFINED_OFFLINE: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "offline comply must still invoke the engine");
@@ -933,11 +976,14 @@ test("offline mode runs the container with no network", async () => {
 
 test("offline mode never pulls: a missing image fails loudly", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             env: { DEFINED_OFFLINE: "1", FAKE_INSPECT_FAIL: "1" },
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /not present locally/u);
         assert.ok(
