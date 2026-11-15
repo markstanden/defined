@@ -1,6 +1,6 @@
 // Tests for steps/tofu.mts: per-directory fmt, tflint, init, validate.
 // Runner injected; no host binaries needed.
-// Run: node --test steps/tofu.test.mts
+// Run: node --test runtime/steps/tofu.test.mts
 
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
@@ -14,6 +14,7 @@ afterEach(cleanupTempDirs);
 const REPO = "/repo";
 
 test("filterTofuFiles finds .tf files", () => {
+    // Act & Assert
     assert.deepEqual(
         filterTofuFiles({
             files: ["main.tf", "variables.tf", "a.sh", "b.yml"],
@@ -23,6 +24,7 @@ test("filterTofuFiles finds .tf files", () => {
 });
 
 test("tfDirectories reduces to the top-most module dirs", () => {
+    // Act & Assert
     // Root only.
     assert.deepEqual(tfDirectories({ files: ["main.tf", "b.tf"] }), ["."]);
     // A single nested module, no root .tf.
@@ -54,23 +56,33 @@ test("tfDirectories reduces to the top-most module dirs", () => {
 });
 
 test("runTofuStep skips when no .tf files tracked", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await runTofuStep({
         ctx: { mode: "no-fix", repoRoot: REPO },
         trackedFiles: ["a.sh", "b.yml"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("no-fix checks each module dir in the scratch, never the repo root", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await runTofuStep({
         ctx: { mode: "no-fix", repoRoot: REPO, scratch: { dir: "/scratch" } },
         trackedFiles: ["infrastructure/main.tf"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.deepEqual(
         calls.map((c) => c.join(" ")),
@@ -85,23 +97,33 @@ test("no-fix checks each module dir in the scratch, never the repo root", async 
 });
 
 test("a root-only module runs in the working root", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     await runTofuStep({
         ctx: { mode: "no-fix", repoRoot: REPO, scratch: { dir: "/scratch" } },
         trackedFiles: ["main.tf"],
         runner,
     });
+
+    // Assert
     const validate = calls.find((c) => c[0] === "tofu" && c[1] === "validate")!;
     assert.equal(validate.at(-1), "/scratch");
 });
 
 test("fix mode writes each tracked file and runs tflint --fix only (repair-only, #65)", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await runTofuStep({
         ctx: { mode: "fix", repoRoot: REPO },
         trackedFiles: ["main.tf"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     // Repair mutations only: fmt -write and tflint --fix (the fmt check and
     // tflint/init/validate run once in the no-fix pass).
@@ -116,31 +138,41 @@ test("fix mode writes each tracked file and runs tflint --fix only (repair-only,
 });
 
 test("a validate failure names the failing directory", async () => {
+    // Arrange
     const { runner } = fakeRunner(
         { "tofu validate": { status: 1, stdout: "boom" } },
         true,
     );
+
+    // Act
     const result = await runTofuStep({
         ctx: { mode: "no-fix", repoRoot: REPO, scratch: { dir: "/scratch" } },
         trackedFiles: ["infrastructure/main.tf"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.ok((result.notice ?? "").includes("infrastructure"));
 });
 
 test("tofu.dirs restricts the module directories", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-tofu-");
     await writeFile(
         `${dir}/.defined.json`,
         JSON.stringify({ tofu: { dirs: ["modules/net"] } }),
     );
     const { runner, calls } = fakeRunner({}, true);
+
+    // Act
     const result = await runTofuStep({
         ctx: { mode: "no-fix", repoRoot: dir, scratch: { dir } },
         trackedFiles: ["main.tf", "modules/net/main.tf"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     const inits = calls.filter((c) => c[0] === "tofu" && c[1] === "init");
     assert.equal(inits.length, 1);
@@ -189,7 +221,10 @@ const failureCases: FailureCase[] = [
 
 for (const c of failureCases) {
     test(`${c.name} fails the step`, async () => {
+        // Arrange
         const { runner } = fakeRunner(c.outcomes, true);
+
+        // Act
         const result = await runTofuStep({
             ctx: {
                 mode: "no-fix",
@@ -199,6 +234,8 @@ for (const c of failureCases) {
             trackedFiles: ["main.tf"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "fail");
         assert.ok((result.notice ?? "").includes(c.notice));
     });

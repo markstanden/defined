@@ -1,6 +1,6 @@
 // Tests for steps/node-coverage.mts: lcov parser + minimum gate.
 // Runner injected, so no host binaries are needed here.
-// Run: node --test steps/node-coverage.test.mts
+// Run: node --test runtime/steps/node-coverage.test.mts
 
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -59,6 +59,7 @@ function reportWriterRunner({
 // --- parseLcov ---
 
 test("parseLcov extracts line totals from lcov content", () => {
+    // Arrange
     const content = [
         "SF:/src/index.ts",
         "DA:1,5",
@@ -72,7 +73,11 @@ test("parseLcov extracts line totals from lcov content", () => {
         "FNF:5",
         "FNH:4",
     ].join("\n");
+
+    // Act
     const summary = parseLcov({ content });
+
+    // Assert
     assert.equal(summary.linesFound, 3);
     assert.equal(summary.linesHit, 2);
     assert.equal(summary.branchesFound, 4);
@@ -82,6 +87,7 @@ test("parseLcov extracts line totals from lcov content", () => {
 });
 
 test("parseLcov aggregates across multiple source files", () => {
+    // Arrange
     const content = [
         "SF:/src/a.ts",
         "DA:1,5",
@@ -102,7 +108,11 @@ test("parseLcov aggregates across multiple source files", () => {
         "FNH:3",
         "end_of_record",
     ].join("\n");
+
+    // Act
     const summary = parseLcov({ content });
+
+    // Assert
     assert.equal(summary.linesFound, 5);
     assert.equal(summary.linesHit, 4);
     assert.equal(summary.branchesFound, 6);
@@ -112,7 +122,10 @@ test("parseLcov aggregates across multiple source files", () => {
 });
 
 test("parseLcov returns zeros for empty content", () => {
+    // Act
     const summary = parseLcov({ content: "" });
+
+    // Assert
     assert.equal(summary.linesFound, 0);
     assert.equal(summary.linesHit, 0);
     assert.equal(summary.branchesFound, 0);
@@ -122,6 +135,7 @@ test("parseLcov returns zeros for empty content", () => {
 });
 
 test("parseLcov rejects a malformed hit counter (the reported reproduction)", () => {
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "LF:10\nLH:garbage\n" }),
         /LH counter 'garbage' is not a non-negative integer/u,
@@ -129,7 +143,9 @@ test("parseLcov rejects a malformed hit counter (the reported reproduction)", ()
 });
 
 test("parseLcov rejects negative, fractional and infinite counters", () => {
+    // Arrange
     for (const bad of ["-1", "1.5", "Infinity", "NaN", "0x10", ""]) {
+        // Act & Assert
         assert.throws(
             () => parseLcov({ content: `LF:10\nLH:${bad}\n` }),
             /is not a non-negative integer/u,
@@ -139,10 +155,13 @@ test("parseLcov rejects negative, fractional and infinite counters", () => {
 });
 
 test("parseLcov rejects a hit count exceeding found in any record", () => {
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "LF:10\nLH:11\n" }),
         /line hit count 11 exceeds found count 10/u,
     );
+
+    // Arrange
     // Aggregate is 15/15 (valid), but the second record alone is inconsistent —
     // per-record validation must not let the total hide it.
     const content = [
@@ -153,17 +172,24 @@ test("parseLcov rejects a hit count exceeding found in any record", () => {
         "LH:6",
         "end_of_record",
     ].join("\n");
+
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content }),
         /line hit count 6 exceeds found count 5/u,
     );
 });
 
-test("parseLcov rejects malformed branch and function counters too", () => {
+test("parseLcov rejects a malformed branch counter", () => {
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "BRF:4\nBRH:oops\n" }),
         /BRH counter 'oops'/u,
     );
+});
+
+test("parseLcov rejects a malformed function counter", () => {
+    // Act & Assert
     assert.throws(
         () => parseLcov({ content: "FNF:2\nFNH:-3\n" }),
         /FNH counter '-3'/u,
@@ -173,6 +199,7 @@ test("parseLcov rejects malformed branch and function counters too", () => {
 // --- checkMinimums ---
 
 test("checkMinimums passes when above minimum", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -184,11 +211,14 @@ test("checkMinimums passes when above minimum", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, true);
     assert.equal(result.failures.length, 0);
 });
 
 test("checkMinimums fails when below minimum", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -200,12 +230,15 @@ test("checkMinimums fails when below minimum", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /line:.*70\.0%.*80%/u);
 });
 
 test("checkMinimums checks branch when configured", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -217,12 +250,15 @@ test("checkMinimums checks branch when configured", () => {
         },
         minimums: { line: 80, branch: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /branch:.*60\.0%.*70%/u);
 });
 
 test("checkMinimums checks function when configured", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -234,12 +270,15 @@ test("checkMinimums checks function when configured", () => {
         },
         minimums: { line: 80, function: 70 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 1);
     assert.match(result.failures[0]!, /function:.*50\.0%.*70%/u);
 });
 
 test("checkMinimums reports multiple failures", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 100,
@@ -251,11 +290,14 @@ test("checkMinimums reports multiple failures", () => {
         },
         minimums: { line: 80, branch: 70, function: 60 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 3);
 });
 
 test("checkMinimums treats zero lines found as 0%", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 0,
@@ -267,10 +309,13 @@ test("checkMinimums treats zero lines found as 0%", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
 });
 
 test("checkMinimums rejects a non-finite summary instead of passing it", () => {
+    // Act
     const result = checkMinimums({
         summary: {
             linesFound: 10,
@@ -282,29 +327,42 @@ test("checkMinimums rejects a non-finite summary instead of passing it", () => {
         },
         minimums: { line: 80 },
     });
+
+    // Assert
     assert.equal(result.pass, false);
     assert.match(result.failures[0]!, /invalid counters/u);
 });
 
-test("checkMinimums rejects negative and hit-over-found summaries", () => {
-    const base = {
-        linesFound: 10,
-        linesHit: 5,
-        branchesFound: 0,
-        branchesHit: 0,
-        functionsFound: 0,
-        functionsHit: 0,
-    };
+test("checkMinimums rejects a negative found count", () => {
+    // Act & Assert
     assert.equal(
         checkMinimums({
-            summary: { ...base, linesFound: -1 },
+            summary: {
+                linesFound: -1,
+                linesHit: 5,
+                branchesFound: 0,
+                branchesHit: 0,
+                functionsFound: 0,
+                functionsHit: 0,
+            },
             minimums: { line: 80 },
         }).pass,
         false,
     );
+});
+
+test("checkMinimums rejects a hit count exceeding found", () => {
+    // Act & Assert
     assert.equal(
         checkMinimums({
-            summary: { ...base, linesHit: 11 },
+            summary: {
+                linesFound: 10,
+                linesHit: 11,
+                branchesFound: 0,
+                branchesHit: 0,
+                functionsFound: 0,
+                functionsHit: 0,
+            },
             minimums: { line: 80 },
         }).pass,
         false,
@@ -314,34 +372,47 @@ test("checkMinimums rejects negative and hit-over-found summaries", () => {
 // --- runNodeCoverageStep ---
 
 test("skips when no coverage.node in config", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({ root: dir, config: { version: TEST_SHA } });
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("skips when no .defined.json exists", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.equal(calls.length, 0);
 });
 
 test("fails when the coverage command fails", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
         config: { version: TEST_SHA, coverage: { node: { command: "false" } } },
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -349,11 +420,14 @@ test("fails when the coverage command fails", async () => {
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 1, stderr: "boom" } },
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /coverage command failed/u);
 });
 
 test("fails when the command writes no lcov.info", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -362,6 +436,8 @@ test("fails when the command writes no lcov.info", async () => {
             coverage: { node: { command: "echo ok" } },
         },
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -369,11 +445,14 @@ test("fails when the command writes no lcov.info", async () => {
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /no coverage report/u);
 });
 
 test("repair skips coverage generation entirely (verification-only, #65)", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -384,18 +463,23 @@ test("repair skips coverage generation entirely (verification-only, #65)", async
         reportPath: "coverage/lcov.info",
         reportContent: ["LF:100", "LH:90"].join("\n"),
     });
+
+    // Act
     const { result, calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         mode: "fix",
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.match(result.notice ?? "", /deferred to verification/u);
     assert.equal(calls.length, 0);
 });
 
 test("write-capable no-fix runs in the repo so the report survives (#65)", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -406,6 +490,8 @@ test("write-capable no-fix runs in the repo so the report survives (#65)", async
         reportPath: "coverage/lcov.info",
         reportContent: ["LF:100", "LH:90"].join("\n"),
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -414,12 +500,15 @@ test("write-capable no-fix runs in the repo so the report survives (#65)", async
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });
+
+    // Assert
     // The report lives only in the repo; a discarded scratch would not find it.
     assert.equal(result.status, "pass");
     assert.match(result.notice ?? "", /90\.0%/u);
 });
 
 test("gates line coverage against the effective minimum", async () => {
+    // Arrange
     const SCENARIOS = [
         {
             label: "meets default 80%",
@@ -466,12 +555,15 @@ test("gates line coverage against the effective minimum", async () => {
             scratchDir: dir,
             trackedFiles: ["package.json"],
         });
+
+        // Act & Assert
         assert.equal(result.status, status, label);
         assert.match(result.notice ?? "", re, label);
     }
 });
 
 test("no-fix runs the coverage command in a scratch workspace, isolated from the repo", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -498,11 +590,14 @@ test("no-fix runs the coverage command in a scratch workspace, isolated from the
                 truncated: false,
             } satisfies CommandResult;
         }) as typeof import("../../lib/proc.mts").run;
+        // Act
         const result = await runNodeCoverageStep({
             ctx: { mode: "no-fix", repoRoot: dir, scratch },
             trackedFiles: ["package.json"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "fail");
         assert.match(result.notice ?? "", /no coverage report/u);
         assert.equal(calls.length, 1);
@@ -516,6 +611,7 @@ test("no-fix runs the coverage command in a scratch workspace, isolated from the
 });
 
 test("no-fix validates the report the command writes into the scratch", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -525,6 +621,7 @@ test("no-fix validates the report the command writes into the scratch", async ()
     const calls: string[][] = [];
     const scratch = { dir: null as string | null };
     try {
+        // Act
         const result = await runNodeCoverageStep({
             ctx: { mode: "no-fix", repoRoot: dir, scratch },
             trackedFiles: ["package.json"],
@@ -533,6 +630,8 @@ test("no-fix validates the report the command writes into the scratch", async ()
                 lcov: ["LF:100", "LH:90"].join("\n"),
             }),
         });
+
+        // Assert
         assert.equal(result.status, "pass");
         assert.match(result.notice ?? "", /90\.0%/u);
         assert.equal(scratch.dir, calls[0]!.at(-1));
@@ -542,6 +641,7 @@ test("no-fix validates the report the command writes into the scratch", async ()
 });
 
 test("reports a malformed lcov report as an execution error", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-bad-");
     await setupCoverageRepo({
         root: dir,
@@ -549,17 +649,22 @@ test("reports a malformed lcov report as an execution error", async () => {
         reportPath: "coverage/lcov.info",
         reportContent: "LF:10\nLH:garbage\n",
     });
+
+    // Act
     const { result } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
         scratchDir: dir,
         trackedFiles: ["package.json"],
     });
+
+    // Assert
     assert.equal(result.status, "error");
     assert.match(result.notice ?? "", /invalid lcov report/u);
 });
 
 test("no-fix runs the consumer command once", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-nc-");
     await setupCoverageRepo({
         root: dir,
@@ -570,6 +675,8 @@ test("no-fix runs the consumer command once", async () => {
         reportPath: "coverage/lcov.info",
         reportContent: ["LF:100", "LH:90"].join("\n"),
     });
+
+    // Act
     const { calls } = await runCoverageScenario({
         step: runNodeCoverageStep,
         repoRoot: dir,
@@ -577,6 +684,8 @@ test("no-fix runs the consumer command once", async () => {
         trackedFiles: ["package.json"],
         runnerOutcomes: { sh: { status: 0 } },
     });
+
+    // Assert
     assert.equal(calls.length, 1);
     assert.equal(calls[0]![0], "sh");
     assert.equal(calls[0]![1], "-c");

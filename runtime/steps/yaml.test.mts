@@ -1,6 +1,6 @@
 // Tests for steps/yaml.mts: yamllint over tracked YAML files.
 // Runner injected, so no host binaries are needed here.
-// Run: node --test steps/yaml.test.mts
+// Run: node --test runtime/steps/yaml.test.mts
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -14,6 +14,7 @@ import {
 import { baseCtx, fakeRunner } from "../test-helpers.mts";
 
 test("filterYamlFiles keeps only .yml and .yaml files", () => {
+    // Act & Assert
     assert.deepEqual(
         filterYamlFiles({
             files: ["a.yml", "b.yaml", "c.sh", "d.ymlx", "e.YAML"],
@@ -23,31 +24,42 @@ test("filterYamlFiles keeps only .yml and .yaml files", () => {
 });
 
 test("yaml extensions are lowercase only", () => {
+    // Act & Assert
     assert.deepEqual(YAML_EXTENSIONS, [".yml", ".yaml"]);
 });
 
 test("runYamlStep skips cleanly when no YAML is tracked", async () => {
+    // Arrange
     const { runner } = fakeRunner({});
+
+    // Act
     const result = await runYamlStep({
         ctx: baseCtx,
         trackedFiles: ["a.sh"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
 });
 
 test("runYamlStep fails naming violation count when yamllint reports", async () => {
+    // Arrange
     const { runner } = fakeRunner({
         yamllint: {
             status: 1,
             stdout: "ci.yml:3:81: error line too long (line-length)\n",
         },
     });
+
+    // Act
     const result = await runYamlStep({
         ctx: baseCtx,
         trackedFiles: ["ci.yml"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.ok((result.notice ?? "").includes("yamllint"));
     assert.deepEqual(result.errors, [
@@ -63,9 +75,12 @@ test("runYamlStep fails naming violation count when yamllint reports", async () 
 });
 
 test("parseYamllint handles bracket levels and ignores non-finding lines", () => {
+    // Act
     const errors = parseYamllint({
         stdout: "a.yml:1:2: [warning] too many spaces (spaces)\nnot a finding\n",
     });
+
+    // Assert
     assert.deepEqual(errors, [
         {
             kind: "finding",
@@ -79,12 +94,17 @@ test("parseYamllint handles bracket levels and ignores non-finding lines", () =>
 });
 
 test("config travels with the gate and -s makes warnings fail", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({});
+
+    // Act
     await runYamlStep({
         ctx: baseCtx,
         trackedFiles: ["ci.yml", "compose.yaml"],
         runner,
     });
+
+    // Assert
     const call = calls.find((c) => c[0] === "yamllint")!;
     assert.equal(call[1], "-c");
     assert.match(call[2]!, /runtime\/config\/yamllint\.yml$/u);
@@ -98,12 +118,17 @@ test("config travels with the gate and -s makes warnings fail", async () => {
 });
 
 test("repair skips yamllint entirely (check-only, #65)", async () => {
+    // Arrange
     const { runner, calls } = fakeRunner({});
+
+    // Act
     const result = await runYamlStep({
         ctx: { ...baseCtx, mode: "fix" },
         trackedFiles: ["ci.yml"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "skip");
     assert.match(result.notice ?? "", /deferred to verification/u);
     assert.equal(calls.length, 0);
