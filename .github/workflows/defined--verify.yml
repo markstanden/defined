@@ -24,7 +24,9 @@ concurrency:
 
 jobs:
     defined-gate:
-        runs-on: ubuntu-latest
+        # Pinned, not ubuntu-latest: the label migrates to Ubuntu 26.04 from
+        # 19 October 2026 and says so on every run (actions/runner-images#14748).
+        runs-on: ubuntu-26.04
         permissions:
             contents: read
         steps:
