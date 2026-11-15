@@ -1,6 +1,6 @@
 // Tests for steps/eslint.mts: house/repo flat-config linting.
 // Runner injected, so no host binaries are needed here.
-// Run: node --test steps/eslint.test.mts
+// Run: node --test runtime/steps/eslint.test.mts
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
@@ -391,6 +391,7 @@ test("repo config in no-fix writes no sidecar and does not notify", async () => 
 });
 
 test("check mode reports each finding with its rule (verification pass)", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-eslint-findings-");
     await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const report = JSON.stringify([
@@ -405,11 +406,15 @@ test("check mode reports each finding with its rule (verification pass)", async 
             ],
         },
     ]);
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
         trackedFiles: ["src/a.ts"],
         runner: failingRunner(report),
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /1 finding\(s\) \(house config\)/u);
     assert.deepEqual(result.errors, [
@@ -425,6 +430,7 @@ test("check mode reports each finding with its rule (verification pass)", async 
 });
 
 test("exit 2 is a config/parse error, distinct from a finding", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-config-err-");
     await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
     const scratch = { dir: null };
@@ -432,11 +438,14 @@ test("exit 2 is a config/parse error, distinct from a finding", async () => {
         eslint: { status: 2, stderr: "boom" },
     });
     try {
+        // Act
         const result = await runEslintStep({
             ctx: { ...baseCtx, repoRoot: root, scratch },
             trackedFiles: ["src/a.ts"],
             runner,
         });
+
+        // Assert
         assert.equal(result.status, "error");
         assert.match(
             result.notice ?? "",
@@ -455,6 +464,7 @@ test("exit 2 is a config/parse error, distinct from a finding", async () => {
 });
 
 test("a stale example is removed when the repo has no config", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-stale-");
     await writeTree(root, {
         "src/a.ts": "export const a = 1;\n",
@@ -462,11 +472,15 @@ test("a stale example is removed when the repo has no config", async () => {
     });
     await writeFile(join(root, ESLINT_EXAMPLE_NAME), "// stale example\n");
     const { runner } = recordingRunner();
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(result.status, "pass");
     assert.equal(existsSync(join(root, ESLINT_EXAMPLE_NAME)), false);
     const exclude = await readFile(join(root, ".git/info/exclude"), "utf8");
@@ -485,21 +499,27 @@ function failingRunner(
 }
 
 test("a finding without a rule id or line still counts", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-eslint-nofields-");
     await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const report = JSON.stringify([
         { filePath: join(dir, "src/a.ts"), messages: [{ severity: 2 }] },
     ]);
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
         trackedFiles: ["src/a.ts"],
         runner: failingRunner(report),
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.equal(result.errors?.[0]?.rule, "parse error");
 });
 
 test("every finding is reported without truncation", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-eslint-many-");
     await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const messages = Array.from({ length: 7 }, (_, i) => ({
@@ -510,17 +530,22 @@ test("every finding is reported without truncation", async () => {
     const report = JSON.stringify([
         { filePath: join(dir, "src/a.ts"), messages },
     ]);
+
+    // Act
     const result = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
         trackedFiles: ["src/a.ts"],
         runner: failingRunner(report),
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.match(result.notice ?? "", /7 finding\(s\)/u);
     assert.equal(result.errors?.length, 7);
 });
 
 test("unparseable, empty, malformed and warning-only reports fall back", async () => {
+    // Arrange
     const dir = await makeTempDir("quality-eslint-fallbacks-");
     await writeTree(dir, { "src/a.ts": "export const a = 1;\n" });
     const cases = [
@@ -547,17 +572,21 @@ test("unparseable, empty, malformed and warning-only reports fall back", async (
         },
     ];
     for (const { stdout, re } of cases) {
+        // Act
         const result = await runEslintStep({
             ctx: { ...baseCtx, repoRoot: dir, scratch: { dir } },
             trackedFiles: ["src/a.ts"],
             runner: failingRunner(stdout),
         });
+
+        // Assert
         assert.equal(result.status, "fail");
         assert.match(result.notice ?? "", re);
     }
 });
 
 test("the example is written without exclusion when there is no git dir", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-nogit-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -565,17 +594,22 @@ test("the example is written without exclusion when there is no git dir", async 
     });
     const notes: string[] = [];
     const { runner } = recordingRunner();
+
+    // Act
     await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["eslint.config.mjs", "src/a.ts"],
         runner,
         notifyFn: (line) => notes.push(line),
     });
+
+    // Assert
     assert.equal(existsSync(join(root, ESLINT_EXAMPLE_NAME)), true);
     assert.doesNotMatch(notes[0]!, /git\/info\/exclude/u);
 });
 
 test("an existing exclude file without a trailing newline stays well formed", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-sep-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -583,17 +617,22 @@ test("an existing exclude file without a trailing newline stays well formed", as
         ".git/info/exclude": "foo",
     });
     const { runner } = recordingRunner();
+
+    // Act
     await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["eslint.config.mjs", "src/a.ts"],
         runner,
         notifyFn: () => {},
     });
+
+    // Assert
     const exclude = await readFile(join(root, ".git/info/exclude"), "utf8");
     assert.equal(exclude, `foo\n${ESLINT_EXAMPLE_NAME}\n`);
 });
 
 test("the example write and exclusion are idempotent across runs", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-idem-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -603,6 +642,8 @@ test("the example write and exclusion are idempotent across runs", async () => {
     const notes: string[] = [];
     const ctx = { mode: "fix" as const, repoRoot: root };
     const trackedFiles = ["eslint.config.mjs", "src/a.ts"];
+
+    // Act
     for (let run = 0; run < 2; run += 1) {
         await runEslintStep({
             ctx,
@@ -611,23 +652,30 @@ test("the example write and exclusion are idempotent across runs", async () => {
             notifyFn: (line) => notes.push(line),
         });
     }
+
+    // Assert
     assert.equal(notes.length, 2);
     assert.match(notes[0]!, /added it to \.git\/info\/exclude/u);
     assert.doesNotMatch(notes[1]!, /git\/info\/exclude/u);
 });
 
 test("prune leaves an exclude file without the entry untouched", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-prune-");
     await writeTree(root, {
         "src/a.ts": "export const a = 1;\n",
         ".git/info/exclude": "other\n",
     });
     const { runner } = recordingRunner();
+
+    // Act
     await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
         trackedFiles: ["src/a.ts"],
         runner,
     });
+
+    // Assert
     assert.equal(
         await readFile(join(root, ".git/info/exclude"), "utf8"),
         "other\n",
@@ -674,6 +722,7 @@ function lintRunner(findings: Map<string, number>): {
 }
 
 test("an unchanged scope is served from the eslint cache with no process", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-cache-hit-");
     await writeTree(root, {
         "a.ts": "export const a = 1;\n",
@@ -692,21 +741,27 @@ test("an unchanged scope is served from the eslint cache with no process", async
         ["b.ts", 2],
     ]);
 
+    // Act — first run primes the cache and lints both files
     const first = lintRunner(findings);
     const r1 = await runEslintStep({
         ctx,
         trackedFiles: ["a.ts", "b.ts"],
         runner: first.runner,
     });
+
+    // Assert
     assert.equal(r1.status, "fail");
     assert.deepEqual(first.calls, [["a.ts", "b.ts"]]);
 
+    // Act — second run over the same unchanged scope
     const second = lintRunner(findings);
     const r2 = await runEslintStep({
         ctx: { ...ctx, notify: (line) => notes.push(line) },
         trackedFiles: ["a.ts", "b.ts"],
         runner: second.runner,
     });
+
+    // Assert — every file is served from the cache
     assert.equal(r2.status, "fail");
     assert.deepEqual(second.calls, [], "all files cached: no process");
     assert.deepEqual(r2.errors, r1.errors);
@@ -714,6 +769,7 @@ test("an unchanged scope is served from the eslint cache with no process", async
 });
 
 test("editing one file re-lints only that file", async () => {
+    // Arrange — prime the cache, then edit one file
     const root = await makeTempDir("quality-eslint-cache-edit-");
     await writeTree(root, {
         "a.ts": "export const a = 1;\n",
@@ -735,11 +791,15 @@ test("editing one file re-lints only that file", async () => {
 
     await writeFile(join(root, "a.ts"), "export const a = 11;\n");
     const edited = lintRunner(new Map([["a.ts", 3]]));
+
+    // Act
     const result = await runEslintStep({
         ctx,
         trackedFiles: ["a.ts", "b.ts"],
         runner: edited.runner,
     });
+
+    // Assert
     assert.equal(result.status, "fail");
     assert.deepEqual(
         edited.calls,
@@ -753,6 +813,7 @@ test("editing one file re-lints only that file", async () => {
 });
 
 test("a changed effective config invalidates every entry", async () => {
+    // Arrange — prime the cache, then change the effective config
     const root = await makeTempDir("quality-eslint-cache-ident-");
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "complexityMax": 12 } }\n',
@@ -776,11 +837,16 @@ test("a changed effective config invalidates every entry", async () => {
         ".defined.json": '{ "eslint": { "complexityMax": 14 } }\n',
     });
     const changed = lintRunner(new Map());
+
+    // Act
     await runEslintStep({ ctx, trackedFiles, runner: changed.runner });
+
+    // Assert
     assert.deepEqual(changed.calls, [["src/a.ts"]], "new identity: all miss");
 });
 
 test("a changed recommended override invalidates every entry", async () => {
+    // Arrange — prime the cache, then flip the recommended override
     const root = await makeTempDir("quality-eslint-cache-rec-");
     await writeTree(root, {
         ".defined.json": '{ "eslint": { "recommended": false } }\n',
@@ -804,11 +870,16 @@ test("a changed recommended override invalidates every entry", async () => {
         ".defined.json": '{ "eslint": { "recommended": true } }\n',
     });
     const changed = lintRunner(new Map());
+
+    // Act
     await runEslintStep({ ctx, trackedFiles, runner: changed.runner });
+
+    // Assert
     assert.deepEqual(changed.calls, [["src/a.ts"]], "new identity: all miss");
 });
 
 test("a repo config bypasses the eslint cache", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-cache-bypass-");
     await writeTree(root, {
         "eslint.config.mjs": "export default [];\n",
@@ -823,6 +894,7 @@ test("a repo config bypasses the eslint cache", async () => {
     };
     const notes: string[] = [];
 
+    // Act — both runs take the uncached repo-config path
     for (let run = 0; run < 2; run += 1) {
         const { runner, calls } = recordingRunner();
         await runEslintStep({
@@ -832,10 +904,13 @@ test("a repo config bypasses the eslint cache", async () => {
         });
         assert.equal(calls.length, 1, "each run still spawns");
     }
+
+    // Assert
     assert.deepEqual(notes, [], "no cache metric when bypassed");
 });
 
 test("cached and uncached eslint runs agree on the verdict", async () => {
+    // Arrange
     const root = await makeTempDir("quality-eslint-cache-agree-");
     await writeTree(root, {
         "a.ts": "export const a = 1;\n",
@@ -844,16 +919,21 @@ test("cached and uncached eslint runs agree on the verdict", async () => {
     const cacheDir = await makeTempDir("quality-eslint-cache-");
     const findings = new Map([["a.ts", 5]]);
 
+    // Act — a cached run
     const cached = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root }, cacheDir },
         trackedFiles: ["a.ts", "b.ts"],
         runner: lintRunner(findings).runner,
     });
+
+    // Act — the same scope with no cache
     const uncached = await runEslintStep({
         ctx: { ...baseCtx, repoRoot: root, scratch: { dir: root } },
         trackedFiles: ["a.ts", "b.ts"],
         runner: lintRunner(findings).runner,
     });
+
+    // Assert — both paths reach the same verdict
     assert.equal(cached.status, uncached.status);
     assert.deepEqual(cached.errors, uncached.errors);
 });
