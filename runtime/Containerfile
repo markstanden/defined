@@ -27,21 +27,24 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 COPY runtime/tool-versions.env /usr/local/share/defined/tool-versions.env
 
+# Tool installs. Downloads are verified against the sha256 pinned in
+# tool-versions.env *before* anything is unpacked into PATH, so a tampered,
+# re-published or wrong-arch asset fails the build instead of becoming a gate
+# tool. shellcheck and shfmt come from upstream releases because the Debian
+# feed caps both below their pins; yamllint stays on apt (see the ceiling note
+# beside its pin). Every tool still asserts its version, which is what catches
+# an upstream asset-naming change.
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
         git \
-        shellcheck \
-        shfmt \
         unzip \
         yamllint \
     ; \
     rm -rf /var/lib/apt/lists/*; \
     . /usr/local/share/defined/tool-versions.env; \
-    test "$(shellcheck --version | sed -n 's/^version: //p')" = "${SHELLCHECK_VERSION}"; \
-    test "$(shfmt --version)" = "${SHFMT_VERSION}"; \
     test "$(yamllint --version | cut -d' ' -f2)" = "${YAMLLINT_VERSION}"; \
     npm install --global "typescript@${TYPESCRIPT_VERSION}"; \
     npm install --global "prettier@${PRETTIER_VERSION}"; \
@@ -60,19 +63,59 @@ RUN set -eux; \
         "typescript@${ESLINT_TYPESCRIPT_VERSION}"; \
     arch="$(uname -m)"; \
     case "${arch}" in \
-        x86_64) ARCH="amd64"; ZIZMOR_ARCH="x86_64"; GITLEAKS_ARCH="x64" ;; \
-        aarch64) ARCH="arm64"; ZIZMOR_ARCH="aarch64"; GITLEAKS_ARCH="arm64" ;; \
+        x86_64) ARCH="amd64"; ZIZMOR_ARCH="x86_64"; GITLEAKS_ARCH="x64"; \
+                SHELLCHECK_ARCH="x86_64"; \
+                SHELLCHECK_SHA256="${SHELLCHECK_SHA256_AMD64}"; \
+                SHFMT_SHA256="${SHFMT_SHA256_AMD64}"; \
+                ACTIONLINT_SHA256="${ACTIONLINT_SHA256_AMD64}"; \
+                ZIZMOR_SHA256="${ZIZMOR_SHA256_AMD64}"; \
+                GITLEAKS_SHA256="${GITLEAKS_SHA256_AMD64}"; \
+                OPENTOFU_SHA256="${OPENTOFU_SHA256_AMD64}"; \
+                TFLINT_SHA256="${TFLINT_SHA256_AMD64}" ;; \
+        aarch64) ARCH="arm64"; ZIZMOR_ARCH="aarch64"; GITLEAKS_ARCH="arm64"; \
+                SHELLCHECK_ARCH="aarch64"; \
+                SHELLCHECK_SHA256="${SHELLCHECK_SHA256_ARM64}"; \
+                SHFMT_SHA256="${SHFMT_SHA256_ARM64}"; \
+                ACTIONLINT_SHA256="${ACTIONLINT_SHA256_ARM64}"; \
+                ZIZMOR_SHA256="${ZIZMOR_SHA256_ARM64}"; \
+                GITLEAKS_SHA256="${GITLEAKS_SHA256_ARM64}"; \
+                OPENTOFU_SHA256="${OPENTOFU_SHA256_ARM64}"; \
+                TFLINT_SHA256="${TFLINT_SHA256_ARM64}" ;; \
         *) echo "Unsupported arch: ${arch}" >&2; exit 1 ;; \
     esac; \
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/kjanat/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin actionlint; \
+    verify() { printf '%s  %s\n' "$1" "$2" | sha256sum -c -; }; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors -o /tmp/shellcheck.tar.gz "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.${SHELLCHECK_ARCH}.tar.gz"; \
+    verify "${SHELLCHECK_SHA256}" /tmp/shellcheck.tar.gz; \
+    tar -xzf /tmp/shellcheck.tar.gz -C /usr/local/bin --strip-components=1 "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"; \
+    rm /tmp/shellcheck.tar.gz; \
+    test "$(shellcheck --version | sed -n 's/^version: //p')" = "${SHELLCHECK_VERSION}"; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors -o /tmp/shfmt "https://github.com/mvdan/sh/releases/download/v${SHFMT_VERSION}/shfmt_v${SHFMT_VERSION}_linux_${ARCH}"; \
+    verify "${SHFMT_SHA256}" /tmp/shfmt; \
+    install -m 0755 /tmp/shfmt /usr/local/bin/shfmt; \
+    rm /tmp/shfmt; \
+    test "$(shfmt --version | sed 's/^v//')" = "${SHFMT_VERSION}"; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors -o /tmp/actionlint.tar.gz "https://github.com/kjanat/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_${ARCH}.tar.gz"; \
+    verify "${ACTIONLINT_SHA256}" /tmp/actionlint.tar.gz; \
+    tar -xzf /tmp/actionlint.tar.gz -C /usr/local/bin actionlint; \
+    rm /tmp/actionlint.tar.gz; \
     actionlint --version >/dev/null; \
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${ZIZMOR_ARCH}-unknown-linux-gnu.tar.gz" | tar -xz -C /usr/local/bin zizmor; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors -o /tmp/zizmor.tar.gz "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-${ZIZMOR_ARCH}-unknown-linux-gnu.tar.gz"; \
+    verify "${ZIZMOR_SHA256}" /tmp/zizmor.tar.gz; \
+    tar -xzf /tmp/zizmor.tar.gz -C /usr/local/bin zizmor; \
+    rm /tmp/zizmor.tar.gz; \
     zizmor --version >/dev/null; \
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" | tar -xz -C /usr/local/bin gitleaks; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors -o /tmp/gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz"; \
+    verify "${GITLEAKS_SHA256}" /tmp/gitleaks.tar.gz; \
+    tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks; \
+    rm /tmp/gitleaks.tar.gz; \
     gitleaks --version >/dev/null; \
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /usr/local/bin tofu; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors -o /tmp/tofu.tar.gz "https://github.com/opentofu/opentofu/releases/download/v${OPENTOFU_VERSION}/tofu_${OPENTOFU_VERSION}_linux_${ARCH}.tar.gz"; \
+    verify "${OPENTOFU_SHA256}" /tmp/tofu.tar.gz; \
+    tar -xzf /tmp/tofu.tar.gz -C /usr/local/bin tofu; \
+    rm /tmp/tofu.tar.gz; \
     tofu --version >/dev/null; \
-    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${ARCH}.zip" -o /tmp/tflint.zip; \
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-all-errors -o /tmp/tflint.zip "https://github.com/terraform-linters/tflint/releases/download/v${TFLINT_VERSION}/tflint_linux_${ARCH}.zip"; \
+    verify "${TFLINT_SHA256}" /tmp/tflint.zip; \
     unzip -o /tmp/tflint.zip -d /usr/local/bin; \
     rm /tmp/tflint.zip; \
     test "$(tflint --version | sed -n 's/^TFLint version //p')" = "${TFLINT_VERSION}"; \
