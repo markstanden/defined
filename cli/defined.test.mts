@@ -390,11 +390,14 @@ async function runLauncher({
 
 test("prefers podman over docker", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             engines: ["podman", "docker"],
         });
+
+        // Assert
         assert.equal(r.status, 0);
         const runs = r.log.filter((line) => line.startsWith("run --rm"));
         assert.equal(
@@ -408,12 +411,15 @@ test("prefers podman over docker", async () => {
 
 test("fails loudly when no engine is available", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({
             fixture,
             args: ["verify"],
             engines: [],
             barePath: true,
         });
+
+        // Assert
         assert.equal(r.status, 1);
         assert.match(r.stderr, /no container engine found/u);
         assert.deepEqual(r.log, []);
@@ -422,7 +428,15 @@ test("fails loudly when no engine is available", async () => {
 
 test("resolves the repo root via git and mounts it for comply", async () => {
     await withFixture("abc12345", async (fixture) => {
-        const r = await runLauncher({ fixture, args: ["comply"] });
+        // Act — from a directory that is not the root, so a cwd-based answer
+        // would mount the wrong path and fail the assertion.
+        const r = await runLauncher({
+            fixture,
+            args: ["comply"],
+            cwd: fixture.install,
+        });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "comply must invoke the engine");
@@ -434,7 +448,10 @@ test("resolves the repo root via git and mounts it for comply", async () => {
 
 test("forwards presentation flags through to the runtime", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify", "--min"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "verify must invoke the engine");
@@ -447,7 +464,10 @@ test("forwards presentation flags through to the runtime", async () => {
 
 test("mounts the repo read-only for verify", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "verify must invoke the engine");
@@ -458,7 +478,10 @@ test("mounts the repo read-only for verify", async () => {
 
 test("mounts read-only with no cache volumes for explain", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["explain", "shell"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "explain must invoke the engine");
@@ -474,7 +497,10 @@ test("mounts read-only with no cache volumes for explain", async () => {
 
 test("mounts the content cache volume outside the read-only checkout", async () => {
     await withFixture("abc12345", async (fixture) => {
+        // Act
         const r = await runLauncher({ fixture, args: ["verify"] });
+
+        // Assert
         assert.equal(r.status, 0);
         const run = r.log.find((line) => line.startsWith("run --rm"));
         assert.ok(run, "verify must invoke the engine");
