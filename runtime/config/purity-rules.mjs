@@ -485,6 +485,17 @@ export const pureModuleRule = {
             }
         }
 
+        function isGlobalThisMember(callee, key) {
+            const path = memberPath(callee);
+            return (
+                path !== null &&
+                path.base.name === "globalThis" &&
+                ambient(path.base) &&
+                path.keys.length === 1 &&
+                path.keys[0] === key
+            );
+        }
+
         function checkClockCall(node) {
             const callee = unwrap(node.callee);
             if (callee?.type === "Identifier") {
@@ -493,14 +504,7 @@ export const pureModuleRule = {
                 }
                 return;
             }
-            const path = memberPath(callee);
-            if (
-                path !== null &&
-                path.base.name === "globalThis" &&
-                ambient(path.base) &&
-                path.keys.length === 1 &&
-                path.keys[0] === "Date"
-            ) {
+            if (isGlobalThisMember(callee, "Date")) {
                 report(node, clockMessage("Date()"));
             }
         }
@@ -604,13 +608,7 @@ export const pureModuleRule = {
                     }
                     return;
                 }
-                const path = memberPath(callee);
-                if (
-                    path?.base.name === "globalThis" &&
-                    ambient(path.base) &&
-                    path.keys.length === 1 &&
-                    path.keys[0] === "Date"
-                ) {
+                if (isGlobalThisMember(callee, "Date")) {
                     report(node, clockMessage("new Date()"));
                 }
             },
