@@ -144,6 +144,9 @@ const RED_FILES: Record<string, string> = {
                     { file: "lib/receipts.mts", name: "readSum" },
                     { file: "lib/receipts.mts", name: "writeCache" },
                     { file: "lib/receipts.mts", name: "readAndMutate" },
+                    { file: "lib/receipts.mts", name: "readDestruct" },
+                    { file: "lib/receipts.mts", name: "readArray" },
+                    { file: "lib/receipts.mts", name: "readForOf" },
                 ],
             },
         },
@@ -198,6 +201,10 @@ const RED_FILES: Record<string, string> = {
         "export function assign(input: { count: number }) { input.count = 1; }",
         "export function update(input: { count: number }) { input.count++; }",
         "export function remove(input: { count: number }) { delete input.count; }",
+        "export function optional(input: { count: number }) { delete input?.count; }",
+        "export function destruct(input: { count: number }, source: { count: number }) {",
+        "    ({ count: input.count } = source);",
+        "}",
         "export function local(input: { items: number[] }) { const out = [...input.items]; out.push(1); return out; }",
         "",
     ].join("\n"),
@@ -316,6 +323,23 @@ const RED_FILES: Record<string, string> = {
         "export function readAndMutate(input: { count: number }): number {",
         "    input.count += 1;",
         "    return input.count;",
+        "}",
+        "",
+        "export function readDestruct(source: { count: number }): number {",
+        "    ({ count: cache } = source);",
+        "    return cache;",
+        "}",
+        "",
+        "export function readArray(values: number[]): number {",
+        "    [cache] = values;",
+        "    return cache;",
+        "}",
+        "",
+        "export function readForOf(values: number[]): number {",
+        "    for (cache of values) {",
+        "        cache += 1;",
+        "    }",
+        "    return cache;",
         "}",
         "",
         "export function saveOverload(value: string): void;",
@@ -454,19 +478,22 @@ test(
             assert.ok(
                 imports.every((error) => error.rule === "defined/pure-module"),
             );
-            assert.ok(
-                imports.some(
-                    (error) =>
-                        error.line === 1 &&
-                        error.message.includes('"node:fs/promises"'),
-                ),
-                "the first finding must name the built-in and the remedy",
+            const firstImport = imports.find((error) => error.line === 1);
+            assert.match(
+                firstImport?.message ?? "",
+                /"node:fs\/promises"/u,
+                "the first finding must name the built-in",
+            );
+            assert.match(
+                firstImport?.message ?? "",
+                /Move the Node built-in use to the caller/u,
+                "the first finding must carry the remedy",
             );
 
             // Ambient effects, including globalThis and literal keys.
             assert.equal(byFile("lib/pure/ambient.mts").length, 17);
             // Direct parameter writes only: a local accumulator is clean.
-            assert.equal(byFile("lib/pure/mutate.mts").length, 3);
+            assert.equal(byFile("lib/pure/mutate.mts").length, 5);
             // The documented limits stay green: aliases and injected effects.
             assert.equal(byFile("lib/pure/alias.mts").length, 0);
             // Type-only specifiers and a relative pure helper stay green.
@@ -495,7 +522,7 @@ test(
             assert.equal(
                 receipts.filter((error) => error.rule === "defined/cqs-query")
                     .length,
-                2,
+                6,
             );
             const targets = receipts.filter(
                 (error) => error.rule === "defined/cqs-targets",
@@ -524,13 +551,17 @@ test(
 
             // Assert
             assert.equal(repaired.results.purity, "fail");
-            assert.ok(
-                (repaired.errors ?? []).some(
-                    (error) =>
-                        error.check === "purity" &&
-                        error.file === "lib/pure/imports.mts" &&
-                        error.rule === "defined/pure-module",
-                ),
+            const repairedPurity = (repaired.errors ?? []).find(
+                (error) =>
+                    error.check === "purity" &&
+                    error.file === "lib/pure/imports.mts",
+            );
+            assert.deepEqual(
+                {
+                    file: repairedPurity?.file,
+                    rule: repairedPurity?.rule,
+                },
+                { file: "lib/pure/imports.mts", rule: "defined/pure-module" },
                 "an unrelated repair must not erase the purity finding",
             );
         } finally {
@@ -556,13 +587,20 @@ test(
             const gate = parseGate(check.stdout);
             assert.equal(gate.results.purity, "pass");
             assert.equal(gate.results.eslint, "fail");
-            assert.ok(
-                (gate.errors ?? []).some(
-                    (error) =>
-                        error.check === "eslint" &&
-                        error.file === "lib/unrelated.mts" &&
-                        error.rule === "@typescript-eslint/no-unused-vars",
-                ),
+            const unrelatedLint = (gate.errors ?? []).find(
+                (error) =>
+                    error.check === "eslint" &&
+                    error.file === "lib/unrelated.mts",
+            );
+            assert.deepEqual(
+                {
+                    file: unrelatedLint?.file,
+                    rule: unrelatedLint?.rule,
+                },
+                {
+                    file: "lib/unrelated.mts",
+                    rule: "@typescript-eslint/no-unused-vars",
+                },
                 "the ordinary ESLint step must still report its own finding",
             );
             assert.equal(
@@ -628,12 +666,16 @@ test(
                     "standards/node-purity.md",
                 ],
             );
-            assert.ok(
-                answers.every(
-                    ({ answer }) =>
-                        answer.guidance.includes("defined/pure-module") &&
-                        answer.guidance.includes("defined/cqs-query"),
-                ),
+            assert.deepEqual(
+                answers.map(({ answer }) => [
+                    answer.guidance.includes("defined/pure-module"),
+                    answer.guidance.includes("defined/cqs-query"),
+                ]),
+                [
+                    [true, true],
+                    [true, true],
+                    [true, true],
+                ],
             );
         } finally {
             await rm(root, { recursive: true, force: true });
