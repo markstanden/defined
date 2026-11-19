@@ -795,7 +795,9 @@ test("loadConfig parses each purity list on its own", async () => {
     const dir = await makeTempDir("quality-config-");
     await writeConfig(
         dir,
-        JSON.stringify({ purity: { queries: [{ file: "q.ts", name: "read" }] } }),
+        JSON.stringify({
+            purity: { queries: [{ file: "q.ts", name: "read" }] },
+        }),
     );
 
     // Act
@@ -903,7 +905,7 @@ test("loadConfig rejects empty or non-array purity lists", async () => {
 });
 
 test("loadConfig rejects absolute, escaping and unsupported purity selectors", async () => {
-    for (const [selector, label] of [
+    for (const [selector] of [
         ["/lib/a.ts", "absolute"],
         ["../a.ts", "parent escape"],
         ["lib/../../a.ts", "nested escape"],

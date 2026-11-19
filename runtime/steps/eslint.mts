@@ -83,11 +83,7 @@ const KIND_LABEL: Record<ConfigKind, string> = {
 };
 
 /** Keep only the tracked files ESLint can parse (the house config's set). */
-export function filterEslintFiles({
-    files,
-}: {
-    files: string[];
-}): string[] {
+export function filterEslintFiles({ files }: { files: string[] }): string[] {
     return filterJsTsFiles({ files });
 }
 

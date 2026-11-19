@@ -648,8 +648,7 @@ function isRepoRelativePath(path: string): boolean {
     return path
         .split("/")
         .every(
-            (segment) =>
-                segment !== "" && segment !== "." && segment !== "..",
+            (segment) => segment !== "" && segment !== "." && segment !== "..",
         );
 }
 
@@ -676,7 +675,9 @@ function validatePurityTargetFile(where: string, raw: unknown): string {
         file.includes("?") ||
         !hasJsTsExtension({ file })
     ) {
-        throw new Error(`.defined.json: "${where}" must be ${TARGET_FILE_RULE}`);
+        throw new Error(
+            `.defined.json: "${where}" must be ${TARGET_FILE_RULE}`,
+        );
     }
     return file;
 }
@@ -686,9 +687,7 @@ const JS_IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
 /** A top-level binding name: an ASCII JavaScript identifier. */
 function validatePurityTargetName(where: string, raw: unknown): string {
     if (typeof raw !== "string" || !JS_IDENTIFIER_RE.test(raw)) {
-        throw new Error(
-            `.defined.json: "${where}" must be a JS identifier`,
-        );
+        throw new Error(`.defined.json: "${where}" must be a JS identifier`);
     }
     return raw;
 }
@@ -719,16 +718,34 @@ function dedupeBy<T>(items: T[], key: (item: T) => string): T[] {
     });
 }
 
-function validatePurityTargets(
-    where: string,
-    raw: unknown,
-): PurityTarget[] {
+function validatePurityTargets(where: string, raw: unknown): PurityTarget[] {
     return dedupeBy(
         expectNonEmptyArray(where, raw).map((entry, index) =>
             validatePurityTarget(`${where}[${index}]`, entry),
         ),
         targetKey,
     );
+}
+
+function validatePureModules(raw: unknown): string[] {
+    return dedupeBy(
+        expectNonEmptyArray("purity.pureModules", raw).map((selector, index) =>
+            validatePureSelector(`purity.pureModules[${index}]`, selector),
+        ),
+        (selector) => selector,
+    );
+}
+
+/** Reject the same symbol declared in both roles. */
+function rejectPurityConflict(result: PurityConfig): void {
+    const commands = new Set((result.commands ?? []).map(targetKey));
+    for (const query of result.queries ?? []) {
+        if (commands.has(targetKey(query))) {
+            throw new Error(
+                `.defined.json: "${query.name}" in "${query.file}" is declared as both a command and a query`,
+            );
+        }
+    }
 }
 
 function validatePurity(raw: unknown): PurityConfig | undefined {
@@ -739,19 +756,13 @@ function validatePurity(raw: unknown): PurityConfig | undefined {
     rejectUnknownKeys(entry, PURITY_KEYS, "purity");
     const result: PurityConfig = {};
     if (entry.pureModules !== undefined) {
-        result.pureModules = dedupeBy(
-            expectNonEmptyArray("purity.pureModules", entry.pureModules).map(
-                (selector, index) =>
-                    validatePureSelector(
-                        `purity.pureModules[${index}]`,
-                        selector,
-                    ),
-            ),
-            (selector) => selector,
-        );
+        result.pureModules = validatePureModules(entry.pureModules);
     }
     if (entry.commands !== undefined) {
-        result.commands = validatePurityTargets("purity.commands", entry.commands);
+        result.commands = validatePurityTargets(
+            "purity.commands",
+            entry.commands,
+        );
     }
     if (entry.queries !== undefined) {
         result.queries = validatePurityTargets("purity.queries", entry.queries);
@@ -760,14 +771,7 @@ function validatePurity(raw: unknown): PurityConfig | undefined {
     if (Object.keys(result).length === 0) {
         return undefined;
     }
-    const commands = new Set((result.commands ?? []).map(targetKey));
-    for (const query of result.queries ?? []) {
-        if (commands.has(targetKey(query))) {
-            throw new Error(
-                `.defined.json: "${query.name}" in "${query.file}" is declared as both a command and a query`,
-            );
-        }
-    }
+    rejectPurityConflict(result);
     return result;
 }
 
