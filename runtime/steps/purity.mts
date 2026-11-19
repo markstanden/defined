@@ -75,7 +75,9 @@ interface PurityFinding {
 
 /** The sorted, deduped file list one run needs a verdict for. */
 function selectedFiles(policy: PurityPolicy): string[] {
-    return [...new Set([...policy.pure, ...Object.keys(policy.cqs)])].sort();
+    return [...new Set([...policy.pure, ...Object.keys(policy.cqs)])].sort(
+        (left, right) => (left < right ? -1 : left > right ? 1 : 0),
+    );
 }
 
 /** First non-empty line of a result's output, for a one-line error. */
@@ -94,7 +96,7 @@ function repoPath({
     repoRoot: string;
     file: string;
 }): string {
-    return relative(repoRoot, file).split("\\").join("/");
+    return relative(repoRoot, file).replaceAll("\\", "/");
 }
 
 /** Parse ESLint's JSON array; null when the output is not a result array. */

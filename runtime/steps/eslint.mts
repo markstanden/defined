@@ -46,7 +46,7 @@ import { loadConfig, type DefinedConfig } from "../lib/config.mts";
 import { hasConsumerEslintConfig } from "../lib/eslint-config.mts";
 import { removeExample, writeExample } from "../lib/eslint-example.mts";
 import { runWithLocalBin } from "../lib/node-packages.mts";
-import { filterJsTsFiles, JS_TS_EXTENSIONS } from "../lib/js-files.mts";
+import { filterJsTsFiles } from "../lib/js-files.mts";
 import {
     createFileCache,
     hashFile,
@@ -72,7 +72,7 @@ export interface EslintRunContext {
 type Runner = typeof run;
 
 /** Extensions the house config lints; mirrors LINT_FILES in that config. */
-export const ESLINT_EXTENSIONS = JS_TS_EXTENSIONS;
+export { JS_TS_EXTENSIONS as ESLINT_EXTENSIONS } from "../lib/js-files.mts";
 
 /** Which config a pass runs: the baked house default or the repo's own. */
 type ConfigKind = "house" | "repo";
