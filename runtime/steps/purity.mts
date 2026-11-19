@@ -216,7 +216,9 @@ function collectFile({
     const file = repoPath({ repoRoot, file: fileResult.filePath });
     seen.add(file);
     if (!Array.isArray(fileResult.messages)) {
-        return null;
+        return errored({
+            message: `purity: malformed eslint result for "${file}" (no messages array)`,
+        });
     }
     for (const message of fileResult.messages as PurityMessage[]) {
         const problem = messageProblem({ file, message });

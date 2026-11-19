@@ -54,7 +54,8 @@ function unwrap(node) {
                 current.type === "TSTypeAssertion" ||
                 current.type === "TSNonNullExpression" ||
                 current.type === "TSSatisfiesExpression" ||
-                current.type === "TSInstantiationExpression")
+                current.type === "TSInstantiationExpression" ||
+                current.type === "ChainExpression")
         ) {
             current = current.expression;
             continue;
@@ -434,6 +435,21 @@ export const pureModuleRule = {
         const ambient = (identifier) =>
             isAmbientReference(references.get(identifier));
 
+        // A `typeof process` type query is erased at runtime even though the
+        // scope manager records it as a value reference. Walk past member
+        // links to the enclosing node: a TSTypeQuery means no runtime read.
+        function inTypeQuery(node) {
+            const ancestors = sourceCode.getAncestors(node);
+            for (let index = ancestors.length - 1; index >= 0; index -= 1) {
+                const type = ancestors[index].type;
+                if (type === "MemberExpression" || type === "TSQualifiedName") {
+                    continue;
+                }
+                return type === "TSTypeQuery";
+            }
+            return false;
+        }
+
         function report(node, message) {
             context.report({ node, message });
         }
@@ -613,12 +629,18 @@ export const pureModuleRule = {
                 }
             },
             ["Identifier"]: (node) => {
+                if (inTypeQuery(node)) {
+                    return;
+                }
                 if (!AMBIENT_GLOBALS.has(node.name) || !ambient(node)) {
                     return;
                 }
                 report(node, ambientMessage(node.name));
             },
             ["MemberExpression"]: (node) => {
+                if (inTypeQuery(node)) {
+                    return;
+                }
                 checkGlobalPath(node);
             },
             ["AssignmentExpression"]: (node) => {

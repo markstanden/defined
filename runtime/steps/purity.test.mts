@@ -507,3 +507,55 @@ test("purity re-reads the policy every run and never replays a stale verdict", a
         queries: [],
     });
 });
+
+test("purity rejects a malformed eslint result with no messages array", async () => {
+    // Arrange
+    const dir = await makeRepo({ purity: { pureModules: ["lib/a.ts"] } });
+
+    // Act
+    const result = await runPurityStep({
+        ctx: { mode: "no-fix", repoRoot: dir },
+        trackedFiles: ["lib/a.ts"],
+        runner: recordingRunner({
+            eslint: {
+                status: 0,
+                stdout: JSON.stringify([{ filePath: `${dir}/lib/a.ts` }]),
+            },
+        }).runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(result.notice ?? "", /malformed eslint result/u);
+});
+
+test("purity sorts and dedupes the selected batch deterministically", async () => {
+    // Arrange
+    const dir = await makeRepo({
+        purity: {
+            pureModules: ["lib/z.ts", "lib/a.ts"],
+            queries: [{ file: "lib/a.ts", name: "readA" }],
+        },
+    });
+    const files = ["lib/z.ts", "lib/a.ts"];
+    const { runner, calls } = recordingRunner({
+        eslint: {
+            status: 0,
+            stdout: eslintResult({
+                root: dir,
+                files: ["lib/a.ts", "lib/z.ts"],
+            }).stdout,
+        },
+    });
+
+    // Act
+    const result = await runPurityStep({
+        ctx: { mode: "no-fix", repoRoot: dir },
+        trackedFiles: files,
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    assert.deepEqual(calls[0]!.args.slice(6), ["lib/a.ts", "lib/z.ts"]);
+});
