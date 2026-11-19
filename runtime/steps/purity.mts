@@ -73,10 +73,21 @@ interface PurityFinding {
     message: string;
 }
 
+/** Deterministic code-unit ordering (never the ambient locale). */
+function compareStrings(left: string, right: string): number {
+    if (left < right) {
+        return -1;
+    }
+    if (left > right) {
+        return 1;
+    }
+    return 0;
+}
+
 /** The sorted, deduped file list one run needs a verdict for. */
 function selectedFiles(policy: PurityPolicy): string[] {
     return [...new Set([...policy.pure, ...Object.keys(policy.cqs)])].sort(
-        (left, right) => (left < right ? -1 : left > right ? 1 : 0),
+        compareStrings,
     );
 }
 
