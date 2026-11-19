@@ -112,7 +112,12 @@ const RED_FILES: Record<string, string> = {
         {
             eslint: { disable: true },
             purity: {
-                pureModules: ["lib/pure/**/*.mts", "lib/pure/imports.mts"],
+                pureModules: [
+                    "lib/pure/**/*.mts",
+                    "lib/pure/**/*.tsx",
+                    "lib/pure/**/*.jsx",
+                    "lib/pure/imports.mts",
+                ],
                 commands: [
                     { file: "lib/receipts.mts", name: "saveReceipt" },
                     { file: "lib/receipts.mts", name: "saveExpression" },
@@ -208,6 +213,13 @@ const RED_FILES: Record<string, string> = {
         "export const constant = 1;",
         "",
     ].join("\n"),
+    "lib/pure/view.tsx": [
+        "export function View({ label }: { label: string }) {",
+        "    return <span>{label}</span>;",
+        "}",
+        "",
+    ].join("\n"),
+    "lib/pure/view.jsx": ["export const View = () => <div />;", ""].join("\n"),
     "lib/pure/with space.mts": [
         'import { join } from "node:path";',
         "export const path = join;",
@@ -457,6 +469,8 @@ test(
             assert.equal(byFile("lib/pure/helper.mts").length, 0);
             assert.equal(byFile("lib/pure/wrapper.mts").length, 0);
             // A selector with spaces is real, not a glob accident.
+            assert.equal(byFile("lib/pure/view.tsx").length, 0);
+            assert.equal(byFile("lib/pure/view.jsx").length, 0);
             assert.equal(byFile("lib/pure/with space.mts").length, 1);
             // Inline suppression does not silence the baked rule.
             assert.equal(byFile("lib/pure/suppressed.mts").length, 1);
@@ -487,7 +501,7 @@ test(
             );
             assert.ok(
                 targets.some((error) =>
-                    error.message.includes("only overload signatures"),
+                    error.message.includes("no implemented body"),
                 ),
             );
 

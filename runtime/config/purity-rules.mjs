@@ -295,8 +295,8 @@ function resolveTarget(items, name) {
     if (implementations.length === 0) {
         return {
             error:
-                `"${name}" has only overload signatures and no implemented body; ` +
-                "a declaration without an implementation is never counted as checked",
+                `"${name}" has no implemented body (overload signatures alone do not count); ` +
+                "a declaration is never counted as checked",
             node: matches[0].node,
         };
     }

@@ -62,8 +62,9 @@ are excluded. Put a small adapter outside the selected module and pass its
 result in.
 
 - Erased declarations are allowed: `import type …`, `export type …`, and an
-  import/export whose every specifier is `type` (verified on the pinned
-  TypeScript toolchain, which emits no runtime import for them).
+  import/export whose every specifier is `type`. Oracle-verified on the pinned
+  TypeScript 7.0.2 (2026-11-19): the emitted JavaScript contains no runtime
+  import for any of them.
 - A side-effect-only `import "node:fs"` and an empty `export {} from "node:fs"`
   are runtime edges. TypeScript may elide the latter today; JavaScript does not,
   so the check stays conservative and rejects it.
@@ -136,7 +137,11 @@ void callback can still return a value, and `readonly` is shallow.
 ## Supported grammar
 
 - Top-level `function` declarations and `const`-bound arrow/function
-  expressions, exported or private. `async` is supported.
+  expressions, exported or private. `async` is supported. Binding names are
+  ASCII JavaScript identifiers (`.defined.json` validation).
+- Every advertised extension (`js`, `mjs`, `cjs`, `jsx`, `ts`, `mts`, `cts`,
+  `tsx`) is configured explicitly; JSX/TSX are parsed by the pinned TypeScript
+  parser, never a second syntax path.
 - Overload signatures are resolved to their implemented declaration; a
   signature-only symbol is reported as never checked.
 - Rejected in v1: class/object methods, generators, `let`/`var`-bound
