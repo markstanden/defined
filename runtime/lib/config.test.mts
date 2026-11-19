@@ -905,6 +905,7 @@ test("loadConfig rejects empty or non-array purity lists", async () => {
 });
 
 test("loadConfig rejects absolute, escaping and unsupported purity selectors", async () => {
+    // Arrange
     for (const [selector] of [
         ["/lib/a.ts", "absolute"],
         ["../a.ts", "parent escape"],
@@ -931,6 +932,7 @@ test("loadConfig rejects absolute, escaping and unsupported purity selectors", a
 });
 
 test("loadConfig rejects malformed purity targets", async () => {
+    // Arrange
     const cases: Array<[unknown, RegExp]> = [
         ["lib/b.ts", /"purity\.commands\[0\]" must be an object/u],
         [

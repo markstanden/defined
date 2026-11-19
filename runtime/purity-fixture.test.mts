@@ -404,14 +404,19 @@ test(
     "purity reports every opted-in finding despite a consumer ignore, inline suppression and disabled ESLint",
     { skip: !hasEngine() },
     async () => {
+        // Arrange
         const root = await makeGitRepo(RED_FILES);
         try {
             const before = hashTree(root);
+
+            // Act
             const check = await run({
                 cmd: gateShim(),
                 args: ["--check-only", "--full"],
                 cwd: root,
             });
+
+            // Assert
             assert.equal(
                 check.status,
                 1,
@@ -489,14 +494,16 @@ test(
             // Read-only verify never writes to the checkout.
             assert.deepEqual([...hashTree(root)].sort(), [...before].sort());
 
-            // Repair cannot erase the finding: purity is skipped in the repair
-            // pass and re-judged in the authoritative verification pass.
+            // Act (repair): purity is skipped in the repair pass and re-judged
+            // in the authoritative verification pass.
             const complied = await run({
                 cmd: gateShim(),
                 args: ["--full"],
                 cwd: root,
             });
             const repaired = parseGate(complied.stdout);
+
+            // Assert
             assert.equal(repaired.results.purity, "fail");
             assert.ok(
                 (repaired.errors ?? []).some(
@@ -517,13 +524,16 @@ test(
     "a repaired consumer passes purity while an ordinary ESLint finding still fails the lint step",
     { skip: !hasEngine() },
     async () => {
+        // Arrange
         const root = await makeGitRepo(GREEN_FILES);
         try {
+            // Act
             const check = await run({
                 cmd: gateShim(),
                 args: ["--check-only", "--full"],
                 cwd: root,
             });
+            // Assert
             const gate = parseGate(check.stdout);
             assert.equal(gate.results.purity, "pass");
             assert.equal(gate.results.eslint, "fail");
@@ -551,31 +561,61 @@ test(
     "explain serves the purity step and rule guidance offline from the pinned image",
     { skip: !hasEngine() },
     async () => {
+        // Arrange
         const root = await makeGitRepo({
             ".defined.json": "{}\n",
         });
+        const cases = [
+            ["purity", "step"],
+            ["defined/pure-module", "rule"],
+            ["defined/cqs-command", "rule"],
+        ] as const;
         try {
-            for (const [topic, kind] of [
-                ["purity", "step"],
-                ["defined/pure-module", "rule"],
-                ["defined/cqs-command", "rule"],
-            ] as const) {
+            // Act
+            const answers = [];
+            for (const [topic] of cases) {
                 const explained = await run({
                     cmd: gateShim(),
                     args: ["explain", topic],
                     cwd: root,
                 });
-                assert.equal(explained.status, 0, explained.stderr);
-                const answer = JSON.parse(explained.stdout.trim()) as {
-                    kind: string;
-                    doc: string;
-                    guidance: string;
-                };
-                assert.equal(answer.kind, kind);
-                assert.equal(answer.doc, "standards/node-purity.md");
-                assert.match(answer.guidance, /defined\/pure-module/u);
-                assert.match(answer.guidance, /defined\/cqs-query/u);
+                answers.push({
+                    status: explained.status,
+                    stderr: explained.stderr,
+                    answer: JSON.parse(explained.stdout.trim()) as {
+                        kind: string;
+                        doc: string;
+                        guidance: string;
+                    },
+                });
             }
+
+            // Assert
+            assert.deepEqual(
+                answers.map(({ status, stderr }) =>
+                    status === 0 ? "ok" : stderr,
+                ),
+                ["ok", "ok", "ok"],
+            );
+            assert.deepEqual(
+                answers.map(({ answer }) => answer.kind),
+                ["step", "rule", "rule"],
+            );
+            assert.deepEqual(
+                answers.map(({ answer }) => answer.doc),
+                [
+                    "standards/node-purity.md",
+                    "standards/node-purity.md",
+                    "standards/node-purity.md",
+                ],
+            );
+            assert.ok(
+                answers.every(
+                    ({ answer }) =>
+                        answer.guidance.includes("defined/pure-module") &&
+                        answer.guidance.includes("defined/cqs-query"),
+                ),
+            );
         } finally {
             await rm(root, { recursive: true, force: true });
         }

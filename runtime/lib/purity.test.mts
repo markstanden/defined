@@ -14,92 +14,82 @@ import {
 test("selectorMatches compares an exact path literally", () => {
     // Arrange
     const selector = "lib/system-status.mts";
+    const files = [
+        "lib/system-status.mts",
+        "lib/system-status.mjs",
+        "nested/lib/system-status.mts",
+    ];
 
-    // Act & Assert
-    assert.equal(
-        selectorMatches({ selector, file: "lib/system-status.mts" }),
-        true,
-    );
-    assert.equal(
-        selectorMatches({ selector, file: "lib/system-status.mjs" }),
-        false,
-    );
-    assert.equal(
-        selectorMatches({ selector, file: "nested/lib/system-status.mts" }),
-        false,
-    );
+    // Act
+    const actual = files.map((file) => selectorMatches({ selector, file }));
+
+    // Assert
+    assert.deepEqual(actual, [true, false, false]);
 });
 
 test("selectorMatches treats a single star as one path segment", () => {
     // Arrange
     const selector = "lib/*.ts";
+    const files = ["lib/a.ts", "lib/a/b.ts", "lib/a.mts"];
 
-    // Act & Assert
-    assert.equal(selectorMatches({ selector, file: "lib/a.ts" }), true);
-    assert.equal(selectorMatches({ selector, file: "lib/a/b.ts" }), false);
-    assert.equal(selectorMatches({ selector, file: "lib/a.mts" }), false);
+    // Act
+    const actual = files.map((file) => selectorMatches({ selector, file }));
+
+    // Assert
+    assert.deepEqual(actual, [true, false, false]);
 });
 
 test("selectorMatches lets **/ span zero or more directories", () => {
     // Arrange
     const selector = "lib/derive/**/*.ts";
+    const files = [
+        "lib/derive/receipt.ts",
+        "lib/derive/nested/receipt.ts",
+        "lib/derive/a/b/c/receipt.ts",
+        "lib/other/receipt.ts",
+    ];
 
-    // Act & Assert
-    assert.equal(
-        selectorMatches({ selector, file: "lib/derive/receipt.ts" }),
-        true,
-    );
-    assert.equal(
-        selectorMatches({ selector, file: "lib/derive/nested/receipt.ts" }),
-        true,
-    );
-    assert.equal(
-        selectorMatches({ selector, file: "lib/derive/a/b/c/receipt.ts" }),
-        true,
-    );
-    assert.equal(
-        selectorMatches({ selector, file: "lib/other/receipt.ts" }),
-        false,
-    );
+    // Act
+    const actual = files.map((file) => selectorMatches({ selector, file }));
+
+    // Assert
+    assert.deepEqual(actual, [true, true, true, false]);
 });
 
 test("selectorMatches supports a leading ** and a trailing **", () => {
-    assert.equal(selectorMatches({ selector: "**/*.ts", file: "a.ts" }), true);
-    assert.equal(
-        selectorMatches({ selector: "**/*.ts", file: "x/y/a.ts" }),
-        true,
+    // Arrange
+    const cases: Array<[string, string]> = [
+        ["**/*.ts", "a.ts"],
+        ["**/*.ts", "x/y/a.ts"],
+        ["lib/**", "lib/a/b/c.ts"],
+    ];
+
+    // Act
+    const actual = cases.map(([selector, file]) =>
+        selectorMatches({ selector, file }),
     );
-    assert.equal(
-        selectorMatches({ selector: "lib/**", file: "lib/a/b/c.ts" }),
-        true,
-    );
+
+    // Assert
+    assert.deepEqual(actual, [true, true, true]);
 });
 
 test("selectorMatches supports ? and treats other characters literally", () => {
-    // Act & Assert
-    assert.equal(
-        selectorMatches({ selector: "lib/a?.ts", file: "lib/ab.ts" }),
-        true,
+    // Arrange
+    const cases: Array<[string, string]> = [
+        ["lib/a?.ts", "lib/ab.ts"],
+        ["lib/a?.ts", "lib/a.ts"],
+        ["lib/a[1].ts", "lib/a[1].ts"],
+        ["lib/a(1).ts", "lib/a(1).ts"],
+        ["lib/with space.ts", "lib/with space.ts"],
+    ];
+
+    // Act
+    const actual = cases.map(([selector, file]) =>
+        selectorMatches({ selector, file }),
     );
-    assert.equal(
-        selectorMatches({ selector: "lib/a?.ts", file: "lib/a.ts" }),
-        false,
-    );
-    assert.equal(
-        selectorMatches({ selector: "lib/a[1].ts", file: "lib/a[1].ts" }),
-        true,
-    );
-    assert.equal(
-        selectorMatches({ selector: "lib/a(1).ts", file: "lib/a(1).ts" }),
-        true,
-    );
-    assert.equal(
-        selectorMatches({
-            selector: "lib/with space.ts",
-            file: "lib/with space.ts",
-        }),
-        true,
-    );
+
+    // Assert
+    assert.deepEqual(actual, [true, false, true, true, true]);
 });
 
 test("selectPurityPolicy dedupes overlapping selectors in git order", () => {

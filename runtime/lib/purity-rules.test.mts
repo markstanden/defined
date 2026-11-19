@@ -37,98 +37,106 @@ function member(
 }
 
 test("isBuiltinSpecifier covers bare names, subpaths and the node: namespace", () => {
-    // Act & Assert
-    assert.equal(isBuiltinSpecifier("fs"), true);
-    assert.equal(isBuiltinSpecifier("fs/promises"), true);
-    assert.equal(isBuiltinSpecifier("node:fs/promises"), true);
-    assert.equal(isBuiltinSpecifier("node:path"), true);
-    assert.equal(isBuiltinSpecifier("node:not-a-real-builtin"), true);
-    assert.equal(isBuiltinSpecifier("./fs"), false);
-    assert.equal(isBuiltinSpecifier("lodash"), false);
+    // Arrange
+    const specifiers = [
+        "fs",
+        "fs/promises",
+        "node:fs/promises",
+        "node:path",
+        "node:not-a-real-builtin",
+        "./fs",
+        "lodash",
+    ];
+
+    // Act
+    const actual = specifiers.map((specifier) => isBuiltinSpecifier(specifier));
+
+    // Assert
+    assert.deepEqual(actual, [true, true, true, true, true, false, false]);
 });
 
 test("isTypeOnlyImport accepts erased declarations and rejects mixed or bare imports", () => {
     // Arrange
-    const typeDeclaration = {
-        importKind: "type",
-        specifiers: [{ importKind: "value" }],
-    };
-    const allTypeSpecifiers = {
-        importKind: "value",
-        specifiers: [{ importKind: "type" }, { importKind: "type" }],
-    };
-    const mixed = {
-        importKind: "value",
-        specifiers: [{ importKind: "type" }, { importKind: "value" }],
-    };
-    const sideEffectOnly = { importKind: "value", specifiers: [] };
+    const declarations = [
+        { importKind: "type", specifiers: [{ importKind: "value" }] },
+        {
+            importKind: "value",
+            specifiers: [{ importKind: "type" }, { importKind: "type" }],
+        },
+        {
+            importKind: "value",
+            specifiers: [{ importKind: "type" }, { importKind: "value" }],
+        },
+        { importKind: "value", specifiers: [] },
+    ];
 
-    // Act & Assert
-    assert.equal(isTypeOnlyImport(typeDeclaration as never), true);
-    assert.equal(isTypeOnlyImport(allTypeSpecifiers as never), true);
-    assert.equal(isTypeOnlyImport(mixed as never), false);
-    assert.equal(isTypeOnlyImport(sideEffectOnly as never), false);
+    // Act
+    const actual = declarations.map((node) => isTypeOnlyImport(node as never));
+
+    // Assert
+    assert.deepEqual(actual, [true, true, false, false]);
 });
 
 test("isTypeOnlyExportNamed accepts erased exports and rejects empty or mixed export-from", () => {
     // Arrange
-    const typeExport = { exportKind: "type", specifiers: [] };
-    const allTypeSpecifiers = {
-        exportKind: "value",
-        specifiers: [{ exportKind: "type" }],
-    };
-    const mixed = {
-        exportKind: "value",
-        specifiers: [{ exportKind: "type" }, { exportKind: "value" }],
-    };
-    const emptyExportFrom = { exportKind: "value", specifiers: [] };
+    const declarations = [
+        { exportKind: "type", specifiers: [] },
+        { exportKind: "value", specifiers: [{ exportKind: "type" }] },
+        {
+            exportKind: "value",
+            specifiers: [{ exportKind: "type" }, { exportKind: "value" }],
+        },
+        { exportKind: "value", specifiers: [] },
+    ];
 
-    // Act & Assert
-    assert.equal(isTypeOnlyExportNamed(typeExport as never), true);
-    assert.equal(isTypeOnlyExportNamed(allTypeSpecifiers as never), true);
-    assert.equal(isTypeOnlyExportNamed(mixed as never), false);
-    assert.equal(isTypeOnlyExportNamed(emptyExportFrom as never), false);
+    // Act
+    const actual = declarations.map((node) =>
+        isTypeOnlyExportNamed(node as never),
+    );
+
+    // Assert
+    assert.deepEqual(actual, [true, true, false, false]);
 });
 
 test("isTypeOnlyExportAll reads only the export kind", () => {
-    assert.equal(isTypeOnlyExportAll({ exportKind: "type" } as never), true);
-    assert.equal(isTypeOnlyExportAll({ exportKind: "value" } as never), false);
+    // Act
+    const actual = [
+        isTypeOnlyExportAll({ exportKind: "type" } as never),
+        isTypeOnlyExportAll({ exportKind: "value" } as never),
+    ];
+
+    // Assert
+    assert.deepEqual(actual, [true, false]);
 });
 
 test("staticMemberKey reads a dotted name or a literal computed key only", () => {
-    // Act & Assert
-    assert.equal(
+    // Act
+    const actual = [
         staticMemberKey(member(identifier("a"), identifier("b"))),
-        "b",
-    );
-    assert.equal(
         staticMemberKey(member(identifier("a"), literal("b"), true)),
-        "b",
-    );
-    assert.equal(
         staticMemberKey(member(identifier("a"), identifier("key"), true)),
-        null,
-    );
+    ];
+
+    // Assert
+    assert.deepEqual(actual, ["b", "b", null]);
 });
 
 test("memberPath resolves nested static keys and gives up on a dynamic link", () => {
     // Arrange
-    const path = memberPath(
-        member(
-            member(identifier("globalThis"), identifier("Math")),
-            identifier("random"),
-        ),
+    const nested = member(
+        member(identifier("globalThis"), identifier("Math")),
+        identifier("random"),
     );
-    const dynamic = memberPath(
-        member(identifier("globalThis"), identifier("name"), true),
-    );
+    const dynamic = member(identifier("globalThis"), identifier("name"), true);
 
-    // Act & Assert
-    assert.deepEqual(path, {
-        base: identifier("globalThis"),
-        keys: ["Math", "random"],
-    });
-    assert.equal(dynamic, null);
+    // Act
+    const actual = [memberPath(nested), memberPath(dynamic)];
+
+    // Assert
+    assert.deepEqual(actual, [
+        { base: identifier("globalThis"), keys: ["Math", "random"] },
+        null,
+    ]);
 });
 
 test("rootIdentifier walks a member chain through TypeScript wrappers", () => {
@@ -138,9 +146,14 @@ test("rootIdentifier walks a member chain through TypeScript wrappers", () => {
         expression: member(identifier("state"), identifier("count")),
     };
 
-    // Act & Assert
-    assert.equal(rootIdentifier(wrapped as never)?.name, "state");
-    assert.equal(rootIdentifier(literal(1) as never), null);
+    // Act
+    const actual = [
+        rootIdentifier(wrapped as never),
+        rootIdentifier(literal(1) as never),
+    ];
+
+    // Assert
+    assert.deepEqual(actual, [identifier("state"), null]);
 });
 
 test("isVoidExpression sees through TS wrappers and rejects other expressions", () => {
@@ -154,16 +167,18 @@ test("isVoidExpression sees through TS wrappers and rejects other expressions", 
         },
     };
 
-    // Act & Assert
-    assert.equal(isVoidExpression(voidCall as never), true);
-    assert.equal(
+    // Act
+    const actual = [
+        isVoidExpression(voidCall as never),
         isVoidExpression({
             type: "UnaryExpression",
             operator: "typeof",
         } as never),
-        false,
-    );
-    assert.equal(isVoidExpression(identifier("undefined") as never), false);
+        isVoidExpression(identifier("undefined") as never),
+    ];
+
+    // Assert
+    assert.deepEqual(actual, [true, false, false]);
 });
 
 test("isUndefinedIdentifier sees through TS wrappers", () => {
@@ -173,7 +188,12 @@ test("isUndefinedIdentifier sees through TS wrappers", () => {
         expression: identifier("undefined"),
     };
 
-    // Act & Assert
-    assert.equal(isUndefinedIdentifier(wrapped as never), true);
-    assert.equal(isUndefinedIdentifier(identifier("null") as never), false);
+    // Act
+    const actual = [
+        isUndefinedIdentifier(wrapped as never),
+        isUndefinedIdentifier(identifier("null") as never),
+    ];
+
+    // Assert
+    assert.deepEqual(actual, [true, false]);
 });

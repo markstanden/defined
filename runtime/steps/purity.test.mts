@@ -331,39 +331,48 @@ test("purity rejects a missing verdict for a selected file", async () => {
     assert.match(result.notice ?? "", /no eslint verdict for "lib\/b\.ts"/u);
 });
 
-test("purity rejects unreadable JSON and a crash status", async () => {
+test("purity rejects unreadable JSON", async () => {
     // Arrange
     const dir = await makeRepo({ purity: { pureModules: ["lib/a.ts"] } });
 
-    // Act & Assert
-    const garbled = await runPurityStep({
+    // Act
+    const result = await runPurityStep({
         ctx: { mode: "no-fix", repoRoot: dir },
         trackedFiles: ["lib/a.ts"],
         runner: recordingRunner({
             eslint: { status: 0, stdout: "not json" },
         }).runner,
     });
-    assert.equal(garbled.status, "error");
-    assert.match(garbled.notice ?? "", /unreadable eslint JSON/u);
 
-    // Act & Assert
-    const crashed = await runPurityStep({
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(result.notice ?? "", /unreadable eslint JSON/u);
+});
+
+test("purity rejects a crashed ESLint status", async () => {
+    // Arrange
+    const dir = await makeRepo({ purity: { pureModules: ["lib/a.ts"] } });
+
+    // Act
+    const result = await runPurityStep({
         ctx: { mode: "no-fix", repoRoot: dir },
         trackedFiles: ["lib/a.ts"],
         runner: recordingRunner({
             eslint: { status: 2, stderr: "boom" },
         }).runner,
     });
-    assert.equal(crashed.status, "error");
-    assert.match(crashed.notice ?? "", /eslint failed: boom/u);
+
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(result.notice ?? "", /eslint failed: boom/u);
 });
 
-test("purity rejects exit 1 with no parsed findings and unexpected rule ids", async () => {
+test("purity rejects exit 1 with no parsed findings", async () => {
     // Arrange
     const dir = await makeRepo({ purity: { pureModules: ["lib/a.ts"] } });
 
-    // Act & Assert
-    const empty = await runPurityStep({
+    // Act
+    const result = await runPurityStep({
         ctx: { mode: "no-fix", repoRoot: dir },
         trackedFiles: ["lib/a.ts"],
         runner: recordingRunner({
@@ -377,11 +386,18 @@ test("purity rejects exit 1 with no parsed findings and unexpected rule ids", as
             },
         }).runner,
     });
-    assert.equal(empty.status, "error");
-    assert.match(empty.notice ?? "", /failed without findings/u);
 
-    // Act & Assert
-    const unexpected = await runPurityStep({
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(result.notice ?? "", /failed without findings/u);
+});
+
+test("purity rejects an unexpected ESLint rule id", async () => {
+    // Arrange
+    const dir = await makeRepo({ purity: { pureModules: ["lib/a.ts"] } });
+
+    // Act
+    const result = await runPurityStep({
         ctx: { mode: "no-fix", repoRoot: dir },
         trackedFiles: ["lib/a.ts"],
         runner: recordingRunner({
@@ -406,8 +422,10 @@ test("purity rejects exit 1 with no parsed findings and unexpected rule ids", as
             },
         }).runner,
     });
-    assert.equal(unexpected.status, "error");
-    assert.match(unexpected.notice ?? "", /unexpected eslint message/u);
+
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(result.notice ?? "", /unexpected eslint message/u);
 });
 
 test("purity reports a missing eslint binary as an execution error", async () => {
@@ -444,23 +462,31 @@ test("purity re-reads the policy every run and never replays a stale verdict", a
         },
     });
 
+    const runBoth = async (): Promise<{
+        first: Awaited<ReturnType<typeof runPurityStep>>;
+        second: Awaited<ReturnType<typeof runPurityStep>>;
+    }> => {
+        const first = await runPurityStep({
+            ctx: { mode: "no-fix", repoRoot: dir },
+            trackedFiles: ["lib/a.ts"],
+            runner,
+        });
+        await writeFile(
+            `${dir}/.defined.json`,
+            JSON.stringify({
+                purity: { commands: [{ file: "lib/a.ts", name: "save" }] },
+            }),
+        );
+        const second = await runPurityStep({
+            ctx: { mode: "no-fix", repoRoot: dir },
+            trackedFiles: ["lib/a.ts"],
+            runner,
+        });
+        return { first, second };
+    };
+
     // Act
-    const first = await runPurityStep({
-        ctx: { mode: "no-fix", repoRoot: dir },
-        trackedFiles: ["lib/a.ts"],
-        runner,
-    });
-    await writeFile(
-        `${dir}/.defined.json`,
-        JSON.stringify({
-            purity: { commands: [{ file: "lib/a.ts", name: "save" }] },
-        }),
-    );
-    const second = await runPurityStep({
-        ctx: { mode: "no-fix", repoRoot: dir },
-        trackedFiles: ["lib/a.ts"],
-        runner,
-    });
+    const { first, second } = await runBoth();
 
     // Assert
     assert.equal(first.status, "pass");
