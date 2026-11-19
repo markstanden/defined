@@ -4,5 +4,8 @@
             "command": "mkdir -p coverage && node --test --experimental-test-coverage --test-coverage-include-all --test-coverage-exclude='**/*.test.mts' --test-coverage-exclude='**/test-helpers.mts' --test-coverage-exclude='**/fixture.mts' --test-coverage-exclude='runtime/config/**' --test-reporter=lcov --test-reporter-destination=coverage/lcov.info 'cli/*.test.mts' 'lib/*.test.mts' 'runtime/**/*.test.mts'",
             "minimums": { "line": 90, "branch": 90 }
         }
+    },
+    "purity": {
+        "pureModules": ["runtime/lib/severities.mts"]
     }
 }

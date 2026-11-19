@@ -258,3 +258,46 @@ test("renderExplanation_isOneCompactJsonLine", async () => {
     assert.equal(line.includes("\n"), false, "single line");
     assert.deepEqual(JSON.parse(line), e);
 });
+
+test("explainTopic_purityRules_routeToThePurityDoc", async () => {
+    // Arrange
+    const topics = [
+        "defined/pure-module",
+        "defined/cqs-command",
+        "defined/cqs-query",
+        "defined/cqs-targets",
+    ];
+
+    // Act
+    const explanations = await Promise.all(
+        topics.map((topic) =>
+            explainTopic({ topic, repoRoot: "/repo", deps: fakeDeps() }),
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        explanations.map((explanation) => [explanation.kind, explanation.doc]),
+        topics.map(() => ["rule", "standards/node-purity.md"]),
+    );
+});
+
+test("explainTopic_purityOwner_isConsumerWhenDeclaredAndNotApplicableOtherwise", async () => {
+    // Arrange
+    const declared = fakeDeps({
+        config: {
+            version: "",
+            purity: { pureModules: ["lib/a.ts"] },
+        } as DefinedConfig,
+    });
+
+    // Act
+    const [undeclaredExplanation, declaredExplanation] = await Promise.all([
+        explainTopic({ topic: "purity", repoRoot: "/repo", deps: fakeDeps() }),
+        explainTopic({ topic: "purity", repoRoot: "/repo", deps: declared }),
+    ]);
+
+    // Assert
+    assert.equal(undeclaredExplanation.owner.side, "n/a");
+    assert.equal(declaredExplanation.owner.side, "consumer");
+});

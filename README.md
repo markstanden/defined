@@ -194,16 +194,17 @@ and offline mode avoids podman's pasta backend, which fails on hosts without the
 the image must already be present locally.
 
 The gate detects the stack (steps are named in the order `naming → node-deps →
-node → eslint → node-checks → node-coverage → dotnet → dotnet-coverage → shell
-→ smoke → yaml → workflow → tofu`; in the no-fix pass independent steps may run
-concurrently), skips cleanly when an ecosystem is absent, and fails loudly
-when a pinned tool is missing. `verify` never writes to the repo, so its
-write-capable steps — `node-deps`, `node`, `node-checks`, `node-coverage`, the
-`dotnet` family and `tofu` — work in a scratch copy of the git scope under the
-container's `/tmp` (a read-only mount cannot host `node_modules/`, `obj/`/`bin/`
-or `.terraform/`), and the repo checkout is never touched. `comply` is
-write-capable, so its coverage step instead generates the report in the repo
-(`coverage/lcov.info`), where a scanner such as SonarQube reads it. Tool versions are pinned in
+node → eslint → purity → node-checks → node-coverage → dotnet →
+dotnet-coverage → shell → smoke → yaml → workflow → tofu`; in the no-fix pass
+independent steps may run concurrently), skips cleanly when an ecosystem is
+absent, and fails loudly when a pinned tool is missing. `verify` never writes to
+the repo, so its write-capable steps — `node-deps`, `node`, `node-checks`,
+`node-coverage`, the `dotnet` family and `tofu` — work in a scratch copy of the
+git scope under the container's `/tmp` (a read-only mount cannot host
+`node_modules/`, `obj/`/`bin/` or `.terraform/`), and the repo checkout is never
+touched. `comply` is write-capable, so its coverage step instead generates the
+report in the repo (`coverage/lcov.info`), where a scanner such as SonarQube
+reads it. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 
@@ -224,9 +225,10 @@ defined explain complexity
 `explain` answers "what does this check mean?" from the house guidance **inside
 the pinned image** — no network, no repo writes — so the answer always matches
 the revision actually gating you (upstream `main` may be newer). It takes one
-topic, a **step id** (`naming`, `eslint`, `yaml`, … the ids in `results`) or a
-**rule id** (shellcheck `SC…`, a yamllint rule name, or an eslint rule such as
-`complexity` / `regexp/*` / `jsdoc/*`), and prints one compact JSON object:
+topic, a **step id** (`naming`, `eslint`, `purity`, `yaml`, … the ids in
+`results`) or a **rule id** (shellcheck `SC…`, a yamllint rule name, or an eslint
+rule such as `complexity` / `regexp/*` / `jsdoc/*`, or a purity rule such as
+`defined/pure-module` / `defined/cqs-query`), and prints one compact JSON object:
 
 ```json
 {
@@ -358,9 +360,35 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     repo-owned `eslint.config.*` at the root is already run by the ESLint step
     itself.
 
-    On a host that cannot run the managed GitHub workflow (Azure DevOps,
-    GitLab, a private server), switch off its installation and check — local
-    `comply` still runs every in-container step:
+    Opt into purity and command/query contracts with the top-level `purity`
+    object. Each list works alone; omission opts out. `pureModules` are positive
+    repo-relative paths or globs, and CQS targets name an exact file plus a
+    top-level binding:
+
+    ```jsonc
+    "purity": {
+        "pureModules": ["lib/system-status.mts", "lib/derive/**/*.ts"],
+        "commands": [{ "file": "lib/receipts.mts", "name": "saveReceipt" }],
+        "queries": [{ "file": "lib/receipts.mts", "name": "readReceipt" }]
+    }
+    ```
+
+    The check is independent of the ESLint step: it runs with the baked parser
+    even when `eslint.disable` is true, and a repo-owned config, its `ignores`,
+    inline disable comments and restored dependencies cannot suppress it. A
+    useful failure reads `lib/system-status.mts:14 imports "node:fs/promises".
+ Move the Node built-in use to the caller and pass its contents or result
+ into the calculation.` The remedy is the point: a pure module takes its
+    input as a parameter; a command writes and returns nothing; a query reads
+    and returns without writing. Supported declarations are top-level functions
+    and `const` arrows/function expressions; methods, generators and overload
+    signatures without an implementation are reported, never skipped. Rules:
+    `defined/pure-module`, `defined/cqs-command`, `defined/cqs-query`,
+    `defined/cqs-targets`. Full table and limits:
+    [`standards/node-purity.md`](standards/node-purity.md). `purity` is uncached
+    in v1, so a policy or source change cannot replay a stale green.
+
+    On a host that cannot run the managed GitHub workflow (Azure DevOps, GitLab, a private server), switch off its installation and check — local `comply` still runs every in-container step:
 
     ```jsonc
     "workflow": { "disable": true }
@@ -593,6 +621,7 @@ image tag and `defined update latest` always resolves to a pullable SHA.
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)
 - [`standards/node-eslint.md`](standards/node-eslint.md) — the house ESLint step: what it owns, how to override, the v1→v2 growth plan
+- [`standards/node-purity.md`](standards/node-purity.md) — the opt-in purity/CQS step: rule and exception table, supported grammar and limits
 - [`standards/documentation.md`](standards/documentation.md) — the API-documentation doctrine and the durable knowledge-doc convention
 - [`practices/architecture.md`](practices/architecture.md) — delivery, structure, code and working-style preferences
 - [`standards/.editorconfig`](standards/.editorconfig) — editor + dotnet code style (installed by gate setup)

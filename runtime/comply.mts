@@ -19,7 +19,7 @@
 //
 // Named comply.mts because it owns the `comply` verb — the always-use loop;
 // `verify` shares the orchestrator. Steps are named in fixed order (naming →
-// node-deps → node → eslint → node-checks → node-coverage → dotnet →
+// node-deps → node → eslint → purity → node-checks → node-coverage → dotnet →
 // dotnet-coverage → shell → smoke → yaml → workflow → tofu). Repair runs
 // strictly sequentially; verification runs with bounded concurrency over the
 // declared dependency edges and shared-resource locks (#70) — results stay
@@ -52,6 +52,7 @@ import { runNodeChecksStep } from "./steps/node-checks.mts";
 import { runNodeDepsStep } from "./steps/node-deps.mts";
 import { runNodeStep } from "./steps/node.mts";
 import { runNodeCoverageStep } from "./steps/node-coverage.mts";
+import { runPurityStep } from "./steps/purity.mts";
 import { runShellStep } from "./steps/shell.mts";
 import { runTofuStep } from "./steps/tofu.mts";
 import { runWorkflowStep } from "./steps/workflow.mts";
@@ -196,6 +197,18 @@ const STEPS: Step[] = [
         run: ({ mode, repoRoot, files, scratch, runner, cacheDir, notify }) =>
             runEslintStep({
                 ctx: { mode, repoRoot, scratch, cacheDir, notify },
+                trackedFiles: files,
+                runner,
+            }),
+    },
+    {
+        // Read-only and image-owned: no dependency on node-deps, no consumer
+        // ESLint config, no cache. Fix mode skips it (a policy check is not a
+        // repair), so comply's verification pass is the only judge.
+        id: "purity",
+        run: ({ mode, repoRoot, files, runner }) =>
+            runPurityStep({
+                ctx: { mode, repoRoot },
                 trackedFiles: files,
                 runner,
             }),

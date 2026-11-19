@@ -56,6 +56,7 @@ export const STEP_IDS: readonly string[] = [
     "node-deps",
     "node",
     "eslint",
+    "purity",
     "node-checks",
     "node-coverage",
     "dotnet",
@@ -119,6 +120,19 @@ function eslintOwner(ctx: OwnerContext): Owner {
     return { side: "house", detail: "runtime/config/eslint.config.mjs" };
 }
 
+/**
+ * Purity ownership: the image owns the rules and the pinned parser, while the
+ * selection itself is the consumer's opt-in `.defined.json purity` object.
+ */
+function purityOwner(ctx: OwnerContext): Owner {
+    return ctx.config.purity !== undefined
+        ? { side: "consumer", detail: ".defined.json purity" }
+        : {
+              side: "n/a",
+              detail: "skips unless .defined.json declares purity",
+          };
+}
+
 const STEP_ENTRIES: Record<string, TopicEntry> = {
     naming: {
         kind: "step",
@@ -139,6 +153,12 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
         owner: house("runtime/config/prettier.config.mjs"),
     },
     eslint: { kind: "step", docRel: "node-eslint.md", owner: eslintOwner },
+    purity: {
+        kind: "step",
+        docRel: "node-purity.md",
+        notice: "opt-in pure modules and command/query contracts from .defined.json purity",
+        owner: purityOwner,
+    },
     "node-checks": {
         kind: "step",
         docRel: "testing/node-testing.md",
@@ -254,6 +274,8 @@ const YAMLLINT_RULES = new Set([
 const SHELLCHECK_RE = /^SC\d{3,4}$/u;
 const REGEXP_RE = /^regexp\/.+$/u;
 const JSDOC_RE = /^jsdoc\/.+$/u;
+const PURITY_RULE_RE =
+    /^defined\/(?:pure-module|cqs-command|cqs-query|cqs-targets)$/u;
 
 const RULE_ENTRIES: Record<string, TopicEntry> = {
     shellcheck: {
@@ -273,6 +295,11 @@ const RULE_ENTRIES: Record<string, TopicEntry> = {
         kind: "rule",
         docRel: "naming/typescript.md",
         owner: eslintOwner,
+    },
+    purity: {
+        kind: "rule",
+        docRel: "node-purity.md",
+        owner: purityOwner,
     },
 };
 
@@ -299,6 +326,9 @@ function resolveTopic(
     if (JSDOC_RE.test(topic)) {
         return { topic, entry: RULE_ENTRIES.jsdoc! };
     }
+    if (PURITY_RULE_RE.test(topic)) {
+        return { topic, entry: RULE_ENTRIES.purity! };
+    }
     if (topic === "@typescript-eslint/naming-convention") {
         return { topic, entry: RULE_ENTRIES["naming-convention"]! };
     }
@@ -312,7 +342,8 @@ function unknownTopic(raw: string): Error {
             "known rules: shellcheck SC<code>, yamllint rules " +
             "(line-length, document-start, truthy, comments, …), eslint " +
             "complexity, regexp/<rule>, jsdoc/<rule>, " +
-            "@typescript-eslint/naming-convention",
+            "@typescript-eslint/naming-convention, defined/pure-module, " +
+            "defined/cqs-command, defined/cqs-query, defined/cqs-targets",
     );
 }
 
