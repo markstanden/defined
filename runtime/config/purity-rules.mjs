@@ -594,14 +594,25 @@ export const pureModuleRule = {
                 }
             },
             ["NewExpression"]: (node) => {
+                if (node.arguments.length !== 0) {
+                    return;
+                }
                 const callee = unwrap(node.callee);
-                if (callee?.type !== "Identifier" || callee.name !== "Date") {
+                if (callee?.type === "Identifier") {
+                    if (callee.name === "Date" && ambient(callee)) {
+                        report(node, clockMessage("new Date()"));
+                    }
                     return;
                 }
-                if (!ambient(callee) || node.arguments.length !== 0) {
-                    return;
+                const path = memberPath(callee);
+                if (
+                    path?.base.name === "globalThis" &&
+                    ambient(path.base) &&
+                    path.keys.length === 1 &&
+                    path.keys[0] === "Date"
+                ) {
+                    report(node, clockMessage("new Date()"));
                 }
-                report(node, clockMessage("new Date()"));
             },
             ["Identifier"]: (node) => {
                 if (!AMBIENT_GLOBALS.has(node.name) || !ambient(node)) {

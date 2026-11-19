@@ -170,6 +170,8 @@ const RED_FILES: Record<string, string> = {
         'export function viaKey() { return globalThis["console"]; }',
         "export function globalNow() { return globalThis.Date.now(); }",
         'export function globalRandom() { return globalThis["Math"]["random"](); }',
+        "export function globalCall() { return globalThis.Date(); }",
+        "export function globalNew() { return new globalThis.Date(); }",
         "",
     ].join("\n"),
     "lib/pure/shadow.mts": [
@@ -272,6 +274,10 @@ const RED_FILES: Record<string, string> = {
         "    return state.count;",
         "}",
         "",
+        "function privateSave(input: string): void {",
+        "    cache = input.length;",
+        "}",
+        "",
         "export const readPersisted = (): number => cache;",
         "",
         "export function readDerived(input: number): number {",
@@ -322,6 +328,12 @@ const GREEN_FILES: Record<string, string> = {
                 commands: [
                     { file: "lib/receipts.mts", name: "saveReceipt" },
                     { file: "lib/receipts.mts", name: "saveWithCallback" },
+                    {
+                        file: "lib/receipts.mts",
+                        name: "saveFunctionExpression",
+                    },
+                    { file: "lib/receipts.mts", name: "saveImplemented" },
+                    { file: "lib/receipts.mts", name: "privateSave" },
                 ],
                 queries: [
                     { file: "lib/receipts.mts", name: "readPersisted" },
@@ -356,6 +368,22 @@ const GREEN_FILES: Record<string, string> = {
         "",
         "export function saveWithCallback(): void {",
         "    [1, 2].map((value) => value * 2);",
+        "}",
+        "",
+        "export const saveFunctionExpression = function (",
+        "    input: string,",
+        "): void {",
+        "    cache = input.length;",
+        "};",
+        "",
+        "export function saveImplemented(value: string): void;",
+        "export function saveImplemented(value: number): void;",
+        "export function saveImplemented(value: string | number): void {",
+        "    cache = String(value).length;",
+        "}",
+        "",
+        "function privateSave(input: string): void {",
+        "    cache = input.length;",
         "}",
         "",
         "export const readPersisted = (): number => cache;",
@@ -414,7 +442,7 @@ test(
             );
 
             // Ambient effects, including globalThis and literal keys.
-            assert.equal(byFile("lib/pure/ambient.mts").length, 15);
+            assert.equal(byFile("lib/pure/ambient.mts").length, 17);
             // Direct parameter writes only: a local accumulator is clean.
             assert.equal(byFile("lib/pure/mutate.mts").length, 3);
             // The documented limits stay green: aliases and injected effects.
