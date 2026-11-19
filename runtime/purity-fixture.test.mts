@@ -61,6 +61,11 @@ function hashTree(root: string): Map<string, string> {
     const hashes = new Map<string, string>();
     const walk = (dir: string): void => {
         for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            // `.git` is not the checkout: a read-only gate may still let git
+            // refresh its index stat cache, which is not a source write.
+            if (entry.name === ".git") {
+                continue;
+            }
             const full = join(dir, entry.name);
             if (entry.isDirectory()) {
                 walk(full);
