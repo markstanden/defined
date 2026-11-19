@@ -769,3 +769,226 @@ test("loadConfig rejects dotnet.disable combined with coverage.dotnet", async ()
         re: /"dotnet\.disable" cannot be combined with "coverage\.dotnet"/u,
     });
 });
+
+const PURITY_JS_TS =
+    "a repo-relative JS/TS file (.js, .mjs, .cjs, .jsx, .ts, .mts, .cts, .tsx)";
+
+test("loadConfig parses a purity policy with every list", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    const purity = {
+        pureModules: ["lib/system-status.mts", "lib/derive/**/*.ts"],
+        commands: [{ file: "lib/receipts.mts", name: "saveReceipt" }],
+        queries: [{ file: "lib/receipts.mts", name: "readReceipt" }],
+    };
+    await writeConfig(dir, JSON.stringify({ purity }));
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.purity, purity);
+});
+
+test("loadConfig parses each purity list on its own", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({ purity: { queries: [{ file: "q.ts", name: "read" }] } }),
+    );
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.purity, {
+        queries: [{ file: "q.ts", name: "read" }],
+    });
+    assert.equal(config.purity?.pureModules, undefined);
+    assert.equal(config.purity?.commands, undefined);
+});
+
+test("loadConfig treats an empty purity object as opted out", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ purity: {} }));
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.equal(config.purity, undefined);
+});
+
+test("loadConfig normalises a leading ./ on purity selectors and target files", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({
+            purity: {
+                pureModules: ["./lib/a.ts"],
+                commands: [{ file: "./lib/b.ts", name: "save" }],
+            },
+        }),
+    );
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.purity?.pureModules, ["lib/a.ts"]);
+    assert.deepEqual(config.purity?.commands, [
+        { file: "lib/b.ts", name: "save" },
+    ]);
+});
+
+test("loadConfig dedupes repeated purity targets and selectors", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({
+            purity: {
+                pureModules: ["lib/a.ts", "lib/a.ts"],
+                commands: [
+                    { file: "lib/b.ts", name: "save" },
+                    { file: "lib/b.ts", name: "save" },
+                ],
+            },
+        }),
+    );
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.purity?.pureModules, ["lib/a.ts"]);
+    assert.deepEqual(config.purity?.commands, [
+        { file: "lib/b.ts", name: "save" },
+    ]);
+});
+
+test("loadConfig rejects unknown purity keys and non-object purity", async () => {
+    // Act & Assert
+    await assertLoadRejects({
+        dir: await makeTempDir("quality-config-"),
+        config: { purity: [] },
+        re: /"purity" must be an object/u,
+    });
+
+    // Act & Assert
+    await assertLoadRejects({
+        dir: await makeTempDir("quality-config-"),
+        config: { purity: { modules: ["lib/a.ts"] } },
+        re: /unknown purity key "modules"/u,
+    });
+});
+
+test("loadConfig rejects empty or non-array purity lists", async () => {
+    // Act & Assert
+    await assertLoadRejects({
+        dir: await makeTempDir("quality-config-"),
+        config: { purity: { pureModules: [] } },
+        re: /"purity\.pureModules" must be a non-empty array/u,
+    });
+
+    // Act & Assert
+    await assertLoadRejects({
+        dir: await makeTempDir("quality-config-"),
+        config: { purity: { commands: "lib/b.ts" } },
+        re: /"purity\.commands" must be a non-empty array/u,
+    });
+});
+
+test("loadConfig rejects absolute, escaping and unsupported purity selectors", async () => {
+    for (const [selector, label] of [
+        ["/lib/a.ts", "absolute"],
+        ["../a.ts", "parent escape"],
+        ["lib/../../a.ts", "nested escape"],
+        ["lib\\a.ts", "backslash"],
+        ["lib/", "trailing slash"],
+        ["lib//a.ts", "empty segment"],
+    ] as const) {
+        // Act & Assert
+        await assertLoadRejects({
+            dir: await makeTempDir("quality-config-"),
+            config: { purity: { pureModules: [selector] } },
+            re: /"purity\.pureModules\[0\]" must be a repo-relative path or glob/u,
+        });
+    }
+    for (const selector of ["", "   "]) {
+        // Act & Assert
+        await assertLoadRejects({
+            dir: await makeTempDir("quality-config-"),
+            config: { purity: { pureModules: [selector] } },
+            re: /"purity\.pureModules\[0\]" must be a non-empty string/u,
+        });
+    }
+});
+
+test("loadConfig rejects malformed purity targets", async () => {
+    const cases: Array<[unknown, RegExp]> = [
+        ["lib/b.ts", /"purity\.commands\[0\]" must be an object/u],
+        [
+            { file: "lib/b.ts", name: "save", role: "command" },
+            /unknown purity\.commands\[0\] key "role"/u,
+        ],
+        [
+            { file: "", name: "save" },
+            /"purity\.commands\[0\]\.file" must be a non-empty string/u,
+        ],
+        [
+            { file: "/lib/b.ts", name: "save" },
+            new RegExp(
+                `"purity\\.commands\\[0\\]\\.file" must be ${PURITY_JS_TS.replace(/[.()]/gu, "\\$&")}`,
+                "u",
+            ),
+        ],
+        [
+            { file: "lib/../b.ts", name: "save" },
+            new RegExp(
+                `"purity\\.commands\\[0\\]\\.file" must be ${PURITY_JS_TS.replace(/[.()]/gu, "\\$&")}`,
+                "u",
+            ),
+        ],
+        [
+            { file: "lib/b.py", name: "save" },
+            new RegExp(
+                `"purity\\.commands\\[0\\]\\.file" must be ${PURITY_JS_TS.replace(/[.()]/gu, "\\$&")}`,
+                "u",
+            ),
+        ],
+        [
+            { file: "lib/b.ts", name: "not a name" },
+            /"purity\.commands\[0\]\.name" must be a JS identifier/u,
+        ],
+        [
+            { file: "lib/b.ts", name: 42 },
+            /"purity\.commands\[0\]\.name" must be a JS identifier/u,
+        ],
+    ];
+    for (const [entry, re] of cases) {
+        // Act & Assert
+        await assertLoadRejects({
+            dir: await makeTempDir("quality-config-"),
+            config: { purity: { commands: [entry] } },
+            re,
+        });
+    }
+});
+
+test("loadConfig rejects one symbol declared as both a command and a query", async () => {
+    // Act & Assert
+    await assertLoadRejects({
+        dir: await makeTempDir("quality-config-"),
+        config: {
+            purity: {
+                commands: [{ file: "lib/receipts.mts", name: "saveReceipt" }],
+                queries: [{ file: "lib/receipts.mts", name: "saveReceipt" }],
+            },
+        },
+        re: /"saveReceipt" in "lib\/receipts\.mts" is declared as both a command and a query/u,
+    });
+});

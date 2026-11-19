@@ -46,6 +46,7 @@ import { loadConfig, type DefinedConfig } from "../lib/config.mts";
 import { hasConsumerEslintConfig } from "../lib/eslint-config.mts";
 import { removeExample, writeExample } from "../lib/eslint-example.mts";
 import { runWithLocalBin } from "../lib/node-packages.mts";
+import { filterJsTsFiles, JS_TS_EXTENSIONS } from "../lib/js-files.mts";
 import {
     createFileCache,
     hashFile,
@@ -71,16 +72,7 @@ export interface EslintRunContext {
 type Runner = typeof run;
 
 /** Extensions the house config lints; mirrors LINT_FILES in that config. */
-export const ESLINT_EXTENSIONS = [
-    "js",
-    "mjs",
-    "cjs",
-    "jsx",
-    "ts",
-    "mts",
-    "cts",
-    "tsx",
-] as const;
+export const ESLINT_EXTENSIONS = JS_TS_EXTENSIONS;
 
 /** Which config a pass runs: the baked house default or the repo's own. */
 type ConfigKind = "house" | "repo";
@@ -90,19 +82,13 @@ const KIND_LABEL: Record<ConfigKind, string> = {
     repo: "repo config",
 };
 
-/** Keep only the tracked files ESLint can parse (the house config's set). */ export function filterEslintFiles({
+/** Keep only the tracked files ESLint can parse (the house config's set). */
+export function filterEslintFiles({
     files,
 }: {
     files: string[];
 }): string[] {
-    return files.filter((file) => {
-        const dot = file.lastIndexOf(".");
-        if (dot === -1) {
-            return false;
-        }
-        const ext = file.slice(dot + 1);
-        return (ESLINT_EXTENSIONS as readonly string[]).includes(ext);
-    });
+    return filterJsTsFiles({ files });
 }
 
 /**

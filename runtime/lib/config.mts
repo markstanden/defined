@@ -21,6 +21,8 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { hasJsTsExtension } from "./js-files.mts";
+
 const CONFIG_FILE = ".defined.json";
 
 export interface CoverageMinimums {
@@ -148,6 +150,28 @@ export interface DotnetConfig {
     disable?: boolean;
 }
 
+/** One declared command or query implementation. */
+export interface PurityTarget {
+    /** Exact repo-relative file path (no glob). */
+    file: string;
+    /** Top-level local binding name of the implementation. */
+    name: string;
+}
+
+/** Consumer purity/CQS policy (`.defined.json` `purity` key). */
+export interface PurityConfig {
+    /**
+     * Positive repo-relative file paths or globs (`*`, `**`, `?`) whose
+     * runtime imports, loaders, ambient effects and parameter writes are
+     * rejected. Absent = no pure modules.
+     */
+    pureModules?: string[];
+    /** Functions that must not return a value. Absent = none. */
+    commands?: PurityTarget[];
+    /** Functions that must not write observable state. Absent = none. */
+    queries?: PurityTarget[];
+}
+
 export interface DefinedConfig {
     /**
      * Immutable image tag (7–40 hex chars). Empty when omitted — the launcher
@@ -173,6 +197,8 @@ export interface DefinedConfig {
     workflow?: WorkflowConfig;
     /** .NET switch. Absent key = the dotnet steps run when .NET is detected. */
     dotnet?: DotnetConfig;
+    /** Purity/CQS policy. Absent key = the purity step skips. */
+    purity?: PurityConfig;
 }
 
 /** Empty config: all coverage steps skip, version is empty. */
@@ -603,6 +629,148 @@ function validateDotnet(raw: unknown): DotnetConfig | undefined {
     return { disable: entry.disable };
 }
 
+const PURITY_KEYS = new Set(["pureModules", "commands", "queries"]);
+const PURITY_TARGET_KEYS = new Set(["file", "name"]);
+
+/** Strip one leading "./" so selectors and targets share one spelling. */
+function withoutDotSlash(value: string): string {
+    return value.startsWith("./") ? value.slice(2) : value;
+}
+
+/** True for a non-empty, forward-slash, non-escaping repo-relative path. */
+function isRepoRelativePath(path: string): boolean {
+    if (path === "" || path === "." || path === "..") {
+        return false;
+    }
+    if (path.startsWith("/") || path.includes("\\")) {
+        return false;
+    }
+    return path
+        .split("/")
+        .every(
+            (segment) =>
+                segment !== "" && segment !== "." && segment !== "..",
+        );
+}
+
+/** A positive pure-module selector: exact path or `*`/`**`/`?` glob. */
+function validatePureSelector(where: string, raw: unknown): string {
+    const selector = withoutDotSlash(expectNonEmptyString(where, raw));
+    if (!isRepoRelativePath(selector)) {
+        throw new Error(
+            `.defined.json: "${where}" must be a repo-relative path or glob`,
+        );
+    }
+    return selector;
+}
+
+const TARGET_FILE_RULE =
+    "a repo-relative JS/TS file (.js, .mjs, .cjs, .jsx, .ts, .mts, .cts, .tsx)";
+
+/** An exact repo-relative JS/TS file (no glob, no escape, no absolute). */
+function validatePurityTargetFile(where: string, raw: unknown): string {
+    const file = withoutDotSlash(expectNonEmptyString(where, raw));
+    if (
+        !isRepoRelativePath(file) ||
+        file.includes("*") ||
+        file.includes("?") ||
+        !hasJsTsExtension({ file })
+    ) {
+        throw new Error(`.defined.json: "${where}" must be ${TARGET_FILE_RULE}`);
+    }
+    return file;
+}
+
+const JS_IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/u;
+
+/** A top-level binding name: an ASCII JavaScript identifier. */
+function validatePurityTargetName(where: string, raw: unknown): string {
+    if (typeof raw !== "string" || !JS_IDENTIFIER_RE.test(raw)) {
+        throw new Error(
+            `.defined.json: "${where}" must be a JS identifier`,
+        );
+    }
+    return raw;
+}
+
+function validatePurityTarget(where: string, raw: unknown): PurityTarget {
+    const entry = expectObject(where, raw);
+    rejectUnknownKeys(entry, PURITY_TARGET_KEYS, where);
+    return {
+        file: validatePurityTargetFile(`${where}.file`, entry.file),
+        name: validatePurityTargetName(`${where}.name`, entry.name),
+    };
+}
+
+function targetKey(target: PurityTarget): string {
+    return `${target.file}\0${target.name}`;
+}
+
+/** Dedupe by key, preserving first-seen order (a policy is not a set of copies). */
+function dedupeBy<T>(items: T[], key: (item: T) => string): T[] {
+    const seen = new Set<string>();
+    return items.filter((item) => {
+        const value = key(item);
+        if (seen.has(value)) {
+            return false;
+        }
+        seen.add(value);
+        return true;
+    });
+}
+
+function validatePurityTargets(
+    where: string,
+    raw: unknown,
+): PurityTarget[] {
+    return dedupeBy(
+        expectNonEmptyArray(where, raw).map((entry, index) =>
+            validatePurityTarget(`${where}[${index}]`, entry),
+        ),
+        targetKey,
+    );
+}
+
+function validatePurity(raw: unknown): PurityConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    const entry = expectObject("purity", raw);
+    rejectUnknownKeys(entry, PURITY_KEYS, "purity");
+    const result: PurityConfig = {};
+    if (entry.pureModules !== undefined) {
+        result.pureModules = dedupeBy(
+            expectNonEmptyArray("purity.pureModules", entry.pureModules).map(
+                (selector, index) =>
+                    validatePureSelector(
+                        `purity.pureModules[${index}]`,
+                        selector,
+                    ),
+            ),
+            (selector) => selector,
+        );
+    }
+    if (entry.commands !== undefined) {
+        result.commands = validatePurityTargets("purity.commands", entry.commands);
+    }
+    if (entry.queries !== undefined) {
+        result.queries = validatePurityTargets("purity.queries", entry.queries);
+    }
+    // `purity` present but nothing declared opts out, like every other key.
+    if (Object.keys(result).length === 0) {
+        return undefined;
+    }
+    const commands = new Set((result.commands ?? []).map(targetKey));
+    for (const query of result.queries ?? []) {
+        if (commands.has(targetKey(query))) {
+            throw new Error(
+                `.defined.json: "${query.name}" in "${query.file}" is declared as both a command and a query`,
+            );
+        }
+    }
+    return result;
+}
+
 function validateParsed(raw: unknown): DefinedConfig {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
         throw new Error(`.defined.json: must be a JSON object`);
@@ -619,12 +787,23 @@ function validateParsed(raw: unknown): DefinedConfig {
     const eslint = validateEslint(obj.eslint);
     const workflow = validateWorkflow(obj.workflow);
     const dotnet = validateDotnet(obj.dotnet);
+    const purity = validatePurity(obj.purity);
     if (dotnet?.disable === true && coverage?.dotnet !== undefined) {
         throw new Error(
             `.defined.json: "dotnet.disable" cannot be combined with "coverage.dotnet"`,
         );
     }
-    return { version, coverage, node, naming, tofu, eslint, workflow, dotnet };
+    return {
+        version,
+        coverage,
+        node,
+        naming,
+        tofu,
+        eslint,
+        workflow,
+        dotnet,
+        purity,
+    };
 }
 
 /**
