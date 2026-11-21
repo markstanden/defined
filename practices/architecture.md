@@ -30,9 +30,10 @@ are enforced by the gate.
   or gets gamed. Expect rules to migrate downward as machinery arrives.
 - **Worked examples**: a banned symbol (wall-clock time, ambient randomness) is
   an analyser rule with a banned-symbols list; layering (core references no I/O
-  or vendor SDKs) is an architecture-test project; command/query separation,
-  injectable effects and pure cores stay prose here, made to bite by the
-  analyser that bans the shortcut.
+  or vendor SDKs) is an architecture-test project; pure modules and declared
+  command/query pairs are the gate's opt-in `purity` step
+  ([`standards/node-purity.md`](../standards/node-purity.md)), declared per repo
+  in `.defined.json`.
 
 ## Delivery
 
@@ -66,9 +67,10 @@ are enforced by the gate.
 - **Functional core, imperative shell**: keep decisions as pure functions and
   inject the effects (time, IO, randomness, network) at the edges. A command
   mutates and returns nothing meaningful; a query answers and never mutates
-  (CQS) — a method that does both hides its cost at every call site. Time comes
-  from an injected `TimeProvider`, never `DateTime.UtcNow`; the banned-symbols
-  list makes that mechanical.
+  (CQS) — a method that does both hides its cost at every call site. Opt a
+  module in as pure, or a function as a command/query, and the gate's `purity`
+  step enforces the contract. Time comes from an injected `TimeProvider`, never
+  `DateTime.UtcNow`; the banned-symbols list makes that mechanical.
 - **Laws earn generated tests**: round-trip, idempotence, ordering and
   normalisation laws derive their generators from the documented domain and pin
   the seed; named examples stay for the cases the law cannot name.
