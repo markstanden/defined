@@ -37,6 +37,7 @@ import { gateConfigPath, standardsDir } from "./lib/config-path.mts";
 import { loadConfig, type DefinedConfig } from "./lib/config.mts";
 import { hasConsumerEslintConfig } from "./lib/eslint-config.mts";
 import { removeExample } from "./lib/eslint-example.mts";
+import { ownershipDrift, type DriftNotice } from "./lib/ownership-drift.mts";
 import { trackedFiles } from "../lib/git.mts";
 import { MANAGED_WORKFLOW_FILE } from "./lib/workflow-files.mts";
 import { filterDotNetFiles } from "./steps/dotnet.mts";
@@ -201,6 +202,8 @@ export interface SetupCheck {
     files: CheckedFile[];
     /** Drift state of the AGENTS.md managed block. */
     agents: MarkedBlockStatus;
+    /** Advisory ownership drift: weakened overrides and edited seeded defaults. */
+    drift: DriftNotice[];
 }
 
 /**
@@ -218,9 +221,11 @@ export async function checkSetup({
 }): Promise<SetupCheck> {
     const repoRoot = await deriveRepoRoot({ startDir });
     const config = await loadConfig({ repoRoot });
-    const files = await checkManagedFiles({
+    const tracked = await trackedFiles({ repoRoot });
+    const files = bootstrapFiles(config, tracked);
+    const checked = await checkManagedFiles({
         sourceDir: standardsDir(),
-        files: bootstrapFiles(config, await trackedFiles({ repoRoot })),
+        files,
         repoRoot,
     });
     const block = await readMarkedBlock({
@@ -230,5 +235,11 @@ export async function checkSetup({
         filePath: join(repoRoot, "AGENTS.md"),
         block,
     });
-    return { files, agents };
+    const drift = await ownershipDrift({
+        config,
+        sourceDir: standardsDir(),
+        files,
+        repoRoot,
+    });
+    return { files: checked, agents, drift };
 }

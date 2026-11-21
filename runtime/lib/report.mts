@@ -14,6 +14,7 @@
 
 import type { SetupCheck } from "../setup.mts";
 import type { LockInfo } from "./lock.mts";
+import type { DriftNotice } from "./ownership-drift.mts";
 import type {
     DiagnosticKind,
     StepDiagnostic,
@@ -78,6 +79,8 @@ export interface GateResult {
     status: ResultStatus;
     /** Per-check statuses keyed by stable id (skips included, `--full`). */
     results: Record<string, StepStatus>;
+    /** Advisory ownership drift; never affects status or the exit code. */
+    notices?: DriftNotice[];
     /** Actionable diagnostics; omitted on a clean run (concise presentation). */
     errors: Diagnostic[];
 }
@@ -204,9 +207,11 @@ export function buildResult({ setup, steps }: ReportInput): GateResult {
         results[step.id] = step.result.status;
         errors.push(...stepErrors(step));
     }
+    const notices = setup?.drift ?? [];
     return {
         status: errors.length > 0 ? "not_compliant" : "compliant",
         results,
+        ...(notices.length > 0 ? { notices } : {}),
         errors,
     };
 }
@@ -219,12 +224,13 @@ export function renderResult({
     result: GateResult;
     presentation: Presentation;
 }): string {
-    const { status, results, errors } = result;
+    const { status, results, notices, errors } = result;
     const withErrors = errors.length > 0 ? { errors } : {};
+    const withNotices = notices && notices.length > 0 ? { notices } : {};
     return JSON.stringify(
         presentation === "full"
-            ? { status, results, ...withErrors }
-            : { status, ...withErrors },
+            ? { status, results, ...withNotices, ...withErrors }
+            : { status, ...withNotices, ...withErrors },
     );
 }
 

@@ -18,6 +18,22 @@ are enforced by the gate.
 - **Gate-clean commits**: every commit passes `defined comply` on its own — no
   "fix the gate later" debt.
 
+## Guidance ownership
+
+- **A rule lives at the lowest rung that holds it**: compiler/analyser first
+  (decidable, total, free), the `defined` gate second (deterministic, every run,
+  one verdict), tests third (semantic claims only behaviour can settle), skills
+  and standards prose fourth (judgement, advisory), knowledge docs last (the
+  reasoning). A decidable rule written in prose is obeyed inconsistently — an
+  observed rate of roughly half in one measured campaign — and every miss costs
+  a write→review→fix circle; a judgement call pushed into the gate becomes noise
+  or gets gamed. Expect rules to migrate downward as machinery arrives.
+- **Worked examples**: a banned symbol (wall-clock time, ambient randomness) is
+  an analyser rule with a banned-symbols list; layering (core references no I/O
+  or vendor SDKs) is an architecture-test project; command/query separation,
+  injectable effects and pure cores stay prose here, made to bite by the
+  analyser that bans the shortcut.
+
 ## Delivery
 
 - **One container image is the toolchain.** Pin versions in one place
@@ -47,6 +63,15 @@ are enforced by the gate.
 
 ## Code
 
+- **Functional core, imperative shell**: keep decisions as pure functions and
+  inject the effects (time, IO, randomness, network) at the edges. A command
+  mutates and returns nothing meaningful; a query answers and never mutates
+  (CQS) — a method that does both hides its cost at every call site. Time comes
+  from an injected `TimeProvider`, never `DateTime.UtcNow`; the banned-symbols
+  list makes that mechanical.
+- **Laws earn generated tests**: round-trip, idempotence, ordering and
+  normalisation laws derive their generators from the documented domain and pin
+  the seed; named examples stay for the cases the law cannot name.
 - **TypeScript core, strip-types runtime**: no enums/namespaces, extensioned
   imports, zero dependencies. The host launcher is a thin bash shim and the
   source shim stays thin too.
