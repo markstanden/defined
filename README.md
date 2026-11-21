@@ -81,6 +81,15 @@ the plan and noise on every run after that:
 - **`errors`** — actionable diagnostics for failing checks and bootstrap drift
   (`check`, `kind`, `message`, and `file`/`line`/`column`/`rule` where known).
   Present whenever there is at least one; omitted on success, in both modes.
+- **`notices`** — advisory ownership drift, present only when found; it never
+  affects `status` or the exit code. Each entry is
+  `{ "kind": "config" | "seeded", "message", "file"? }`: `config` means a
+  `.defined.json` override weakens the house floor (an `eslint`/`dotnet`/
+  `workflow` `disable` switch, or a coverage line minimum below the house
+  default of 80), and `seeded` means a project-owned seeded default
+  (`.editorconfig`, `.gitattributes`, `Directory.Build.props`) differs from the
+  image copy. Managed-file drift is not a notice — that stays a bootstrap
+  failure.
 - **`results`** — every check in the run plan, including skipped ones, keyed by
   stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Present with `--full`
   only.
@@ -113,9 +122,9 @@ defined comply --timings  # adds monotonic phase/step durations on stderr
 ```
 
 The two presentations describe the identical run — same checks, same
-diagnostics, same exit code — so the flag changes presentation only, never
-scope. Parsers should treat a missing `errors` key as empty
-(`jq -r '.errors // []'`).
+diagnostics, same advisory notices, same exit code — so the flag changes
+presentation only, never scope. Parsers should treat a missing `errors` (or
+`notices`) key as empty (`jq -r '.errors // []'`).
 
 ### Opt-in timings
 

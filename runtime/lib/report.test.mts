@@ -21,6 +21,7 @@ function cleanSetup(): SetupCheck {
             { name: "Directory.Build.props", status: "present" },
         ],
         agents: "present",
+        drift: [],
     };
 }
 
@@ -365,4 +366,71 @@ test("renderBusyResult_isTheThirdStatusWithTheHolderAndStaleEdits", () => {
         }),
         '{"status":"busy","lock":{"pid":99,"startedAt":"2026-10-04T00:00:00.000Z","checkout":"/repo","command":"comply"},"newerThanRun":["src/a.ts"]}',
     );
+});
+
+const WEAKENED = {
+    kind: "config" as const,
+    message: "eslint.disable: disables the house ESLint floor",
+    file: ".defined.json",
+};
+
+test("buildResult_advisoryDrift_keepsCompliantAndCarriesNotices", () => {
+    // Arrange
+    const setup = { ...cleanSetup(), drift: [WEAKENED] };
+
+    // Act
+    const result = buildResult({
+        setup,
+        steps: [{ id: "node", result: passed({}) }],
+    });
+
+    // Assert
+    assert.equal(result.status, "compliant");
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.notices, [WEAKENED]);
+});
+
+test("renderResult_minPresentation_advisoryDrift_isVisibleWithoutErrors", () => {
+    // Arrange
+    const result = buildResult({
+        setup: { ...cleanSetup(), drift: [WEAKENED] },
+        steps: [{ id: "node", result: passed({}) }],
+    });
+
+    // Act
+    const rendered = JSON.parse(renderResult({ result, presentation: "min" }));
+
+    // Assert
+    assert.equal(rendered.status, "compliant");
+    assert.deepEqual(rendered.notices, [WEAKENED]);
+    assert.equal("errors" in rendered, false);
+});
+
+test("renderResult_fullPresentation_advisoryDrift_sitsBesideResults", () => {
+    // Arrange
+    const result = buildResult({
+        setup: { ...cleanSetup(), drift: [WEAKENED] },
+        steps: [{ id: "node", result: passed({}) }],
+    });
+
+    // Act
+    const rendered = JSON.parse(renderResult({ result, presentation: "full" }));
+
+    // Assert
+    assert.deepEqual(rendered.notices, [WEAKENED]);
+    assert.equal(rendered.results.bootstrap, "pass");
+});
+
+test("renderResult_cleanSetup_omitsTheNoticesKey", () => {
+    // Arrange
+    const result = buildResult({
+        setup: cleanSetup(),
+        steps: [{ id: "node", result: passed({}) }],
+    });
+
+    // Act
+    const rendered = renderResult({ result, presentation: "min" });
+
+    // Assert
+    assert.equal(rendered, '{"status":"compliant"}');
 });

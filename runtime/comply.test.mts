@@ -43,6 +43,7 @@ function cleanSetup(): SetupCheck {
             { name: "Directory.Build.props", status: "present" },
         ],
         agents: "present",
+        drift: [],
     };
 }
 

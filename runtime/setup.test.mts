@@ -439,3 +439,54 @@ test("runSetup skips Directory.Build.props when dotnet is disabled", async () =>
         await rm(repo, { recursive: true, force: true });
     }
 });
+
+test("checkSetup_weakenedConfigAndEditedSeed_reportsAdvisoryDrift", async () => {
+    // Arrange
+    const repo = await makeTempRepo();
+    try {
+        await writeFile(
+            join(repo, ".defined.json"),
+            `${JSON.stringify({ version: "deadbeef", eslint: { disable: true } })}\n`,
+        );
+
+        // Act
+        await runSetup({ startDir: repo });
+        await writeFile(
+            join(repo, ".editorconfig"),
+            "root = true\nend_of_line = crlf\n",
+        );
+        const check = await checkSetup({ startDir: repo });
+
+        // Assert
+        assert.ok(
+            check.drift.some(
+                (notice) =>
+                    notice.kind === "config" &&
+                    notice.message.includes("eslint.disable"),
+            ),
+        );
+        assert.ok(
+            check.drift.some(
+                (notice) =>
+                    notice.kind === "seeded" && notice.file === ".editorconfig",
+            ),
+        );
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
+
+test("checkSetup_bootstrappedRepoWithoutOverrides_reportsNoDrift", async () => {
+    // Arrange
+    const repo = await makeTempRepo();
+    try {
+        // Act
+        await runSetup({ startDir: repo });
+        const check = await checkSetup({ startDir: repo });
+
+        // Assert
+        assert.deepEqual(check.drift, []);
+    } finally {
+        await rm(repo, { recursive: true, force: true });
+    }
+});
