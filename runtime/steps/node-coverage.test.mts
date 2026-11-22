@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
+import fc from "fast-check";
 
 import type { CommandResult } from "../../lib/proc.mts";
 import {
@@ -366,6 +367,70 @@ test("checkMinimums rejects a hit count exceeding found", () => {
             minimums: { line: 80 },
         }).pass,
         false,
+    );
+});
+
+test("checkMinimums passes when coverage exactly meets the minimum", () => {
+    // Regression: 29 of 100 lines at a 29% minimum computed 28.999999999999996
+    // in floating point and failed, printing "29.0% < 29% minimum". Shrunk
+    // from the property below, which found it before the fix.
+    // Arrange
+    const summary = {
+        linesFound: 100,
+        linesHit: 29,
+        branchesFound: 0,
+        branchesHit: 0,
+        functionsFound: 0,
+        functionsHit: 0,
+    };
+
+    // Act
+    const result = checkMinimums({ summary, minimums: { line: 29 } });
+
+    // Assert
+    assert.equal(result.pass, true);
+    assert.deepEqual(result.failures, []);
+});
+
+test("checkMinimums agrees with the exact ratio at every boundary", () => {
+    // Contract: a metric passes iff hit/found >= minimum/100. With integer
+    // counters and minimums the exact form is hit*100 >= minimum*found; the
+    // float form (hit/found)*100 >= minimum can round below the boundary.
+    // Coverage totals are round (lines and branches are counted in hundreds),
+    // so the generator puts hit exactly on the documented threshold — the
+    // boundary is where the contract decides, and where a borrowed float
+    // comparison drifts. It must stay an integer counter: the contract rejects
+    // fractional counts as malformed before any comparison.
+    // Arrange
+    const ROUND_DENOMINATORS = [100, 200, 400, 500, 1000, 2000];
+    const boundaryCounters = fc.integer({ min: 0, max: 100 }).chain((minimum) =>
+        fc.constantFrom(...ROUND_DENOMINATORS).map((found) => ({
+            found,
+            minimum,
+            hit: (minimum * found) / 100,
+        })),
+    );
+
+    // Act & Assert
+    fc.assert(
+        fc.property(boundaryCounters, ({ found, hit, minimum }) => {
+            // Act
+            const result = checkMinimums({
+                summary: {
+                    linesFound: found,
+                    linesHit: hit,
+                    branchesFound: 0,
+                    branchesHit: 0,
+                    functionsFound: 0,
+                    functionsHit: 0,
+                },
+                minimums: { line: minimum },
+            });
+
+            // Assert
+            return result.pass === hit * 100 >= minimum * found;
+        }),
+        { seed: 20261122, numRuns: 500 },
     );
 });
 

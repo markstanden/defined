@@ -198,10 +198,15 @@ function compareMinimum({
     hit: number;
     minimum: number;
 }): string | null {
-    const pct = found > 0 ? (hit / found) * 100 : 0;
-    if (pct >= minimum) {
+    // Compare exactly: hit/found >= minimum/100 is the same statement as
+    // hit*100 >= minimum*found, and the integer form never rounds below the
+    // threshold. The float form (hit/found)*100 does — 29 of 100 lines at 29%
+    // computed 28.999999999999996 and failed a compliant repo.
+    const passes = found === 0 ? minimum <= 0 : hit * 100 >= minimum * found;
+    if (passes) {
         return null;
     }
+    const pct = found > 0 ? (hit / found) * 100 : 0;
     return `${label}: ${pct.toFixed(1)}% < ${minimum}% minimum`;
 }
 

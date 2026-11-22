@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
+import fc from "fast-check";
 
 import {
     createFileCache,
@@ -49,6 +50,33 @@ test("identityHash is order-independent and value-sensitive", () => {
     // Assert
     assert.equal(a, b);
     assert.notEqual(a, c);
+});
+
+test("identityHash ignores the order its parts were inserted", () => {
+    // Contract: "Keys are sorted, so part order never changes the digest."
+    // Arrange
+    const parts = fc.dictionary(
+        fc.constantFrom("tool", "config", "ignore", "env", "plugin", "engine"),
+        fc.string({ maxLength: 12 }),
+        { minKeys: 2, maxKeys: 6 },
+    );
+
+    // Act & Assert
+    fc.assert(
+        fc.property(parts, (record) => {
+            // Act
+            const [forward, reversed] = [
+                identityHash({ parts: record }),
+                identityHash({
+                    parts: Object.fromEntries(Object.entries(record).reverse()),
+                }),
+            ];
+
+            // Assert
+            return forward === reversed;
+        }),
+        { seed: 20261128 },
+    );
 });
 
 test("hashFile hashes bytes and returns undefined for a missing file", async () => {

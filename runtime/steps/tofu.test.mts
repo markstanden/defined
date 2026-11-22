@@ -4,7 +4,9 @@
 
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { afterEach, test } from "node:test";
+import fc from "fast-check";
 
 import { filterTofuFiles, runTofuStep, tfDirectories } from "./tofu.mts";
 import { cleanupTempDirs, fakeRunner, makeTempDir } from "../test-helpers.mts";
@@ -53,6 +55,95 @@ test("tfDirectories reduces to the top-most module dirs", () => {
     ]);
     // Nothing to do.
     assert.deepEqual(tfDirectories({ files: ["a.sh"] }), []);
+});
+
+const moduleDir = fc
+    .array(fc.constantFrom("a", "b", "c"), { maxLength: 3 })
+    .map((segments) => segments.join("/"));
+const tfFile = moduleDir.map((dir) =>
+    dir === "" ? "main.tf" : `${dir}/main.tf`,
+);
+const tfFiles = fc.array(tfFile, { maxLength: 12 });
+
+/** True when `entry` names `dir` or a strict ancestor of it. */
+function coversDir(entry: string, dir: string): boolean {
+    return entry === dir || (dir !== "." && dir.startsWith(`${entry}/`));
+}
+
+test("tfDirectories covers every module file's directory", () => {
+    // Contract: the output is the minimal top-most set, so each discovered
+    // module directory must be named, or sit below one that is.
+    // Act & Assert
+    fc.assert(
+        fc.property(tfFiles, (files) => {
+            // Act
+            const dirs = tfDirectories({ files });
+
+            // Assert
+            return files.every((file) => {
+                const dir = dirname(file);
+                return dirs.some((entry) => coversDir(entry, dir));
+            });
+        }),
+        { seed: 20261124 },
+    );
+});
+
+test("tfDirectories returns no directory that contains another", () => {
+    // Contract: modules are reduced to the top-most directory, so the result
+    // is an antichain — no entry may contain a sibling entry.
+    // Act & Assert
+    fc.assert(
+        fc.property(tfFiles, (files) => {
+            // Act
+            const dirs = tfDirectories({ files });
+
+            // Assert
+            return dirs.every((outer) =>
+                dirs.every(
+                    (inner) => !coversDir(outer, inner) || outer === inner,
+                ),
+            );
+        }),
+        { seed: 20261125 },
+    );
+});
+
+test("tfDirectories returns its directories in ascending codepoint order", () => {
+    // Contract: "Codepoint order for paths: deterministic and locale-independent"
+    // — strict ascending order also pins uniqueness.
+    // Act & Assert
+    fc.assert(
+        fc.property(tfFiles, (files) => {
+            // Act
+            const dirs = tfDirectories({ files });
+
+            // Assert
+            return dirs.every(
+                (dir, index) => index === 0 || dirs[index - 1]! < dir,
+            );
+        }),
+        { seed: 20261126 },
+    );
+});
+
+test("tfDirectories is independent of the file list order", () => {
+    // Contract: the reduced set is a function of the discovered directories,
+    // not of the order git happened to list the files in.
+    // Act & Assert
+    fc.assert(
+        fc.property(tfFiles, (files) => {
+            // Act
+            const [forward, backward] = [
+                tfDirectories({ files }),
+                tfDirectories({ files: [...files].reverse() }),
+            ];
+
+            // Assert
+            return forward.join("\n") === backward.join("\n");
+        }),
+        { seed: 20261127 },
+    );
 });
 
 test("runTofuStep skips when no .tf files tracked", async () => {
