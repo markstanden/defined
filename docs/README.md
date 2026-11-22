@@ -108,3 +108,6 @@ non-goal)](issues/92-tailwind-position.md). Deep dives below.
 - [`runtime/managed-workflow-self-audit.md`](runtime/managed-workflow-self-audit.md)
   — why this repo keeps its managed workflow (and how the host-repo step made
   it green).
+- [`runtime/coverage-boundary-property-tests.md`](runtime/coverage-boundary-property-tests.md)
+  — the exact-boundary coverage defect, the property test that found it, and
+  the dev-dependency restore inside the container.
