@@ -656,6 +656,36 @@ test("write-capable no-fix runs in the repo so the report survives (#65)", async
     assert.match(result.notice ?? "", /90\.0%/u);
 });
 
+test("the pass notice shows the exact line percentage, floored", async () => {
+    // Arrange — 724/2500 passes a 20% minimum; a one-decimal notice would read
+    // "29.0%", the rounding the failure message refuses.
+    const dir = await makeTempDir("quality-nc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { node: { command: "npm t", minimums: { line: 20 } } },
+        },
+        reportPath: "coverage/lcov.info",
+        reportContent: ["LF:2500", "LH:724"].join("\n"),
+    });
+
+    // Act
+    const { result } = await runCoverageScenario({
+        step: runNodeCoverageStep,
+        repoRoot: dir,
+        scratchDir: dir,
+        trackedFiles: ["package.json"],
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    assert.match(
+        result.notice ?? "",
+        /^node-coverage: 28\.96% line coverage \(724\/2500\)$/u,
+    );
+});
+
 test("gates line coverage against the effective minimum", async () => {
     // Arrange
     const SCENARIOS = [

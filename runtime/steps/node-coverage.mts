@@ -243,7 +243,7 @@ export function checkMinimums({
 }): {
     /** False when any tracked metric sits below its minimum. */
     pass: boolean;
-    /** One per failed metric: `<label>: <pct>% < <minimum>% minimum`. */
+    /** One per failed metric: `<label>: <pct>% (<hit>/<found>) < <minimum>% minimum`. */
     failures: string[];
 } {
     const invalid = counterFailures(summary);
@@ -392,7 +392,10 @@ export async function runNodeCoverageStep({
         });
     }
 
-    const pct = ((parsed.linesHit / parsed.linesFound) * 100).toFixed(1);
+    const pct = formatPercent({
+        hit: parsed.linesHit,
+        found: parsed.linesFound,
+    });
     return passed({
         notice: `node-coverage: ${pct}% line coverage (${parsed.linesHit}/${parsed.linesFound})`,
     });
