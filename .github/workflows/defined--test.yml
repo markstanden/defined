@@ -36,6 +36,11 @@ jobs:
               with:
                   node-version: 26
 
+            - name: Install dev dependencies
+              # The suite imports fast-check, so a cold runner needs node_modules
+              # before the host test step; the container gate restores its own.
+              run: npm ci --no-audit --no-fund
+
             - name: Read tool pins
               id: pins
               shell: bash
