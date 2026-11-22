@@ -79,8 +79,9 @@ const RATE_RE = /^\d+(?:\.(\d+))?$/u;
 
 /**
  * Parse a Cobertura rate attribute exactly. Returns undefined when the
- * attribute is absent or not a plain decimal (for example an exponent form),
- * matching the previous "no usable rate" handling.
+ * attribute is absent or not the plain decimal the Cobertura schema writes;
+ * an unsupported form (for example an exponent) is treated as no usable rate
+ * rather than interpreted, so it fails as a missing-data report.
  */
 export function parseRate(attr: string | undefined): CoberturaRate | undefined {
     if (attr === undefined) {

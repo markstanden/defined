@@ -1,4 +1,5 @@
-// lib/coverage.mts — shared plumbing for steps that run a consumer command.
+// lib/coverage.mts — shared plumbing for the coverage steps: run a consumer
+// command in the right working root, and format an exact ratio as a percentage.
 //
 // Coverage steps and the naming step all run a consumer-supplied command, then
 // act on its exit code. A read-only `verify` cannot write into the repo, so
@@ -7,7 +8,8 @@
 // write-capable comply sets `repoWritable`, so no-fix runs report-producing
 // steps in the repo and the artifact survives for a scanner. This module owns
 // that shared command step so callers differ only in config key and what they
-// do with the result.
+// do with the result, plus `formatPercent` so both ecosystems print the same
+// floored percentage.
 
 import { resolveWorkingRoot, type Scratch } from "./scratch.mts";
 import { run, failureDetail } from "../../lib/proc.mts";
