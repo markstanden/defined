@@ -1,7 +1,7 @@
 ---
 Area: runtime
-Keywords: coverage minimums, property-based tests, fast-check, float boundary, checkMinimums, node_modules volume, coverage.satisfies
-Summary: An exact-boundary defect in the coverage gate, the property test that found it, and how a test dev dependency reaches the suite inside the container.
+Keywords: coverage minimums, property-based tests, fast-check, float boundary, checkMinimums, Cobertura rate, node_modules volume, coverage.satisfies
+Summary: An exact-boundary defect in both coverage steps (lcov counters and Cobertura rates), the fix and its tests, and how a test dev dependency reaches the suite inside the container.
 ---
 
 # Coverage boundaries and property tests
@@ -22,6 +22,14 @@ Summary: An exact-boundary defect in the coverage gate, the property test that f
   still float for decimals — 7 of 10,000 lines at a 0.07% minimum failed
   (`0.07 * 10000 = 700.0000000000001`) and printed
   `line: 0.07% (7/10000) < 0.07% minimum`, the same self-contradiction.
+- The .NET step had the same defect through the Cobertura rate: `0.29 * 100` is
+  `28.999999999999996`, so a 29% report failed a 29% minimum. `parseRate`
+  (`runtime/steps/dotnet-coverage.mts`) keeps the rate as an exact decimal
+  (`value / 10^scale`) and compares `value * 100 >= minimum * 10^scale`.
+- Both ecosystems format percentages through one helper
+  (`formatPercent`, `runtime/lib/coverage.mts`), so the failure message and the
+  pass notice agree: `line: 89.9999% (0.899999) < 90% minimum` for Cobertura,
+  `line: 28.96% (724/2500) < 29% minimum` for lcov.
 - Failure messages show the exact counter pair and a floored four-decimal
   percentage — `line: 28.96% (724/2500) < 29% minimum` — derived by exact
   integer division, so the printed value can never read as meeting a minimum
@@ -55,7 +63,10 @@ Summary: An exact-boundary defect in the coverage gate, the property test that f
   the exact oracle after the fix.
 - `loadConfig` rejects fractional minimums (`0.07`, `90.5`) and still accepts
   the 0 and 100 boundaries.
-- `node --test` (609 pass) and `./runtime/comply.sh`
+- The Cobertura comparison fails against the float form and passes against the
+  exact one; every integer minimum 0–100 is enumerated, because a sampled
+  property missed the sparse 29/57/58 set.
+- `node --test` (618 pass) and `./runtime/comply.sh`
   (`{"status":"compliant"}`) on 2026-11-22.
 
 ## Failed approaches

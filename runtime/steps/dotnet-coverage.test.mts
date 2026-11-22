@@ -12,7 +12,9 @@ import type { CommandResult } from "../../lib/proc.mts";
 import {
     checkMinimums,
     parseCobertura,
+    parseRate,
     runDotNetCoverageStep,
+    type CoberturaRate,
 } from "./dotnet-coverage.mts";
 import { cleanupScratch } from "../lib/scratch.mts";
 import {
@@ -83,13 +85,16 @@ const SAMPLE_XML = `<?xml version="1.0" encoding="utf-8"?>
 
 // --- parseCobertura ---
 
-test("parseCobertura extracts line and branch rates", () => {
+/** A summary rate written exactly as a report does (`rate("0.85")`). */
+const rate = (text: string): CoberturaRate => parseRate(text)!;
+
+test("parseCobertura extracts line and branch rates exactly", () => {
     // Act
     const summary = parseCobertura({ content: SAMPLE_XML });
 
     // Assert
-    assert.equal(summary.lineRate, 0.85);
-    assert.equal(summary.branchRate, 0.7);
+    assert.deepEqual(summary.lineRate, { value: 85n, scale: 2 });
+    assert.deepEqual(summary.branchRate, { value: 7n, scale: 1 });
 });
 
 test("parseCobertura handles integer-style rates", () => {
@@ -100,8 +105,13 @@ test("parseCobertura handles integer-style rates", () => {
     const summary = parseCobertura({ content: xml });
 
     // Assert
-    assert.equal(summary.lineRate, 1);
-    assert.equal(summary.branchRate, 0.5);
+    assert.deepEqual(summary.lineRate, { value: 1n, scale: 0 });
+    assert.deepEqual(summary.branchRate, { value: 5n, scale: 1 });
+});
+
+test("parseRate ignores a rate that is not a plain decimal", () => {
+    // Act & Assert
+    assert.equal(parseRate("8.5e-1"), undefined);
 });
 
 test("parseCobertura returns zero when rates absent", () => {
@@ -112,7 +122,7 @@ test("parseCobertura returns zero when rates absent", () => {
     const summary = parseCobertura({ content: xml });
 
     // Assert
-    assert.equal(summary.lineRate, 0);
+    assert.deepEqual(summary.lineRate, { value: 0n, scale: 0 });
     assert.equal(summary.branchRate, undefined);
 });
 
@@ -121,7 +131,7 @@ test("parseCobertura returns zero for empty content", () => {
     const summary = parseCobertura({ content: "" });
 
     // Assert
-    assert.equal(summary.lineRate, 0);
+    assert.deepEqual(summary.lineRate, { value: 0n, scale: 0 });
     assert.equal(summary.branchRate, undefined);
 });
 
@@ -130,7 +140,7 @@ test("parseCobertura returns zero for empty content", () => {
 test("checkMinimums passes when above line minimum", () => {
     // Act
     const result = checkMinimums({
-        summary: { lineRate: 0.9, branchRate: 0.8 },
+        summary: { lineRate: rate("0.9"), branchRate: rate("0.8") },
         minimums: { line: 80 },
     });
 
@@ -142,7 +152,7 @@ test("checkMinimums passes when above line minimum", () => {
 test("checkMinimums fails when below line minimum", () => {
     // Act
     const result = checkMinimums({
-        summary: { lineRate: 0.7, branchRate: 0.8 },
+        summary: { lineRate: rate("0.7"), branchRate: rate("0.8") },
         minimums: { line: 80 },
     });
 
@@ -155,7 +165,7 @@ test("checkMinimums fails when below line minimum", () => {
 test("checkMinimums checks branch when configured", () => {
     // Act
     const result = checkMinimums({
-        summary: { lineRate: 0.9, branchRate: 0.6 },
+        summary: { lineRate: rate("0.9"), branchRate: rate("0.6") },
         minimums: { line: 80, branch: 70 },
     });
 
@@ -168,7 +178,7 @@ test("checkMinimums checks branch when configured", () => {
 test("checkMinimums fails on missing branch data when branch minimum configured", () => {
     // Act
     const result = checkMinimums({
-        summary: { lineRate: 0.9, branchRate: undefined },
+        summary: { lineRate: rate("0.9"), branchRate: undefined },
         minimums: { line: 80, branch: 70 },
     });
 
@@ -181,7 +191,7 @@ test("checkMinimums fails on missing branch data when branch minimum configured"
 test("checkMinimums fails on function minimum (no function data in Cobertura)", () => {
     // Act
     const result = checkMinimums({
-        summary: { lineRate: 0.9, branchRate: 0.8 },
+        summary: { lineRate: rate("0.9"), branchRate: rate("0.8") },
         minimums: { line: 80, function: 70 },
     });
 
@@ -194,13 +204,54 @@ test("checkMinimums fails on function minimum (no function data in Cobertura)", 
 test("checkMinimums reports multiple failures", () => {
     // Act
     const result = checkMinimums({
-        summary: { lineRate: 0.5, branchRate: 0.5 },
+        summary: { lineRate: rate("0.5"), branchRate: rate("0.5") },
         minimums: { line: 80, branch: 70 },
     });
 
     // Assert
     assert.equal(result.pass, false);
     assert.equal(result.failures.length, 2);
+});
+
+test("checkMinimums passes at every exact integer minimum", () => {
+    // Contract: a metric passes iff rate >= minimum/100. Each rate is the
+    // exact decimal a report writes (29% -> "0.29"); as a float, 0.29 * 100 is
+    // 28.999999999999996, so 29, 57 and 58 failed their own minimum. All 101
+    // integer minimums are enumerated: the misround set is sparse, so a
+    // sampled generator can miss it (as a 100-run property did).
+    for (let minimum = 0; minimum <= 100; minimum += 1) {
+        // Arrange
+        const summary = {
+            lineRate: rate((minimum / 100).toFixed(2)),
+            branchRate: undefined,
+        };
+
+        // Act
+        const result = checkMinimums({
+            summary,
+            minimums: { line: minimum },
+        });
+
+        // Assert
+        assert.equal(result.pass, true, `${minimum}%`);
+        assert.deepEqual(result.failures, [], `${minimum}%`);
+    }
+});
+
+test("a failure message shows the exact rate and a floored percentage", () => {
+    // Arrange — 0.899999 is 89.9999%, just below a 90% minimum.
+    const summary = {
+        lineRate: rate("0.899999"),
+        branchRate: undefined,
+    };
+
+    // Act
+    const result = checkMinimums({ summary, minimums: { line: 90 } });
+
+    // Assert
+    assert.deepEqual(result.failures, [
+        "line: 89.9999% (0.899999) < 90% minimum",
+    ]);
 });
 
 // --- runDotNetCoverageStep ---

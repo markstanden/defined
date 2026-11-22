@@ -27,7 +27,7 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
-import { runScopedCommand } from "../lib/coverage.mts";
+import { formatPercent, runScopedCommand } from "../lib/coverage.mts";
 import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import {
@@ -51,35 +51,83 @@ type Runner = typeof run;
 
 const COBERTURA_NAME = "coverage.cobertura.xml";
 
-export interface CoberturaSummary {
-    /** Line coverage as a 0.0–1.0 rate, parsed from a Cobertura XML file. */
-    lineRate: number;
-    /** Branch coverage as a 0.0–1.0 rate; undefined when the report omits it. */
-    branchRate: number | undefined;
+/**
+ * An exact non-negative decimal rate as a Cobertura report writes it:
+ * `value / 10^scale` (`"0.29"` is `{ value: 29n, scale: 2 }`). Keeping the
+ * decimal exact lets the minimum comparison stay in integer arithmetic —
+ * `0.29 * 100` is 28.999999999999996 as a double.
+ */
+export interface CoberturaRate {
+    /** Unscaled digits: `"0.29"` -> `29n`. */
+    value: bigint;
+    /** Decimal places: `"0.29"` -> `2`. */
+    scale: number;
 }
 
-function tryParseFloat(attr: string | undefined): number | undefined {
-    if (attr === undefined || attr === "") {
+export interface CoberturaSummary {
+    /** Line coverage rate, parsed from a Cobertura XML file. */
+    lineRate: CoberturaRate;
+    /** Branch coverage rate; undefined when the report omits it. */
+    branchRate: CoberturaRate | undefined;
+}
+
+/** A zero rate, used when the report carries no rate attribute. */
+const ZERO_RATE: CoberturaRate = { value: 0n, scale: 0 };
+
+/** The decimal form a Cobertura `*-rate` attribute uses. */
+const RATE_RE = /^\d+(?:\.(\d+))?$/u;
+
+/**
+ * Parse a Cobertura rate attribute exactly. Returns undefined when the
+ * attribute is absent or not a plain decimal (for example an exponent form),
+ * matching the previous "no usable rate" handling.
+ */
+export function parseRate(attr: string | undefined): CoberturaRate | undefined {
+    if (attr === undefined) {
         return undefined;
     }
-    const value = Number(attr);
-    return Number.isFinite(value) ? value : undefined;
+    const text = attr.trim();
+    const match = RATE_RE.exec(text);
+    if (match === null) {
+        return undefined;
+    }
+    return {
+        value: BigInt(text.replace(".", "")),
+        scale: match[1]?.length ?? 0,
+    };
+}
+
+/** The rate as written in the report, for a failure message (`"0.29"`). */
+function rateText({ value, scale }: CoberturaRate): string {
+    const digits = value.toString().padStart(scale + 1, "0");
+    if (scale === 0) {
+        return digits;
+    }
+    return `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+}
+
+/** The rate as a floored percentage string (`"0.85"` -> `"85.0"`). */
+function formatRate(rate: CoberturaRate): string {
+    return formatPercent({
+        numerator: rate.value,
+        denominator: 10n ** BigInt(rate.scale),
+    });
 }
 
 /**
  * Parse a Cobertura XML document. Extracts `line-rate` and `branch-rate` from
- * the root `<coverage>` element. Rates are 0.0–1.0. Returns zeros when the
- * rates are absent.
+ * the root `<coverage>` element as exact decimals. Returns a zero line rate
+ * when the rates are absent.
  */
 export function parseCobertura({
     content,
 }: {
     content: string;
 }): CoberturaSummary {
-    const lineRate = tryParseFloat(extractAttribute(content, "line-rate"));
-    const branchRate = tryParseFloat(extractAttribute(content, "branch-rate"));
+    const lineRate = parseRate(extractAttribute(content, "line-rate"));
+    const branchRate = parseRate(extractAttribute(content, "branch-rate"));
     return {
-        lineRate: lineRate ?? 0,
+        lineRate: lineRate ?? ZERO_RATE,
         branchRate,
     };
 }
@@ -96,11 +144,33 @@ function extractAttribute(xml: string, name: string): string | undefined {
 }
 
 /**
+ * Compare one rate against its minimum exactly, returning a failure message or
+ * null. Cobertura rates are decimal strings, so the comparison is integer
+ * arithmetic on the unscaled value — `rate * 100 >= minimum` as a float can
+ * fail at an exact boundary (0.29 * 100 is 28.999999999999996).
+ */
+function compareRate({
+    label,
+    rate,
+    minimum,
+}: {
+    label: string;
+    rate: CoberturaRate;
+    minimum: number;
+}): string | null {
+    const found = 10n ** BigInt(rate.scale);
+    if (rate.value * 100n >= BigInt(minimum) * found) {
+        return null;
+    }
+    return `${label}: ${formatRate(rate)}% (${rateText(rate)}) < ${minimum}% minimum`;
+}
+
+/**
  * Compare a Cobertura summary against the configured minimums.
  *
  * @param root0 the parameter object
- * @param root0.summary parsed Cobertura rates (0.0–1.0)
- * @param root0.minimums configured per-metric floors, in percent
+ * @param root0.summary parsed Cobertura rates, exact decimals
+ * @param root0.minimums configured per-metric floors, integer percentages
  * @returns pass=false with one failure message per metric below its floor
  */
 export function checkMinimums({
@@ -112,17 +182,19 @@ export function checkMinimums({
 }): {
     /** False when any tracked metric sits below its minimum. */
     pass: boolean;
-    /** One per failed metric: `line/branch: <pct>% < <minimum>% minimum`. */
+    /** One per failed metric: `line/branch: <pct>% (<rate>) < <minimum>% minimum`. */
     failures: string[];
 } {
     const failures: string[] = [];
 
     if (minimums.line !== undefined) {
-        const pct = summary.lineRate * 100;
-        if (pct < minimums.line) {
-            failures.push(
-                `line: ${pct.toFixed(1)}% < ${minimums.line}% minimum`,
-            );
+        const failure = compareRate({
+            label: "line",
+            rate: summary.lineRate,
+            minimum: minimums.line,
+        });
+        if (failure !== null) {
+            failures.push(failure);
         }
     }
 
@@ -132,11 +204,13 @@ export function checkMinimums({
                 `branch: report has no branch-rate data (minimum ${minimums.branch}%)`,
             );
         } else {
-            const pct = summary.branchRate * 100;
-            if (pct < minimums.branch) {
-                failures.push(
-                    `branch: ${pct.toFixed(1)}% < ${minimums.branch}% minimum`,
-                );
+            const failure = compareRate({
+                label: "branch",
+                rate: summary.branchRate,
+                minimum: minimums.branch,
+            });
+            if (failure !== null) {
+                failures.push(failure);
             }
         }
     }
@@ -205,7 +279,7 @@ async function loadCoberturaSummary({
     const content = await readFileFn(resolve(coberturaPath), "utf8");
     const summary = parseCobertura({ content });
 
-    if (summary.lineRate === 0 && summary.branchRate === undefined) {
+    if (summary.lineRate.value === 0n && summary.branchRate === undefined) {
         return failed({
             notice: "dotnet-coverage: Cobertura XML contains no coverage data",
         });
@@ -309,8 +383,7 @@ async function evaluateCobertura({
         });
     }
 
-    const pct = (summary.lineRate * 100).toFixed(1);
     return passed({
-        notice: `dotnet-coverage: ${pct}% line coverage`,
+        notice: `dotnet-coverage: ${formatRate(summary.lineRate)}% line coverage`,
     });
 }
