@@ -66,7 +66,7 @@ Summary: An exact-boundary defect in both coverage steps (lcov counters and Cobe
 - The Cobertura comparison fails against the float form and passes against the
   exact one; every integer minimum 0–100 is enumerated, because a sampled
   property missed the sparse 29/57/58 set.
-- `node --test` (618 pass) and `./runtime/comply.sh`
+- `node --test` (633 pass) and `./runtime/comply.sh`
   (`{"status":"compliant"}`) on 2026-11-22.
 
 ## Failed approaches
