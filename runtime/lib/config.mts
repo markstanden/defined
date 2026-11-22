@@ -26,11 +26,11 @@ import { hasJsTsExtension } from "./js-files.mts";
 const CONFIG_FILE = ".defined.json";
 
 export interface CoverageMinimums {
-    /** Line coverage percentage (0–100). Omitted = not checked. */
+    /** Line coverage percentage (integer 0–100). Omitted = not checked. */
     line?: number;
-    /** Branch coverage percentage (0–100). Omitted = not checked. */
+    /** Branch coverage percentage (integer 0–100). Omitted = not checked. */
     branch?: number;
-    /** Function coverage percentage (0–100). Omitted = not checked. */
+    /** Function coverage percentage (integer 0–100). Omitted = not checked. */
     function?: number;
 }
 
@@ -217,7 +217,7 @@ function validateVersion(version: unknown): string {
 
 const MINIMUM_METRICS = ["line", "branch", "function"] as const;
 
-/** One metric entry: known name, numeric value in 0–100. */
+/** One metric entry: known name, integer percentage 0–100. */
 function validateMinimumEntry(
     key: string,
     metric: string,
@@ -228,9 +228,17 @@ function validateMinimumEntry(
             `.defined.json: unknown minimum metric "${metric}" in "coverage.${key}.minimums"`,
         );
     }
-    if (typeof value !== "number" || value < 0 || value > 100) {
+    // Integers only: the gate's comparison is exact integer arithmetic, and a
+    // fractional floor would compare in float (29% of 100 lines can read as
+    // 28.999999999999996). Reject it at the boundary rather than mis-gate.
+    if (
+        typeof value !== "number" ||
+        !Number.isInteger(value) ||
+        value < 0 ||
+        value > 100
+    ) {
         throw new Error(
-            `.defined.json: "coverage.${key}.minimums.${metric}" must be a number 0–100`,
+            `.defined.json: "coverage.${key}.minimums.${metric}" must be an integer 0–100`,
         );
     }
 }

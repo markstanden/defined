@@ -17,6 +17,11 @@ Summary: An exact-boundary defect in the coverage gate, the property test that f
 - The fix compares exactly: `hit * 100 >= minimum * found` (integer arithmetic
   for integer counters and minimums), with `found === 0` passing only at a 0
   minimum.
+- Minimums are integers 0–100 by contract: `loadConfig` rejects a fractional
+  value (`must be an integer 0–100`). Without that guard the integer form is
+  still float for decimals — 7 of 10,000 lines at a 0.07% minimum failed
+  (`0.07 * 10000 = 700.0000000000001`) and printed
+  `line: 0.07% (7/10000) < 0.07% minimum`, the same self-contradiction.
 - Failure messages show the exact counter pair and a floored four-decimal
   percentage — `line: 28.96% (724/2500) < 29% minimum` — derived by exact
   integer division, so the printed value can never read as meeting a minimum
@@ -48,14 +53,10 @@ Summary: An exact-boundary defect in the coverage gate, the property test that f
   cases on the unfixed code.
 - An independent enumeration of `found <= 5000` leaves zero disagreements with
   the exact oracle after the fix.
+- `loadConfig` rejects fractional minimums (`0.07`, `90.5`) and still accepts
+  the 0 and 100 boundaries.
 - `node --test` (609 pass) and `./runtime/comply.sh`
   (`{"status":"compliant"}`) on 2026-11-22.
-
-## Open questions
-
-- Fractional minimums (config accepts any number 0–100) still compare in float;
-  `hit * 100 >= minimum * found` is far tighter but not exact for arbitrary
-  decimal literals.
 
 ## Failed approaches
 
