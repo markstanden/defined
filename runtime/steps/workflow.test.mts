@@ -525,8 +525,13 @@ test("an escaped path is a regex matching exactly that literal", () => {
             // Act
             const pattern = new RegExp(`^${escapeRegexPath(expected)}$`, "u");
 
-            // Assert
-            return pattern.test(candidate) === (candidate === expected);
+            // Assert — the pattern matches the literal itself, and nothing
+            // else. Both halves can fail independently: an over-escaped
+            // pattern still rejects candidates but stops matching its own path.
+            return (
+                pattern.test(expected) &&
+                pattern.test(candidate) === (candidate === expected)
+            );
         }),
         { seed: 20261123 },
     );

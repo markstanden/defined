@@ -187,7 +187,8 @@ test("a rewrite replaces only the marked span and stays idempotent", async () =>
         "trailing  ",
     );
     const neighbours = fc.array(neighbourLine, { maxLength: 6 });
-    const block = [BLOCK_START, "fresh block", BLOCK_END].join("\n");
+    const blockLines = [BLOCK_START, "fresh block", BLOCK_END];
+    const block = blockLines.join("\n");
 
     // Act & Assert
     await fc.assert(
@@ -206,12 +207,17 @@ test("a rewrite replaces only the marked span and stays idempotent", async () =>
                 // Act
                 const [first, second] = await rewriteTwice({ target, block });
 
-                // Assert
+                // Assert — idempotent, neighbours verbatim, and the span itself
+                // replaced: a writer that left "stale" in place would satisfy
+                // the other two clauses on its own.
                 const lines = first.split("\n");
                 return (
                     second === first &&
                     lines.slice(0, before.length).join("\n") ===
                         before.join("\n") &&
+                    lines
+                        .slice(before.length, before.length + blockLines.length)
+                        .join("\n") === block &&
                     lines.slice(lines.length - after.length).join("\n") ===
                         after.join("\n")
                 );
