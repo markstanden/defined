@@ -36,6 +36,13 @@ jobs:
               with:
                   node-version: 26
 
+            - name: Install dev dependencies
+              # The suite imports fast-check, so a cold runner needs node_modules
+              # before the host test step; the container gate restores its own.
+              # --ignore-scripts: the dev dependencies have no required lifecycle
+              # scripts, and an install must never run them (githubactions:S6505).
+              run: npm ci --no-audit --no-fund --ignore-scripts
+
             - name: Read tool pins
               id: pins
               shell: bash

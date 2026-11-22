@@ -291,7 +291,8 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
 
     Absent `coverage` (or an absent ecosystem entry) skips that coverage step;
     `command` generates the report in `comply` mode; omitted minimums default
-    to 80% line coverage.
+    to 80% line coverage. Minimums are integers 0–100 — a fractional value is
+    a config error, because the gate compares exactly in integer arithmetic.
 
     Add optional `node` project checks to run the consumer's own
     ESLint/`tsc`/tests (and any other declared command) — the gate restores the

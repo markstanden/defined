@@ -7,6 +7,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
+import fc from "fast-check";
 
 import type { CommandResult } from "../../lib/proc.mts";
 import {
@@ -296,6 +297,50 @@ test("checkMinimums reports multiple failures", () => {
     assert.equal(result.failures.length, 3);
 });
 
+test("checkMinimums reports the exact counter pair with a floored percentage", () => {
+    // 724/2500 lines is 28.96%; a rounded one-decimal percentage printed
+    // "29.0% < 29%", contradicting the verdict.
+    // Arrange
+    const summary = {
+        linesFound: 2500,
+        linesHit: 724,
+        branchesFound: 0,
+        branchesHit: 0,
+        functionsFound: 0,
+        functionsHit: 0,
+    };
+
+    // Act
+    const result = checkMinimums({ summary, minimums: { line: 29 } });
+
+    // Assert
+    assert.deepEqual(result.failures, [
+        "line: 28.96% (724/2500) < 29% minimum",
+    ]);
+});
+
+test("a failure message never rounds its percentage up to the minimum", () => {
+    // 899,999 of 1,000,000 lines is 89.9999%; rounding to four decimal places
+    // would read 90.0000 and contradict the verdict.
+    // Arrange
+    const summary = {
+        linesFound: 1_000_000,
+        linesHit: 899_999,
+        branchesFound: 0,
+        branchesHit: 0,
+        functionsFound: 0,
+        functionsHit: 0,
+    };
+
+    // Act
+    const result = checkMinimums({ summary, minimums: { line: 90 } });
+
+    // Assert
+    assert.deepEqual(result.failures, [
+        "line: 89.9999% (899999/1000000) < 90% minimum",
+    ]);
+});
+
 test("checkMinimums treats zero lines found as 0%", () => {
     // Act
     const result = checkMinimums({
@@ -366,6 +411,110 @@ test("checkMinimums rejects a hit count exceeding found", () => {
             minimums: { line: 80 },
         }).pass,
         false,
+    );
+});
+
+test("checkMinimums passes when coverage exactly meets the minimum", () => {
+    // Regression: 29 of 100 lines at a 29% minimum computed 28.999999999999996
+    // in floating point and failed, printing "29.0% < 29% minimum". Shrunk
+    // from the property below, which found it before the fix.
+    // Arrange
+    const summary = {
+        linesFound: 100,
+        linesHit: 29,
+        branchesFound: 0,
+        branchesHit: 0,
+        functionsFound: 0,
+        functionsHit: 0,
+    };
+
+    // Act
+    const result = checkMinimums({ summary, minimums: { line: 29 } });
+
+    // Assert
+    assert.equal(result.pass, true);
+    assert.deepEqual(result.failures, []);
+});
+
+test("checkMinimums agrees with the exact ratio at every boundary", () => {
+    // Contract: a metric passes iff hit/found >= minimum/100. With integer
+    // counters and minimums the exact form is hit*100 >= minimum*found; the
+    // float form (hit/found)*100 >= minimum can round below the boundary.
+    // Coverage totals are round (lines and branches are counted in hundreds),
+    // so the generator puts hit exactly on the documented threshold — the
+    // boundary is where the contract decides, and where a borrowed float
+    // comparison drifts. It must stay an integer counter: the contract rejects
+    // fractional counts as malformed before any comparison.
+    // Arrange
+    const ROUND_DENOMINATORS = [100, 200, 400, 500, 1000, 2000];
+    const boundaryCounters = fc.integer({ min: 0, max: 100 }).chain((minimum) =>
+        fc.constantFrom(...ROUND_DENOMINATORS).map((found) => ({
+            found,
+            minimum,
+            hit: (minimum * found) / 100,
+        })),
+    );
+
+    // Act & Assert
+    fc.assert(
+        fc.property(boundaryCounters, ({ found, hit, minimum }) => {
+            // Act
+            const result = checkMinimums({
+                summary: {
+                    linesFound: found,
+                    linesHit: hit,
+                    branchesFound: 0,
+                    branchesHit: 0,
+                    functionsFound: 0,
+                    functionsHit: 0,
+                },
+                minimums: { line: minimum },
+            });
+
+            // Assert
+            return result.pass === hit * 100 >= minimum * found;
+        }),
+        { seed: 20261122, numRuns: 500 },
+    );
+});
+
+test("a failure message never displays the minimum it failed", () => {
+    // Contract: the message must not contradict the verdict. The displayed
+    // percentage is floored, so a failing case always reads below its minimum,
+    // however small the exact shortfall.
+    // Arrange
+    const ROUND_DENOMINATORS = [100, 200, 400, 500, 1000, 2000];
+    const failingCounters = fc.integer({ min: 1, max: 100 }).chain((minimum) =>
+        fc.constantFrom(...ROUND_DENOMINATORS).map((found) => ({
+            found,
+            minimum,
+            hit: Math.max(0, Math.floor((minimum * found) / 100) - 1),
+        })),
+    );
+
+    // Act & Assert
+    fc.assert(
+        fc.property(failingCounters, ({ found, hit, minimum }) => {
+            // Act
+            const result = checkMinimums({
+                summary: {
+                    linesFound: found,
+                    linesHit: hit,
+                    branchesFound: 0,
+                    branchesHit: 0,
+                    functionsFound: 0,
+                    functionsHit: 0,
+                },
+                minimums: { line: minimum },
+            });
+
+            // Assert
+            const shown = Number(
+                /^line: ([\d.]+)%/u.exec(result.failures[0] ?? "")?.[1],
+            );
+            return result.pass === false && shown < minimum;
+        }),
+        { seed: 20261130 },
     );
 });
 
@@ -505,6 +654,36 @@ test("write-capable no-fix runs in the repo so the report survives (#65)", async
     // The report lives only in the repo; a discarded scratch would not find it.
     assert.equal(result.status, "pass");
     assert.match(result.notice ?? "", /90\.0%/u);
+});
+
+test("the pass notice shows the exact line percentage, floored", async () => {
+    // Arrange — 724/2500 passes a 20% minimum; a one-decimal notice would read
+    // "29.0%", the rounding the failure message refuses.
+    const dir = await makeTempDir("quality-nc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: {
+            version: TEST_SHA,
+            coverage: { node: { command: "npm t", minimums: { line: 20 } } },
+        },
+        reportPath: "coverage/lcov.info",
+        reportContent: ["LF:2500", "LH:724"].join("\n"),
+    });
+
+    // Act
+    const { result } = await runCoverageScenario({
+        step: runNodeCoverageStep,
+        repoRoot: dir,
+        scratchDir: dir,
+        trackedFiles: ["package.json"],
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    assert.match(
+        result.notice ?? "",
+        /^node-coverage: 28\.96% line coverage \(724\/2500\)$/u,
+    );
 });
 
 test("gates line coverage against the effective minimum", async () => {

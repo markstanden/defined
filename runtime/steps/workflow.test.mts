@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
+import fc from "fast-check";
 
 import {
     buildGitleaksConfig,
@@ -487,6 +488,53 @@ test("escapeRegexPath escapes regex metacharacters", () => {
     assert.equal(escapeRegexPath("src/App.Core/bin/"), "src/App\\.Core/bin/");
     assert.equal(escapeRegexPath(".env"), "\\.env");
     assert.equal(escapeRegexPath("a+b"), "a\\+b");
+});
+
+test("an escaped path is a regex matching exactly that literal", () => {
+    // Metacharacter-heavy strings: the property walks the long tail the three
+    // literal cases above cannot enumerate.
+    // Arrange
+    const METACHARS = [
+        ".",
+        "*",
+        "+",
+        "?",
+        "^",
+        "$",
+        "{",
+        "}",
+        "(",
+        ")",
+        "|",
+        "[",
+        "]",
+        "\\",
+        "/",
+        "a",
+        "B",
+        "0",
+        "é",
+    ];
+    const path = fc
+        .array(fc.constantFrom(...METACHARS), { maxLength: 40 })
+        .map((chars) => chars.join(""));
+
+    // Act & Assert
+    fc.assert(
+        fc.property(fc.tuple(path, path), ([expected, candidate]) => {
+            // Act
+            const pattern = new RegExp(`^${escapeRegexPath(expected)}$`, "u");
+
+            // Assert — the pattern matches the literal itself, and nothing
+            // else. Both halves can fail independently: an over-escaped
+            // pattern still rejects candidates but stops matching its own path.
+            return (
+                pattern.test(expected) &&
+                pattern.test(candidate) === (candidate === expected)
+            );
+        }),
+        { seed: 20261123 },
+    );
 });
 
 test("buildGitleaksConfig anchors files end-to-end and dirs as prefixes", () => {

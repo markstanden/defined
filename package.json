@@ -1,0 +1,8 @@
+{
+    "name": "defined",
+    "private": true,
+    "description": "Mark's portable quality gate — dev dependencies for the gate's own test suite",
+    "devDependencies": {
+        "fast-check": "^4.11.0"
+    }
+}

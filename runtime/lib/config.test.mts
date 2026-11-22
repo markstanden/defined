@@ -426,7 +426,21 @@ test("loadConfig rejects minimum outside 0–100", async () => {
                 version: SHA,
                 coverage: { node: { command: "npm t", minimums: { line } } },
             },
-            re: /must be a number 0–100/u,
+            re: /must be an integer 0–100/u,
+        });
+    }
+});
+
+test("loadConfig rejects a fractional minimum", async () => {
+    for (const line of [90.5, 0.07]) {
+        // Act & Assert
+        await assertLoadRejects({
+            dir: await makeTempDir("quality-config-"),
+            config: {
+                version: SHA,
+                coverage: { node: { command: "npm t", minimums: { line } } },
+            },
+            re: /must be an integer 0–100/u,
         });
     }
 });

@@ -22,8 +22,10 @@ Everything else is consumer-owned in `.defined.json` under
 `coverage.<ecosystem>`:
 
 - `command` — the shell command that generates the report.
-- `minimums` — `line`, `branch` and `function` percentages. Omitting the key
-  entirely defaults to **80% line**; an absent metric is not checked.
+- `minimums` — `line`, `branch` and `function` percentages, each an integer
+  0–100. Omitting the key entirely defaults to **80% line**; an absent metric
+  is not checked. A fractional value is a config error: the comparison is
+  exact integer arithmetic.
 - `satisfies` (node only) — names a `node.checks` entry the coverage command
   also runs, so `node-checks` skips it instead of running the suite twice.
 

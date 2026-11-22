@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import fc from "fast-check";
 
 import {
     BLOCK_END,
@@ -24,6 +25,21 @@ const BLOCK = [
 
 async function makeTempTree(): Promise<string> {
     return mkdtemp(join(tmpdir(), "quality-agents-block-"));
+}
+
+/** Install the managed block twice in a row, returning the file after each write. */
+async function rewriteTwice({
+    target,
+    block,
+}: {
+    target: string;
+    block: string;
+}): Promise<[string, string]> {
+    await writeMarkedBlock({ filePath: target, block });
+    const first = await readFile(target, "utf8");
+    await writeMarkedBlock({ filePath: target, block });
+    const second = await readFile(target, "utf8");
+    return [first, second];
 }
 
 test("readMarkedBlock returns the marked span, newline-terminated", async () => {
@@ -155,6 +171,62 @@ test("writeMarkedBlock is idempotent: a second run leaves the file byte-identica
     } finally {
         await rm(root, { recursive: true, force: true });
     }
+});
+
+test("a rewrite replaces only the marked span and stays idempotent", async () => {
+    // Contract: re-runs rewrite only the marked lines; content above and below
+    // is preserved verbatim, whatever it is. Neighbours exclude marker text —
+    // a stray marker is a corrupt install, pinned by the example above.
+    // Arrange
+    const neighbourLine = fc.constantFrom(
+        "text",
+        "## heading",
+        "",
+        "- item",
+        "```",
+        "trailing  ",
+    );
+    const neighbours = fc.array(neighbourLine, { maxLength: 6 });
+    const blockLines = [BLOCK_START, "fresh block", BLOCK_END];
+    const block = blockLines.join("\n");
+
+    // Act & Assert
+    await fc.assert(
+        fc.asyncProperty(neighbours, neighbours, async (before, after) => {
+            // Arrange
+            const root = await makeTempTree();
+            try {
+                const target = join(root, "AGENTS.md");
+                await writeFile(
+                    target,
+                    [...before, BLOCK_START, "stale", BLOCK_END, ...after].join(
+                        "\n",
+                    ),
+                );
+
+                // Act
+                const [first, second] = await rewriteTwice({ target, block });
+
+                // Assert — idempotent, neighbours verbatim, and the span itself
+                // replaced: a writer that left "stale" in place would satisfy
+                // the other two clauses on its own.
+                const lines = first.split("\n");
+                return (
+                    second === first &&
+                    lines.slice(0, before.length).join("\n") ===
+                        before.join("\n") &&
+                    lines
+                        .slice(before.length, before.length + blockLines.length)
+                        .join("\n") === block &&
+                    lines.slice(lines.length - after.length).join("\n") ===
+                        after.join("\n")
+                );
+            } finally {
+                await rm(root, { recursive: true, force: true });
+            }
+        }),
+        { seed: 20261129 },
+    );
 });
 
 test("writeMarkedBlock throws on a half-written block", async () => {

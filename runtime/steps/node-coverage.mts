@@ -27,7 +27,7 @@ import {
     skipped,
     type StepResult,
 } from "../lib/step-result.mts";
-import { runScopedCommand } from "../lib/coverage.mts";
+import { formatPercent, runScopedCommand } from "../lib/coverage.mts";
 import type { Scratch } from "../lib/scratch.mts";
 import { run } from "../../lib/proc.mts";
 import { loadConfig, type CoverageMinimums } from "../lib/config.mts";
@@ -198,11 +198,15 @@ function compareMinimum({
     hit: number;
     minimum: number;
 }): string | null {
-    const pct = found > 0 ? (hit / found) * 100 : 0;
-    if (pct >= minimum) {
+    // Compare exactly: hit/found >= minimum/100 is the same statement as
+    // hit*100 >= minimum*found, and the integer form never rounds below the
+    // threshold. The float form (hit/found)*100 does — 29 of 100 lines at 29%
+    // computed 28.999999999999996 and failed a compliant repo.
+    const passes = found === 0 ? minimum <= 0 : hit * 100 >= minimum * found;
+    if (passes) {
         return null;
     }
-    return `${label}: ${pct.toFixed(1)}% < ${minimum}% minimum`;
+    return `${label}: ${formatPercent({ numerator: hit, denominator: found })}% (${hit}/${found}) < ${minimum}% minimum`;
 }
 
 /**
@@ -218,7 +222,7 @@ export function checkMinimums({
 }): {
     /** False when any tracked metric sits below its minimum. */
     pass: boolean;
-    /** One per failed metric: `<label>: <pct>% < <minimum>% minimum`. */
+    /** One per failed metric: `<label>: <pct>% (<hit>/<found>) < <minimum>% minimum`. */
     failures: string[];
 } {
     const invalid = counterFailures(summary);
@@ -367,7 +371,10 @@ export async function runNodeCoverageStep({
         });
     }
 
-    const pct = ((parsed.linesHit / parsed.linesFound) * 100).toFixed(1);
+    const pct = formatPercent({
+        numerator: parsed.linesHit,
+        denominator: parsed.linesFound,
+    });
     return passed({
         notice: `node-coverage: ${pct}% line coverage (${parsed.linesHit}/${parsed.linesFound})`,
     });
