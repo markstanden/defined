@@ -17,6 +17,11 @@ Summary: An exact-boundary defect in the coverage gate, the property test that f
 - The fix compares exactly: `hit * 100 >= minimum * found` (integer arithmetic
   for integer counters and minimums), with `found === 0` passing only at a 0
   minimum.
+- Failure messages show the exact counter pair and a floored four-decimal
+  percentage — `line: 28.96% (724/2500) < 29% minimum` — derived by exact
+  integer division, so the printed value can never read as meeting a minimum
+  the verdict failed. Round values keep one decimal (`70.0%`), preserving the
+  familiar output. A seed-pinned property pins that law.
 - Seed-pinned fast-check properties now cover `checkMinimums`,
   `escapeRegexPath`, `tfDirectories`, `identityHash` and `writeMarkedBlock`.
 - `fast-check` is a devDependency (`package.json`); `package-lock.json` pins it.
@@ -43,15 +48,11 @@ Summary: An exact-boundary defect in the coverage gate, the property test that f
   cases on the unfixed code.
 - An independent enumeration of `found <= 5000` leaves zero disagreements with
   the exact oracle after the fix.
-- `node --test` (606 pass) and `./runtime/comply.sh`
+- `node --test` (609 pass) and `./runtime/comply.sh`
   (`{"status":"compliant"}`) on 2026-11-22.
 
 ## Open questions
 
-- The failure message still renders coverage with `toFixed(1)`, so a genuine
-  near-boundary failure (28.96% against a 29% minimum) still prints
-  `29.0% < 29% minimum`. Cosmetic; needs a decision on precision or fraction
-  display.
 - Fractional minimums (config accepts any number 0–100) still compare in float;
   `hit * 100 >= minimum * found` is far tighter but not exact for arbitrary
   decimal literals.

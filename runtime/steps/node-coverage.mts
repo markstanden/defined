@@ -186,6 +186,27 @@ function counterFailures(summary: LcovSummary): string[] {
     return failures;
 }
 
+/**
+ * A coverage percentage for the failure message, floored at four decimal
+ * places (never rounded up) so a printed value can never read as meeting a
+ * minimum the exact comparison failed. Round values keep one decimal ("70.0");
+ * only awkward ratios grow digits ("28.96").
+ */
+function formatPercent({ hit, found }: { hit: number; found: number }): string {
+    if (found === 0) {
+        return "0.0";
+    }
+    // Ten-thousandths by exact integer division: (hit/found) * 100 * 10^4.
+    const tenThousandths = Number((BigInt(hit) * 1_000_000n) / BigInt(found));
+    const fixed = (tenThousandths / 10_000).toFixed(4);
+    let end = fixed.length;
+    while (end > 0 && fixed[end - 1] === "0") {
+        end -= 1;
+    }
+    const trimmed = fixed.slice(0, end);
+    return trimmed.endsWith(".") ? `${trimmed}0` : trimmed;
+}
+
 /** One minimum comparison: a percentage failure line, or null when it passes. */
 function compareMinimum({
     label,
@@ -206,8 +227,7 @@ function compareMinimum({
     if (passes) {
         return null;
     }
-    const pct = found > 0 ? (hit / found) * 100 : 0;
-    return `${label}: ${pct.toFixed(1)}% < ${minimum}% minimum`;
+    return `${label}: ${formatPercent({ hit, found })}% (${hit}/${found}) < ${minimum}% minimum`;
 }
 
 /**

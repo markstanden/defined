@@ -297,6 +297,50 @@ test("checkMinimums reports multiple failures", () => {
     assert.equal(result.failures.length, 3);
 });
 
+test("checkMinimums reports the exact counter pair with a floored percentage", () => {
+    // 724/2500 lines is 28.96%; a rounded one-decimal percentage printed
+    // "29.0% < 29%", contradicting the verdict.
+    // Arrange
+    const summary = {
+        linesFound: 2500,
+        linesHit: 724,
+        branchesFound: 0,
+        branchesHit: 0,
+        functionsFound: 0,
+        functionsHit: 0,
+    };
+
+    // Act
+    const result = checkMinimums({ summary, minimums: { line: 29 } });
+
+    // Assert
+    assert.deepEqual(result.failures, [
+        "line: 28.96% (724/2500) < 29% minimum",
+    ]);
+});
+
+test("a failure message never rounds its percentage up to the minimum", () => {
+    // 899,999 of 1,000,000 lines is 89.9999%; rounding to four decimal places
+    // would read 90.0000 and contradict the verdict.
+    // Arrange
+    const summary = {
+        linesFound: 1_000_000,
+        linesHit: 899_999,
+        branchesFound: 0,
+        branchesHit: 0,
+        functionsFound: 0,
+        functionsHit: 0,
+    };
+
+    // Act
+    const result = checkMinimums({ summary, minimums: { line: 90 } });
+
+    // Assert
+    assert.deepEqual(result.failures, [
+        "line: 89.9999% (899999/1000000) < 90% minimum",
+    ]);
+});
+
 test("checkMinimums treats zero lines found as 0%", () => {
     // Act
     const result = checkMinimums({
@@ -431,6 +475,46 @@ test("checkMinimums agrees with the exact ratio at every boundary", () => {
             return result.pass === hit * 100 >= minimum * found;
         }),
         { seed: 20261122, numRuns: 500 },
+    );
+});
+
+test("a failure message never displays the minimum it failed", () => {
+    // Contract: the message must not contradict the verdict. The displayed
+    // percentage is floored, so a failing case always reads below its minimum,
+    // however small the exact shortfall.
+    // Arrange
+    const ROUND_DENOMINATORS = [100, 200, 400, 500, 1000, 2000];
+    const failingCounters = fc.integer({ min: 1, max: 100 }).chain((minimum) =>
+        fc.constantFrom(...ROUND_DENOMINATORS).map((found) => ({
+            found,
+            minimum,
+            hit: Math.max(0, Math.floor((minimum * found) / 100) - 1),
+        })),
+    );
+
+    // Act & Assert
+    fc.assert(
+        fc.property(failingCounters, ({ found, hit, minimum }) => {
+            // Act
+            const result = checkMinimums({
+                summary: {
+                    linesFound: found,
+                    linesHit: hit,
+                    branchesFound: 0,
+                    branchesHit: 0,
+                    functionsFound: 0,
+                    functionsHit: 0,
+                },
+                minimums: { line: minimum },
+            });
+
+            // Assert
+            const shown = Number(
+                /^line: ([\d.]+)%/u.exec(result.failures[0] ?? "")?.[1],
+            );
+            return result.pass === false && shown < minimum;
+        }),
+        { seed: 20261130 },
     );
 });
 
