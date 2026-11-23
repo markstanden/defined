@@ -429,6 +429,53 @@ test("a failing declared workspace names itself and stops the run", async () => 
     cleanupScratch(scratch);
 });
 
+test("a failing format check names its workspace", async () => {
+    // Arrange
+    const repoRoot = await makeTwoProjectRepo();
+    await writeConfig(repoRoot, {
+        dotnet: { workspaces: ["a/A.csproj", "b/B.csproj"] },
+    });
+    const scratch = { dir: null as string | null };
+    const calls: string[][] = [];
+    const runner = (async ({
+        cmd,
+        args,
+        cwd,
+    }: {
+        cmd: string;
+        args: string[];
+        cwd?: string;
+    }) => {
+        calls.push([cmd, ...args, cwd ?? ""]);
+        const formatB =
+            args[0] === "format" &&
+            args.some((arg) => arg.includes("B.csproj"));
+        return formatB
+            ? { status: 1, stdout: "", stderr: "diff" }
+            : { status: 0, stdout: "", stderr: "" };
+    }) as typeof import("../../lib/proc.mts").run;
+
+    // Act
+    const result = await runDotNetStep({
+        ctx: { mode: "no-fix", repoRoot, scratch },
+        trackedFiles: ["a/A.csproj", "b/B.csproj"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "fail");
+    assert.match(
+        result.notice ?? "",
+        /dotnet: format found diffs \[b\/B\.csproj\] \(run with --fix\)/u,
+    );
+    const builtB = calls.some(
+        (call) =>
+            call[1] === "build" && call.some((arg) => arg.includes("B.csproj")),
+    );
+    assert.equal(builtB, false, "the run stops at the first failing workspace");
+    cleanupScratch(scratch);
+});
+
 test("a declared workspace outside the git scope fails before restore", async () => {
     // Arrange
     const repoRoot = await makeDotnetRepo();
