@@ -8,7 +8,7 @@
 // only the selection uses this result. A scope that selects nothing is an
 // operator error, never a clean run — the caller turns it into a failure.
 
-import { matchesGlob } from "./glob.mts";
+import { globMatcher } from "./glob.mts";
 
 /**
  * Narrow the git inventory to the declared content scope. `include` absent or
@@ -24,7 +24,8 @@ export function resolveScope({
     if (include === undefined || include.length === 0) {
         return files;
     }
-    return files.filter((file) =>
-        include.some((selector) => matchesGlob({ selector, file })),
-    );
+    // Compile each selector once, not once per file: a scope is matched against
+    // the whole inventory on every pass.
+    const matchers = include.map(globMatcher);
+    return files.filter((file) => matchers.some((matches) => matches(file)));
 }

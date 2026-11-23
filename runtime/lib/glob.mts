@@ -52,8 +52,17 @@ export function matchesGlob({
     selector: string;
     file: string;
 }): boolean {
+    return globMatcher(selector)(file);
+}
+
+/**
+ * Compile one selector once for many files: the reusable form of
+ * `matchesGlob`, for callers that match a selector against a whole inventory.
+ */
+export function globMatcher(selector: string): (file: string) => boolean {
     if (!isGlob(selector)) {
-        return selector === file;
+        return (file) => selector === file;
     }
-    return globToRegExp(selector).test(file);
+    const regex = globToRegExp(selector);
+    return (file) => regex.test(file);
 }
