@@ -103,7 +103,7 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
 
 ## Tested
 
-- `node --test` (679 tests): the glob dialect (segment, `**/`, `?`, anchoring,
+- `node --test` (689 tests): the glob dialect (segment, `**/`, `?`, anchoring,
   metacharacter escaping), scope resolution and the whole-inventory default,
   config accept/reject tables for both keys including the trailing-slash
   normalisation, dedupe and the two mutual exclusions, pass threading (scratch
@@ -111,6 +111,11 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
   leaving machinery running, the scope notice on `scan`, and the .NET workspace
   loop (declared order, first failure naming its workspace, an out-of-scope
   entry failing before restore, and fix-mode restore/format per workspace).
+- The review pass that followed added: gate-level scope threading (scan and
+  both comply passes), the dotnet format-diff workspace label, the config
+  container-shape rejects, the cache identity's out-of-scope `.editorconfig`
+  invalidation, the stale-vs-out-of-scope purity discrimination, and the
+  matcher hoist (40k files × 5 selectors: 214 ms → 21 ms).
 - The repo's own gate: `./runtime/comply.sh`.
 
 ## Open questions
