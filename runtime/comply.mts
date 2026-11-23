@@ -715,8 +715,9 @@ async function runScheduled({
 /**
  * The consumer config facts the orchestrator itself needs: the content-scope
  * selectors and the advisory drift that does not come from a bootstrap phase.
- * A malformed config yields neither — the steps that read it report the
- * failure themselves, once, rather than here as well.
+ * A config the loader rejects yields neither — including a failure that is not
+ * a parse error (an unreadable file, say) — because the steps that load the
+ * config report the failure themselves, once, rather than here as well.
  */
 async function configContext({
     repoRoot,
