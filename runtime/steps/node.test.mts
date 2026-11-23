@@ -137,6 +137,49 @@ test("runNodeStep runs prettier for a docs-only repo (no package.json)", async (
     }
 });
 
+test("a narrowed content scope still checks in-scope files when the repo trigger is outside it", async () => {
+    // Arrange
+    const cases: { label: string; tree: Record<string, string> }[] = [
+        {
+            label: "manifest outside the scope",
+            tree: {
+                "package.json": "{}\n",
+                "src/app.ts": "const a = 1;\n",
+            },
+        },
+        {
+            label: "markdown outside the scope",
+            tree: {
+                "README.md": "# title\n",
+                "src/app.ts": "const a = 1;\n",
+            },
+        },
+    ];
+
+    for (const { label, tree } of cases) {
+        const root = await makeTempDir("quality-node-");
+        await writeTree(root, tree);
+        const scratch = { dir: null };
+        const { runner, calls } = recordingRunner();
+        try {
+            // Act
+            const result = await runNodeStep({
+                ctx: { ...baseCtx, repoRoot: root, scratch },
+                trackedFiles: ["src/app.ts"],
+                scratchFiles: Object.keys(tree),
+                runner,
+            });
+
+            // Assert
+            assert.equal(result.status, "pass", label);
+            assert.equal(calls.length, 1, label);
+            assert.equal(calls[0]!.args.at(-1), "src/app.ts", label);
+        } finally {
+            cleanupScratch(scratch);
+        }
+    }
+});
+
 test("check mode runs prettier --check in the scratch working root with the git-scoped file list", async () => {
     // Arrange
     const root = await makeTempDir("quality-node-");

@@ -507,11 +507,12 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     Selectors use the same documented glob as `purity.pureModules` (`*` one
     segment, `**` zero or more, `?` one character) and a trailing `/` means the
     whole subtree. The scope filters what the `node`, `eslint`, `shell`, `yaml`,
-    `tofu`, `purity` and `node-deps` checks _report on_; it never narrows the
-    working copy, so a pinned `dotnet.workspaces` build still sees every file it
-    references, and it never touches gate machinery such as the managed workflow
-    check. A scope that matches no file in the git scope is a config error, not
-    a clean run.
+    `tofu` and `purity` checks _report on_; it never narrows the working copy or
+    the dependency restore, so a pinned `dotnet.workspaces` build still sees
+    every file it references and a config-declared Prettier/ESLint plugin still
+    resolves from its manifest, and it never touches gate machinery such as the
+    managed workflow check. A scope that matches no file in the git scope is a
+    config error, not a clean run.
 
     Two consequences to keep in mind. `scan` reports the narrowed scope as a
     `notices` entry, so a green run says what it did not look at. And a config

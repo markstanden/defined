@@ -243,8 +243,12 @@ export async function runNodeStep({
     scratchFiles?: string[];
     runner?: Runner;
 }): Promise<StepResult> {
-    const manifests = filterPackageJsons({ files: trackedFiles });
-    const markdownFiles = filterMarkdownFiles({ files: trackedFiles });
+    // What kind of project this is — Node, docs, or neither — is a whole-repo
+    // fact, so both probes read the full inventory: a scope that names only
+    // source files must not silence prettier on them. The files it checks are
+    // the scoped list.
+    const manifests = filterPackageJsons({ files: scratchFiles });
+    const markdownFiles = filterMarkdownFiles({ files: scratchFiles });
     if (manifests.length === 0 && markdownFiles.length === 0) {
         return skipped({
             notice: "node: no tracked package.json or *.md files",

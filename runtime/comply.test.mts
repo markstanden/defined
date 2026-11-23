@@ -1340,6 +1340,7 @@ test("runPass fails the scoped steps when the scope matches nothing", async () =
         steps: [
             {
                 id: "node",
+                scoped: true,
                 run: async () => {
                     touched.push("node");
                     return passed({});
@@ -1364,28 +1365,15 @@ test("runPass fails the scoped steps when the scope matches nothing", async () =
     );
 });
 
-test("runPass names every scoped step id in the module scope set", async () => {
+test("the run plan scopes exactly the content checks", async () => {
     // Arrange
-    const expected = [
-        "eslint",
-        "node",
-        "node-deps",
-        "purity",
-        "shell",
-        "tofu",
-        "yaml",
-    ];
+    const expected = ["eslint", "node", "purity", "shell", "tofu", "yaml"];
 
     // Act
     const actual = [...SCOPED_STEP_IDS].sort();
 
     // Assert
     assert.deepEqual(actual, expected);
-    assert.deepEqual(
-        actual.filter((id) => !STEP_IDS.includes(id)),
-        [],
-        "every scoped id is a real step id",
-    );
 });
 
 test("runGate_scan_surfacesTheConsumerConfigDriftWithoutBootstrap", async () => {

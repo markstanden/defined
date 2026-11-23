@@ -140,7 +140,7 @@ test("selectPurityPolicy rejects a selector matching no supported file", () => {
     // Act & Assert
     assert.throws(
         () => selectPurityPolicy({ config, files: ["lib/a.ts"] }),
-        /pureModules selector "lib\/missing\.ts" matches no supported file in the git scope/u,
+        /pureModules selector "lib\/missing\.ts" matches no supported file among the gated files/u,
     );
 });
 
@@ -155,11 +155,11 @@ test("selectPurityPolicy rejects a selector matching only unsupported files", ()
                 config,
                 files: ["docs/readme.md", "lib/a.ts"],
             }),
-        /pureModules selector "docs\/\*\.md" matches no supported file in the git scope/u,
+        /pureModules selector "docs\/\*\.md" matches no supported file among the gated files/u,
     );
 });
 
-test("selectPurityPolicy reports a target outside the git scope", () => {
+test("selectPurityPolicy reports a target outside the gated files", () => {
     // Arrange
     const config: PurityConfig = {
         commands: [{ file: "lib/receipts.mts", name: "saveReceipt" }],
@@ -168,11 +168,11 @@ test("selectPurityPolicy reports a target outside the git scope", () => {
     // Act & Assert
     assert.throws(
         () => selectPurityPolicy({ config, files: ["lib/other.mts"] }),
-        /purity: command "saveReceipt" is declared in "lib\/receipts\.mts", which is not in the git scope/u,
+        /purity: command "saveReceipt" is declared in "lib\/receipts\.mts", which is not among the gated files/u,
     );
 });
 
-test("selectPurityPolicy reports a query target outside the git scope", () => {
+test("selectPurityPolicy reports a query target outside the gated files", () => {
     // Arrange
     const config: PurityConfig = {
         queries: [{ file: "lib/receipts.mts", name: "readReceipt" }],
@@ -181,7 +181,7 @@ test("selectPurityPolicy reports a query target outside the git scope", () => {
     // Act & Assert
     assert.throws(
         () => selectPurityPolicy({ config, files: [] }),
-        /purity: query "readReceipt" is declared in "lib\/receipts\.mts", which is not in the git scope/u,
+        /purity: query "readReceipt" is declared in "lib\/receipts\.mts", which is not among the gated files/u,
     );
 });
 

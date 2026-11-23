@@ -151,6 +151,13 @@ interface Step {
      * never run concurrently; a resource is not a dependency edge (see `needs`).
      */
     uses?: readonly string[];
+    /**
+     * True when the step judges consumer content, so `.defined.json`
+     * `scope.include` narrows the files it is handed (`StepInput.checkFiles`).
+     * Declared beside the wiring that consumes `checkFiles`; `SCOPED_STEP_IDS`
+     * is derived from these flags, so the two cannot drift apart.
+     */
+    scoped?: true;
 }
 
 /**
@@ -173,22 +180,6 @@ export async function runSmoke({
     return passed({ notice: `container exec ok (${probe.stdout.trim()})` });
 }
 
-/**
- * Steps whose findings `.defined.json` `scope.include` narrows. Everything else
- * is gate machinery (bootstrap, the managed workflow, the naming grammar, the
- * smoke probe) or an explicitly declared consumer command, and keeps the whole
- * git scope: a scope must never blind the checks that judge the gate's own work.
- */
-export const SCOPED_STEP_IDS: ReadonlySet<string> = new Set([
-    "node-deps",
-    "node",
-    "eslint",
-    "purity",
-    "shell",
-    "yaml",
-    "tofu",
-]);
-
 const STEPS: Step[] = [
     {
         id: "naming",
@@ -203,19 +194,21 @@ const STEPS: Step[] = [
     {
         // The install contract is to materialise node_modules — a path no other
         // step writes — and the node family waits on it (`needs`), so it takes
-        // no shared resource and may overlap the dotnet family (#70).
+        // no shared resource and may overlap the dotnet family (#70). Restoring
+        // dependencies is machinery, not a finding: it sees the whole inventory
+        // whatever `scope.include` says (a config-declared plugin must resolve).
         id: "node-deps",
-        run: ({ mode, repoRoot, files, checkFiles, scratch, runner }) =>
+        run: ({ mode, repoRoot, files, scratch, runner }) =>
             runNodeDepsStep({
                 ctx: { mode, repoRoot, scratch },
-                trackedFiles: checkFiles,
-                scratchFiles: files,
+                trackedFiles: files,
                 runner,
             }),
     },
     {
         id: "node",
         needs: ["node-deps"],
+        scoped: true,
         run: ({
             mode,
             repoRoot,
@@ -236,6 +229,7 @@ const STEPS: Step[] = [
     {
         id: "eslint",
         needs: ["node-deps"],
+        scoped: true,
         run: ({
             mode,
             repoRoot,
@@ -258,6 +252,7 @@ const STEPS: Step[] = [
         // ESLint config, no cache. Fix mode skips it (a policy check is not a
         // repair), so comply's verification pass is the only judge.
         id: "purity",
+        scoped: true,
         run: ({ mode, repoRoot, checkFiles, runner }) =>
             runPurityStep({
                 ctx: { mode, repoRoot },
@@ -310,6 +305,7 @@ const STEPS: Step[] = [
     },
     {
         id: "shell",
+        scoped: true,
         run: ({ mode, repoRoot, checkFiles, runner }) =>
             runShellStep({
                 ctx: { mode, repoRoot },
@@ -320,6 +316,7 @@ const STEPS: Step[] = [
     { id: "smoke", run: runSmoke },
     {
         id: "yaml",
+        scoped: true,
         run: ({ mode, repoRoot, checkFiles, runner }) =>
             runYamlStep({
                 ctx: { mode, repoRoot },
@@ -339,6 +336,7 @@ const STEPS: Step[] = [
     {
         id: "tofu",
         uses: [CONSUMER_RESOURCE],
+        scoped: true,
         run: ({ mode, repoRoot, files, checkFiles, scratch, runner }) =>
             runTofuStep({
                 ctx: { mode, repoRoot, scratch },
@@ -351,6 +349,18 @@ const STEPS: Step[] = [
 
 /** The run-plan step ids, in order (the guide for `defined explain` coverage). */
 export const STEP_IDS: readonly string[] = STEPS.map((step) => step.id);
+
+/**
+ * Steps whose findings `.defined.json` `scope.include` narrows, taken from the
+ * `scoped` flag on the run plan so the set and the wiring cannot disagree.
+ * Everything else is gate machinery (bootstrap, the managed workflow, the
+ * naming grammar, the smoke probe, dependency restore) or an explicitly
+ * declared consumer command, and keeps the whole git scope: a scope must never
+ * blind a check that judges the gate's own work.
+ */
+export const SCOPED_STEP_IDS: ReadonlySet<string> = new Set(
+    STEPS.filter((step) => step.scoped === true).map((step) => step.id),
+);
 
 /**
  * Resolve the concurrency bound: an explicit override wins, then the
@@ -775,7 +785,7 @@ export async function runPass({
         failure === null
             ? steps
             : steps.map((step) =>
-                  SCOPED_STEP_IDS.has(step.id)
+                  step.scoped === true
                       ? {
                             ...step,
                             run: async () => errored({ message: failure }),
@@ -919,7 +929,6 @@ async function runComply({
     });
 }
 
-/** The verify flow: read-only bootstrap check → complete no-fix pass → result. */
 /**
  * The verify flow: read-only bootstrap check → complete no-fix pass → result.
  * `scan` is the same pass with the bootstrap check reported as a skip.

@@ -82,7 +82,7 @@ export function selectPurityPolicy({
         );
         if (!matched) {
             throw new Error(
-                `purity: pureModules selector "${selector}" matches no supported file in the git scope`,
+                `purity: pureModules selector "${selector}" matches no supported file among the gated files`,
             );
         }
     }
@@ -116,7 +116,7 @@ function requireInScope({
         !hasJsTsExtension({ file: target.file })
     ) {
         throw new Error(
-            `purity: ${role} "${target.name}" is declared in "${target.file}", which is not in the git scope`,
+            `purity: ${role} "${target.name}" is declared in "${target.file}", which is not among the gated files`,
         );
     }
 }

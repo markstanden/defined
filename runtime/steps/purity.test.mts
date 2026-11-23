@@ -112,7 +112,7 @@ test("purity reports a stale selector as an error before invoking ESLint", async
     assert.equal(calls.length, 0);
 });
 
-test("purity reports a target outside the git scope before invoking ESLint", async () => {
+test("purity reports a target outside the gated files before invoking ESLint", async () => {
     // Arrange
     const dir = await makeRepo({
         purity: {
@@ -130,7 +130,7 @@ test("purity reports a target outside the git scope before invoking ESLint", asy
 
     // Assert
     assert.equal(result.status, "error");
-    assert.match(result.notice ?? "", /not in the git scope/u);
+    assert.match(result.notice ?? "", /not among the gated files/u);
     assert.equal(calls.length, 0);
 });
 

@@ -40,10 +40,13 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
   `*.csproj` paths, deduped, run in declared order. It replaces discovery.
   `disable` plus `workspaces` is a parse error, as `disable` plus
   `coverage.dotnet` already was.
-- `SCOPED_STEP_IDS` names the seven steps the scope narrows (`node-deps`,
-  `node`, `eslint`, `purity`, `shell`, `yaml`, `tofu`). `StepInput` carries the
-  full `files` and the narrowed `checkFiles`; the four steps that build the
-  scratch take `scratchFiles` for materialisation and config/identity discovery.
+- `SCOPED_STEP_IDS` names the six steps the scope narrows (`node`, `eslint`,
+  `purity`, `shell`, `yaml`, `tofu`), derived from a `scoped` flag on the run
+  plan. `StepInput` carries the full `files` and the narrowed `checkFiles`; the
+  three steps that build the scratch take `scratchFiles` for materialisation and
+  config/identity discovery. Dependency restore (`node-deps`) sees the whole
+  inventory: it is machinery, and a config-declared plugin must resolve from
+  wherever its manifest lives.
 - A scope matching no file in the git scope fails every scoped step with
   `scope: scope.include matches no file in the git scope (N selector(s))`;
   machinery steps still report.
@@ -78,6 +81,14 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
   deliberately still hashes the **full** list's `.prettierignore` and
   `.editorconfig` files, because a root `.editorconfig` governs in-scope files
   even when it is itself out of scope.
+- The narrowed list belongs only where a finding is produced. Every signal that
+  asks what the repository _is_ — the scratch inventory, the node manifest and
+  markdown probes, consumer config and ignore discovery, the cache identity,
+  dependency restore — reads the full inventory. Passing the scope to one of
+  them silently disables a check instead of narrowing it: reviewing this change
+  found prettier skipping a `src/**` scope entirely because the root
+  `package.json` sat outside it, and the config-triggered root restore lost to
+  the same leak.
 - `dotnet.workspaces` belongs beside the scope rather than inside it: the scope
   says which findings are reported, the workspaces say what is built, and a
   repo may legitimately build a reference it does not report on.
