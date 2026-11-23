@@ -790,7 +790,8 @@ export async function runPass({
                   step.scoped === true
                       ? {
                             ...step,
-                            run: async () => errored({ message: failure }),
+                            run: () =>
+                                Promise.resolve(errored({ message: failure })),
                         }
                       : step,
               );
