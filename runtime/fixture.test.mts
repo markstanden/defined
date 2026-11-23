@@ -31,7 +31,12 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { test } from "node:test";
 
-import { createBrokenFixture, brokenFixtureFiles } from "./lib/fixture.mts";
+import {
+    cleanFixtureFiles,
+    createBrokenFixture,
+    createFixture,
+    brokenFixtureFiles,
+} from "./lib/fixture.mts";
 import { run } from "../lib/proc.mts";
 
 function hasEngine(): boolean {
@@ -235,6 +240,191 @@ test(
                 ignored,
                 brokenFixtureFiles()["dotfiles/nvim/lazy-lock.json"],
             );
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
+
+test(
+    "scan reports broken code, skips the bootstrap check, and neither writes nor adopts",
+    { skip: !hasEngine() },
+    async () => {
+        // Arrange — the same broken checkout verify rejects, with no adoption.
+        const root = await makeTemp();
+        try {
+            await createBrokenFixture({ root });
+            const before = hashTree(root);
+
+            // Act
+            const scan = await run({
+                cmd: gateShim(),
+                args: ["scan", "--full"],
+                cwd: root,
+            });
+
+            // Assert
+            assert.equal(
+                scan.status,
+                1,
+                `scan should fail, got:\n${scan.stdout}`,
+            );
+            const gate = parseGate(scan.stdout);
+            assert.equal(gate.status, "not_compliant");
+            for (const step of [
+                "node",
+                "eslint",
+                "shell",
+                "yaml",
+                "workflow",
+                "tofu",
+            ]) {
+                assert.ok(
+                    isUnsuccessful(gate, step),
+                    `${step} should be picked up by scan, got ${gate.results[step]}`,
+                );
+            }
+            // The headline difference from verify: bootstrap is a clean skip,
+            // never a drift finding, because scan never adopts.
+            assert.equal(gate.results.bootstrap, "skip");
+            assert.equal(
+                gate.errors?.some((error) => error.check === "bootstrap") ??
+                    false,
+                false,
+                "scan must not report bootstrap drift",
+            );
+            // Consumer tests are never guessed: no config declares any.
+            assert.equal(gate.results["node-checks"], "skip");
+            assert.equal(gate.results["node-coverage"], "skip");
+            // Never adopts: every gate-owned artefact stays absent, and the
+            // whole tree (including .git) is byte-identical afterwards.
+            for (const artefact of [
+                ".editorconfig",
+                ".gitattributes",
+                "Directory.Build.props",
+                "AGENTS.md",
+                ".defined.json",
+                ".github/workflows/defined--verify.yml",
+            ]) {
+                assert.equal(
+                    existsSync(join(root, artefact)),
+                    false,
+                    `scan must never create ${artefact}`,
+                );
+            }
+            assertTreeUntouched(root, before);
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
+
+test(
+    "scan is green on a clean, unadopted repository without touching it",
+    { skip: !hasEngine() },
+    async () => {
+        // Arrange — nothing wrong, nothing adopted: the try-out promise.
+        const root = await makeTemp();
+        try {
+            await createFixture({ root, files: cleanFixtureFiles() });
+            const before = hashTree(root);
+
+            // Act
+            const scan = await run({
+                cmd: gateShim(),
+                args: ["scan", "--full"],
+                cwd: root,
+            });
+
+            // Assert
+            assert.equal(
+                scan.status,
+                0,
+                `scan should pass, got:\n${scan.stdout}`,
+            );
+            const gate = parseGate(scan.stdout);
+            assert.equal(gate.status, "compliant");
+            assert.equal(gate.results.bootstrap, "skip");
+            assert.equal("errors" in gate, false);
+            assert.equal(
+                existsSync(join(root, "AGENTS.md")),
+                false,
+                "an install-less scan seeds no AGENTS block",
+            );
+            assertTreeUntouched(root, before);
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
+
+test(
+    "scan honours a locally ignored .defined.json (work-repo use)",
+    { skip: !hasEngine() },
+    async () => {
+        // Arrange — a clean repo whose config is present on disk but gitignored,
+        // so the git scope never carries it; the gate must still read it.
+        const root = await makeTemp();
+        try {
+            await createFixture({
+                root,
+                files: {
+                    ...cleanFixtureFiles(),
+                    "package.json":
+                        '{\n  "name": "fixture",\n  "private": true\n}\n',
+                    ".gitignore": ".defined.json\n",
+                },
+            });
+            await writeFile(
+                join(root, ".defined.json"),
+                `${JSON.stringify(
+                    {
+                        node: {
+                            packages: [
+                                {
+                                    dir: "",
+                                    install: false,
+                                    checks: [
+                                        { name: "probe", command: "true" },
+                                    ],
+                                },
+                            ],
+                        },
+                    },
+                    null,
+                    2,
+                )}\n`,
+            );
+            const listed = await run({
+                cmd: "git",
+                args: ["ls-files", "-co", "--exclude-standard"],
+                cwd: root,
+            });
+            assert.equal(
+                listed.stdout.split("\n").includes(".defined.json"),
+                false,
+                "the fixture config must be outside the git scope",
+            );
+            const before = hashTree(root);
+
+            // Act
+            const scan = await run({
+                cmd: gateShim(),
+                args: ["scan", "--full"],
+                cwd: root,
+            });
+
+            // Assert — the declared check ran, from config read off the mount.
+            assert.equal(
+                scan.status,
+                0,
+                `scan should pass, got:\n${scan.stdout}`,
+            );
+            const gate = parseGate(scan.stdout);
+            assert.equal(gate.status, "compliant");
+            assert.equal(gate.results["node-checks"], "pass");
+            assert.equal(gate.results.bootstrap, "skip");
+            assertTreeUntouched(root, before);
         } finally {
             await rm(root, { recursive: true, force: true });
         }

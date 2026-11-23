@@ -476,6 +476,25 @@ test("mounts the repo read-only for verify", async () => {
     });
 });
 
+test("mounts the repo read-only and keeps the cache for scan", async () => {
+    await withFixture("abc12345", async (fixture) => {
+        // Act
+        const r = await runLauncher({ fixture, args: ["scan", "--full"] });
+
+        // Assert
+        assert.equal(r.status, 0);
+        const run = r.log.find((line) => line.startsWith("run --rm"));
+        assert.ok(run, "scan must invoke the engine");
+        assert.match(run!, new RegExp(`-v ${fixture.repo}:/repo:ro`));
+        // The content cache lives outside /repo, so a read-only scan can use it.
+        assert.match(
+            run!,
+            /-v defined-cache-abc12345-[0-9a-f]{12}:\/home\/node\/\.cache\/defined( |$)/u,
+        );
+        assert.ok(run!.endsWith(`${IMAGE_REPO}:abc12345 scan --full`));
+    });
+});
+
 test("mounts read-only with no cache volumes for explain", async () => {
     await withFixture("abc12345", async (fixture) => {
         // Act
@@ -1454,6 +1473,18 @@ test("runs the local runtime for comply and verify in the source repo", async ()
         assert.equal(explain.status, 0);
         assert.equal(explain.stdout.trim(), "shim:explain shell");
         assert.deepEqual(explain.log, []);
+
+        // Act
+        const scan = await runLauncher({
+            fixture,
+            args: ["scan", "--full"],
+            env: source,
+        });
+
+        // Assert
+        assert.equal(scan.status, 0);
+        assert.equal(scan.stdout.trim(), "shim:scan --full");
+        assert.deepEqual(scan.log, [], "no engine runs in the source repo");
     });
 });
 

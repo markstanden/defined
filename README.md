@@ -51,10 +51,48 @@ the checkout is green. `verify` exists solely for the pipeline: it is the
 read-only check the installed `defined--verify.yml` runs in CI (never writes),
 and is not the command for a developer to reach for.
 
+### Try the gate without adopting it: `defined scan`
+
+`scan` runs the same lint/scan steps as `verify` with the bootstrap check
+skipped. It never creates `.editorconfig`, `.gitattributes`,
+`Directory.Build.props`, the managed workflow, an AGENTS block or a
+`.defined.json`, and it never writes to the checkout. Use it to try the gate on
+a repo you have not adopted — or one you do not own.
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/markstanden/defined/main/cli/scan.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/markstanden/defined/main/cli/scan.sh) --full --timings
+```
+
+`cli/scan.sh` downloads `cli/defined` from the published `main` branch,
+verifies it against a checksum, and caches it under
+`${XDG_CACHE_HOME:-~/.cache}/defined/launcher-<hash>` keyed by launcher
+content, so a repeat run downloads nothing; `--refresh` forces a fresh fetch.
+Nothing is installed and nothing is added to `PATH`; `--min`/`--full`/
+`--timings` pass straight through to the verb.
+
+A `.defined.json` is honoured when present — including a **gitignored** one:
+config is read from the mounted repo, never from the git scope, so a
+work-repo config can stay uncommitted. Put `.defined.json` in
+`.git/info/exclude` and `scan` runs your declared checks and coverage
+thresholds locally. Two caveats: CI never sees an ignored config (a fresh
+clone has no file), and declared commands run against a copy of the git scope,
+so gitignored fixtures or `.env` files are absent there — the same rule
+`verify` follows.
+
+Consumer commands are never guessed and never taken from argv: `node.checks`,
+`coverage.*.command` and `naming.command` run only when `.defined.json`
+declares them. With no config those steps report `skip`; `scan` runs the
+gate's own lint/scan checks only.
+
+`scan` needs an image that knows the verb: an unpinned repo rides `latest`
+(always current), while a repo pinned to an older gate image reports that
+image's usage error until `defined update`.
+
 ## Output: one JSON result line
 
-Both verbs print exactly one compact JSON object (plus a newline) to stdout, and
-exit non-zero unless it reports `"status":"compliant"`. The default is concise —
+Every result verb prints exactly one compact JSON object (plus a newline) to
+stdout, and exits non-zero unless it reports `"status":"compliant"`. The default is concise —
 `status` plus any `errors` — so a passing run is one short line:
 
 ```json
@@ -89,10 +127,11 @@ the plan and noise on every run after that:
   default of 80), and `seeded` means a project-owned seeded default
   (`.editorconfig`, `.gitattributes`, `Directory.Build.props`) differs from the
   image copy. Managed-file drift is not a notice — that stays a bootstrap
-  failure.
+  failure. `scan` has no bootstrap check, so it emits neither bootstrap errors
+  nor ownership notices.
 - **`results`** — every check in the run plan, including skipped ones, keyed by
   stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Present with `--full`
-  only.
+  only. On `scan`, `bootstrap` is `skip`.
 
 When another `comply` already holds this checkout, a run does not wait. It
 prints a third status — `busy` — carrying the running invocation's identity and
@@ -113,7 +152,7 @@ the git-scope files edited after that run started, and exits non-zero:
 
 An empty `newerThanRun` means the running gate is judging your current code, so
 wait for it; a non-empty list means your edits are not in that run, so cancel it
-and rerun. `verify` is read-only and never contends.
+and rerun. `verify` and `scan` are read-only and never contend.
 
 ```bash
 defined comply          # concise: status (+ errors when present)  [default]
@@ -206,14 +245,14 @@ The gate detects the stack (steps are named in the order `naming → node-deps �
 node → eslint → purity → node-checks → node-coverage → dotnet →
 dotnet-coverage → shell → smoke → yaml → workflow → tofu`; in the no-fix pass
 independent steps may run concurrently), skips cleanly when an ecosystem is
-absent, and fails loudly when a pinned tool is missing. `verify` never writes to
-the repo, so its write-capable steps — `node-deps`, `node`, `node-checks`,
-`node-coverage`, the `dotnet` family and `tofu` — work in a scratch copy of the
-git scope under the container's `/tmp` (a read-only mount cannot host
-`node_modules/`, `obj/`/`bin/` or `.terraform/`), and the repo checkout is never
-touched. `comply` is write-capable, so its coverage step instead generates the
-report in the repo (`coverage/lcov.info`), where a scanner such as SonarQube
-reads it. Tool versions are pinned in
+absent, and fails loudly when a pinned tool is missing. `verify` and `scan`
+never write to the repo, so their write-capable steps — `node-deps`, `node`,
+`node-checks`, `node-coverage`, the `dotnet` family and `tofu` — work in a
+scratch copy of the git scope under the container's `/tmp` (a read-only mount
+cannot host `node_modules/`, `obj/`/`bin/` or `.terraform/`), and the repo
+checkout is never touched. `comply` is write-capable, so its coverage step
+instead generates the report in the repo (`coverage/lcov.info`), where a
+scanner such as SonarQube reads it. Tool versions are pinned in
 [`runtime/tool-versions.env`](runtime/tool-versions.env) — a pin change rebuilds
 the image.
 
@@ -650,6 +689,7 @@ image tag and `defined update latest` always resolves to a pullable SHA.
 defined/
 ├── cli/                             # installed host launcher (no gate logic)
 │   ├── defined                      # bash; needs git + podman/docker
+│   ├── scan.sh                      # install-less entry: cached launcher + scan
 │   └── install.sh                   # verified, idempotent installer
 ├── runtime/                         # the container image (the gate)
 │   ├── Containerfile                # node 26 slim base, pinned tools

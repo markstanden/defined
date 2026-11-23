@@ -6,9 +6,13 @@
 //                                   → fresh verify (no-fix) pass → JSON result.
 //   defined verify [--min|--full] [--timings]   managed-artifact check (never
 //                                   writes) → complete no-fix pass → JSON result.
+//   defined scan [--min|--full] [--timings]     complete no-fix pass with the
+//                                   bootstrap check skipped: never adopts, so
+//                                   no seeded files, managed workflow or AGENTS
+//                                   block are written or demanded.
 // `comply` holds a per-checkout lock for the whole flow, so a second invocation
 // on the same checkout reports `busy` instead of racing the same files (#75);
-// read-only `verify` takes no lock.
+// read-only `verify` and `scan` take no lock.
 //
 // Exit is 0 only when the canonical result is `compliant`, 1 otherwise; the
 // exit code derives from the result, never from the rendered text. Output is a
@@ -41,8 +45,10 @@ import {
     mergeRepairErrors,
     renderBusyResult,
     renderResult,
+    BOOTSTRAP_CHECK,
     type GateResult,
     type Presentation,
+    type ReportedStep,
 } from "./lib/report.mts";
 import { runDotNetStep } from "./steps/dotnet.mts";
 import { runDotNetCoverageStep } from "./steps/dotnet-coverage.mts";
@@ -724,17 +730,17 @@ export async function runPass({
     return results;
 }
 
-/** Report the verbs: the two result verbs with flags, and the guidance verb. */
+/** Report the verbs: the three result verbs with flags, and the guidance verb. */
 export function printUsage(): void {
     console.log(
-        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined explain <step-or-rule>",
+        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined scan [--min|--full] [--timings] | defined explain <step-or-rule>",
     );
 }
 
 export interface RunGateDeps {
     /** Bootstrap (comply only). Injected so tests need no real checkout. */
     runSetupFn?: typeof runSetup;
-    /** Read-only bootstrap check (verify only). */
+    /** Read-only bootstrap check (verify only; scan reports it skipped). */
     checkSetupFn?: typeof checkSetup;
     /** Pass runner; injected so tests drive fake step results. */
     runPassFn?: typeof runPass;
@@ -823,6 +829,7 @@ async function runVerify({
     repoRoot,
     files,
     checkSetupFn,
+    bootstrapCheck = true,
     runPassFn,
     timings,
     signal,
@@ -832,15 +839,19 @@ async function runVerify({
     repoRoot: string;
     files: string[];
     checkSetupFn: typeof checkSetup;
+    /** False for `scan`: the bootstrap check is reported skipped, never run. */
+    bootstrapCheck?: boolean;
     runPassFn: typeof runPass;
     timings?: Timings;
     signal?: AbortSignal;
     cacheDir?: string;
     notify?: (line: string) => void;
 }): Promise<GateResult> {
-    const setup = await measure(timings, "setup check", () =>
-        checkSetupFn({ startDir: repoRoot }),
-    );
+    const setup = bootstrapCheck
+        ? await measure(timings, "setup check", () =>
+              checkSetupFn({ startDir: repoRoot }),
+          )
+        : undefined;
     const results = await measure(timings, "no-fix pass", () =>
         runPassFn({
             mode: "no-fix",
@@ -852,10 +863,22 @@ async function runVerify({
             notify,
         }),
     );
-    return buildResult({
-        setup,
-        steps: [...results].map(([id, result]) => ({ id, result })),
-    });
+    // `scan` never adopts, so the bootstrap check belongs to the run plan as a
+    // clean skip: nothing is compared against gate copies it never installed.
+    const steps: ReportedStep[] = [
+        ...(setup === undefined
+            ? [
+                  {
+                      id: BOOTSTRAP_CHECK,
+                      result: skipped({
+                          notice: "bootstrap check skipped (scan)",
+                      }),
+                  },
+              ]
+            : []),
+        ...[...results].map(([id, result]) => ({ id, result })),
+    ];
+    return buildResult({ setup, steps });
 }
 
 /** The injectable deps with their production defaults applied. */
@@ -883,11 +906,12 @@ function resolveDeps(deps: RunGateDeps): Required<RunGateDeps> {
 }
 
 /**
- * Run the full two-verb flow against a repo and print one JSON result line.
+ * Run the full result-verb flow against a repo and print one JSON result line.
  * `comply` bootstraps → repair (fix) pass → fresh verify (no-fix) pass, then
  * reports bootstrap state alongside the step findings; `verify` checks
- * bootstrap state then a complete no-fix pass. Exit 1 unless the result is
- * `compliant`. All deps are injectable for tests.
+ * bootstrap state then a complete no-fix pass; `scan` runs the same no-fix pass
+ * without the bootstrap check, so it never adopts and never writes. Exit 1
+ * unless the result is `compliant`. All deps are injectable for tests.
  */
 export async function runGate({
     verb,
@@ -930,6 +954,7 @@ export async function runGate({
                   repoRoot,
                   files,
                   checkSetupFn: resolved.checkSetupFn,
+                  bootstrapCheck: verb === "verify",
                   runPassFn: resolved.runPassFn,
                   timings: sink,
                   signal,
@@ -1080,7 +1105,7 @@ async function main(): Promise<void> {
     // Serialise comply runs per checkout (#75): the lock is held across
     // bootstrap, repair and verification, so a second invocation on this
     // checkout reports busy rather than racing the same files. Read-only verify
-    // takes no lock. A busy result is already printed, with the exit code set,
+    // and scan take no lock. A busy result is already printed, with the exit code set,
     // so there is nothing to release.
     let lock: LockHandle | undefined;
     let exitCode = 0;

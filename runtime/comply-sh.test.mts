@@ -195,6 +195,27 @@ test("mounts no deps volume and creates no mount point for explain", async () =>
     });
 });
 
+test("passes the scan verb through to the gate with its flags", async () => {
+    await withFixture(async (fixture) => {
+        // Arrange
+        await fakeEngine(fixture.bin, {});
+
+        // Act
+        const r = await runShim(fixture, ["scan", "--full"]);
+
+        // Assert
+        assert.equal(r.status, 0, r.stderr);
+        const run = r.log.find((line) => line.startsWith("run --rm"));
+        assert.ok(run, "scan must invoke the engine");
+        assert.match(run!, /scan --full$/u);
+        assert.doesNotMatch(
+            run!,
+            /--check-only/u,
+            "scan is verbatim, not a check-only alias",
+        );
+    });
+});
+
 test("propagates the gate's exit status", async () => {
     await withFixture(async (fixture) => {
         // Arrange

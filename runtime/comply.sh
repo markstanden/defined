@@ -7,9 +7,11 @@
 #
 # Usage: ./runtime/comply.sh            # local/agent loop (default): bootstrap + repair + verify
 #        ./runtime/comply.sh --check-only  # read-only no-fix pass (tests + no-write checks)
+#        ./runtime/comply.sh scan          # read-only no-fix pass, no bootstrap check (never adopts)
 #
 # `comply` is the always-use default; `--check-only` is the pipeline-style
-# read-only pass, kept for the fixture tests and local no-write checks. The
+# read-only pass, kept for the fixture tests and local no-write checks; `scan`
+# is the install-less verb (same no-fix pass, bootstrap check skipped). The
 # installed `defined` launcher is the public surface; this shim is gate
 # development only.
 #
@@ -19,7 +21,7 @@
 
 set -euo pipefail
 
-# Map the default verb and the check-only flag to the runtime contract.
+# Map the default verb and the read-only/scan verbs to the runtime contract.
 # `explain` passes through with its topic as the remaining argument.
 VERB="comply"
 if [[ "${1:-}" == "--check-only" ]]; then
@@ -27,6 +29,9 @@ if [[ "${1:-}" == "--check-only" ]]; then
     shift
 elif [[ "${1:-}" == "explain" ]]; then
     VERB="explain"
+    shift
+elif [[ "${1:-}" == "scan" ]]; then
+    VERB="scan"
     shift
 fi
 

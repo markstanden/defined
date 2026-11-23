@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # cli/defined — installed host launcher for the defined gate (decision #25).
 #
-# The run surface: `defined comply` and `defined verify`. `comply` is the
-# command to use locally and for agent work (bootstrap + repair + verify);
-# `verify` is the read-only check the pipeline runs and nothing else. Reads
+# The run surface: `defined comply`, `defined verify` and `defined scan`.
+# `comply` is the command to use locally and for agent work (bootstrap +
+# repair + verify); `verify` is the read-only check the pipeline runs and
+# nothing else; `scan` is the install-less read-only check (same no-fix pass,
+# bootstrap check skipped — it never adopts, so no seeded files, managed
+# workflow or AGENTS block are written or demanded). Reads
 # the consumer's committed .defined.json `version` (omitted → current default
 # image), picks a container engine (podman preferred), ensures the exact image
 # is present, then runs it — mounting the repo read-write for comply,
@@ -55,7 +58,7 @@ UPDATE_WORK=""
 LAUNCHER_REV=""
 
 usage() {
-    echo "usage: ${PROGRAM} comply [--min|--full] [--timings] | ${PROGRAM} verify [--min|--full] [--timings] | ${PROGRAM} explain <step-or-rule> | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
+    echo "usage: ${PROGRAM} comply [--min|--full] [--timings] | ${PROGRAM} verify [--min|--full] [--timings] | ${PROGRAM} scan [--min|--full] [--timings] | ${PROGRAM} explain <step-or-rule> | ${PROGRAM} version | ${PROGRAM} update [<sha>|latest] | ${PROGRAM} --version" >&2
     return 0
 }
 
@@ -570,7 +573,7 @@ main() {
         run_update "${2:-latest}"
         return 0
     fi
-    if [[ "${verb}" != "comply" && "${verb}" != "verify" && "${verb}" != "explain" ]]; then
+    if [[ "${verb}" != "comply" && "${verb}" != "verify" && "${verb}" != "scan" && "${verb}" != "explain" ]]; then
         usage
         return 2
     fi
@@ -600,6 +603,10 @@ main() {
             echo "${PROGRAM}: defined source repo — running the local runtime (${shim} --check-only)" >&2
             exec "${shim}" --check-only "${forward[@]}"
         fi
+        if [[ "${verb}" == "scan" ]]; then
+            echo "${PROGRAM}: defined source repo — running the local runtime (${shim} scan)" >&2
+            exec "${shim}" scan "${forward[@]}"
+        fi
         if [[ "${verb}" == "explain" ]]; then
             echo "${PROGRAM}: defined source repo — running the local runtime (${shim} explain)" >&2
             exec "${shim}" explain "${forward[@]}"
@@ -621,9 +628,9 @@ main() {
     local repo_hash mount_arg
     repo_hash="$(printf '%s' "${root}" | sha256sum | cut -c1-12)"
     # `explain` only reads the pinned image and the repo's .defined.json, so it
-    # mounts read-only and needs no dependency caches (unlike comply/verify).
+    # mounts read-only and needs no dependency caches (unlike comply/verify/scan).
     mount_arg="-v ${root}:/repo"
-    if [[ "${verb}" == "verify" || "${verb}" == "explain" ]]; then
+    if [[ "${verb}" == "verify" || "${verb}" == "scan" || "${verb}" == "explain" ]]; then
         mount_arg="-v ${root}:/repo:ro"
     fi
     local -a cache_args=()
