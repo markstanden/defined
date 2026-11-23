@@ -1376,6 +1376,78 @@ test("the run plan scopes exactly the content checks", async () => {
     assert.deepEqual(actual, expected);
 });
 
+/**
+ * A temp repo whose `.defined.json` declares `scope.include: ["src/**"]`, so a
+ * gate run can resolve a real config without a bootstrap phase.
+ */
+async function withScopedConfig(
+    run: (repoRoot: string) => Promise<void>,
+): Promise<void> {
+    const repoRoot = await mkdtemp(join(tmpdir(), "quality-scope-"));
+    await writeFile(
+        join(repoRoot, ".defined.json"),
+        JSON.stringify({ scope: { include: ["src/**"] } }),
+    );
+    try {
+        await run(repoRoot);
+    } finally {
+        await rm(repoRoot, { recursive: true, force: true });
+    }
+}
+
+test("runGate_scan passes the declared scope to the pass", async () => {
+    // Arrange
+    const scopes: (string[] | undefined)[] = [];
+
+    // Act
+    await withScopedConfig(async (repoRoot) => {
+        await runGate({
+            verb: "scan",
+            repoRoot,
+            files: [],
+            deps: {
+                runPassFn: async (input) => {
+                    scopes.push(input.scope);
+                    return allGreen();
+                },
+                printFn: () => undefined,
+                exitFn: () => undefined,
+            },
+        });
+    });
+
+    // Assert
+    assert.deepEqual(scopes, [["src/**"]]);
+});
+
+test("runGate_comply passes the declared scope to both passes", async () => {
+    // Arrange
+    const scopes: (string[] | undefined)[] = [];
+
+    // Act
+    await withScopedConfig(async (repoRoot) => {
+        await runGate({
+            verb: "comply",
+            repoRoot,
+            files: [],
+            deps: {
+                runSetupFn: async () => undefined,
+                checkSetupFn: async () => cleanSetup(),
+                trackedFilesFn: async () => [],
+                runPassFn: async (input) => {
+                    scopes.push(input.scope);
+                    return allGreen();
+                },
+                printFn: () => undefined,
+                exitFn: () => undefined,
+            },
+        });
+    });
+
+    // Assert
+    assert.deepEqual(scopes, [["src/**"], ["src/**"]]);
+});
+
 test("runGate_scan_surfacesTheConsumerConfigDriftWithoutBootstrap", async () => {
     // Arrange
     const repoRoot = await mkdtemp(join(tmpdir(), "quality-scan-scope-"));
