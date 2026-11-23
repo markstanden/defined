@@ -1069,6 +1069,7 @@ test("loadConfig rejects malformed dotnet.workspaces entries", async () => {
             /"dotnet\.workspaces\[0\]" must be a repo-relative/u,
         ],
         [[42], /"dotnet\.workspaces\[0\]" must be a non-empty string/u],
+        ["app.sln", /"dotnet\.workspaces" must be a non-empty array/u],
     ];
     for (const [workspaces, re] of cases) {
         // Act & Assert
@@ -1130,6 +1131,7 @@ test("loadConfig rejects a malformed scope declaration", async () => {
     // Arrange
     const cases: [Record<string, unknown>, RegExp][] = [
         [{ include: [] }, /"scope\.include" must be a non-empty array/u],
+        [{ include: "src/**" }, /"scope\.include" must be a non-empty array/u],
         [
             { include: ["../escape"] },
             /"scope\.include\[0\]" must be a repo-relative/u,
@@ -1156,6 +1158,18 @@ test("loadConfig rejects a malformed scope declaration", async () => {
             re,
         });
     }
+});
+
+test("loadConfig rejects a non-object scope", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ scope: [] }));
+
+    // Act & Assert
+    await assert.rejects(
+        () => loadConfig({ repoRoot: dir }),
+        /"scope" must be an object/u,
+    );
 });
 
 test("loadConfig dedupes repeated scope.include selectors", async () => {
