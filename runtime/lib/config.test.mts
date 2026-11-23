@@ -1010,3 +1010,165 @@ test("loadConfig rejects one symbol declared as both a command and a query", asy
         re: /"saveReceipt" in "lib\/receipts\.mts" is declared as both a command and a query/u,
     });
 });
+
+test("loadConfig parses dotnet.workspaces in declared order", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({
+            dotnet: {
+                workspaces: [
+                    "tests/FunctionAppLoyalty.Tests/FunctionAppLoyalty.Tests.csproj",
+                    "./D365i.sln",
+                ],
+            },
+        }),
+    );
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.dotnet?.workspaces, [
+        "tests/FunctionAppLoyalty.Tests/FunctionAppLoyalty.Tests.csproj",
+        "D365i.sln",
+    ]);
+});
+
+test("loadConfig dedupes repeated dotnet.workspaces entries", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({ dotnet: { workspaces: ["app.sln", "app.sln"] } }),
+    );
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.dotnet?.workspaces, ["app.sln"]);
+});
+
+test("loadConfig rejects malformed dotnet.workspaces entries", async () => {
+    // Arrange
+    const cases: [unknown, RegExp][] = [
+        [[], /"dotnet\.workspaces" must be a non-empty array/u],
+        [
+            ["../escape.sln"],
+            /"dotnet\.workspaces\[0\]" must be a repo-relative/u,
+        ],
+        [
+            ["/abs/app.sln"],
+            /"dotnet\.workspaces\[0\]" must be a repo-relative/u,
+        ],
+        [["src/app.txt"], /"dotnet\.workspaces\[0\]" must be a repo-relative/u],
+        [
+            ["src/*.csproj"],
+            /"dotnet\.workspaces\[0\]" must be a repo-relative/u,
+        ],
+        [[42], /"dotnet\.workspaces\[0\]" must be a non-empty string/u],
+    ];
+    for (const [workspaces, re] of cases) {
+        // Act & Assert
+        await assertLoadRejects({
+            dir: await makeTempDir("quality-config-"),
+            config: { dotnet: { workspaces } },
+            re,
+        });
+    }
+});
+
+test("loadConfig rejects dotnet.workspaces combined with dotnet.disable", async () => {
+    // Act & Assert
+    await assertLoadRejects({
+        dir: await makeTempDir("quality-config-"),
+        config: { dotnet: { disable: true, workspaces: ["app.sln"] } },
+        re: /"dotnet\.disable" cannot be combined with "dotnet\.workspaces"/u,
+    });
+});
+
+test("loadConfig parses scope.include and normalises a trailing slash", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({
+            scope: {
+                include: [
+                    "./src/FunctionAppLoyalty/**",
+                    "tests/FunctionAppLoyalty.Tests/",
+                ],
+            },
+        }),
+    );
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.scope?.include, [
+        "src/FunctionAppLoyalty/**",
+        "tests/FunctionAppLoyalty.Tests/**",
+    ]);
+});
+
+test("loadConfig treats an empty scope key as the whole git scope", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(dir, JSON.stringify({ scope: {} }));
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.equal(config.scope, undefined);
+});
+
+test("loadConfig rejects a malformed scope declaration", async () => {
+    // Arrange
+    const cases: [Record<string, unknown>, RegExp][] = [
+        [{ include: [] }, /"scope\.include" must be a non-empty array/u],
+        [
+            { include: ["../escape"] },
+            /"scope\.include\[0\]" must be a repo-relative/u,
+        ],
+        [
+            { include: ["/abs/path"] },
+            /"scope\.include\[0\]" must be a repo-relative/u,
+        ],
+        [
+            { include: ["src\\win"] },
+            /"scope\.include\[0\]" must be a repo-relative/u,
+        ],
+        [
+            { include: [""] },
+            /"scope\.include\[0\]" must be a non-empty string/u,
+        ],
+        [{ paths: ["src"] }, /unknown scope key "paths"/u],
+    ];
+    for (const [scope, re] of cases) {
+        // Act & Assert
+        await assertLoadRejects({
+            dir: await makeTempDir("quality-config-"),
+            config: { scope },
+            re,
+        });
+    }
+});
+
+test("loadConfig dedupes repeated scope.include selectors", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-config-");
+    await writeConfig(
+        dir,
+        JSON.stringify({ scope: { include: ["src/**", "src/**"] } }),
+    );
+
+    // Act
+    const config = await loadConfig({ repoRoot: dir });
+
+    // Assert
+    assert.deepEqual(config.scope?.include, ["src/**"]);
+});

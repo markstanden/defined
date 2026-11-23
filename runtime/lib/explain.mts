@@ -185,11 +185,22 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
     dotnet: {
         kind: "step",
         docRel: "documentation.md",
-        notice: "runs dotnet format/build/test when .NET projects are detected",
-        owner: (ctx) =>
-            ctx.config.dotnet?.disable === true
-                ? { side: "consumer", detail: ".defined.json dotnet.disable" }
-                : { side: "house", detail: "auto-detected .NET projects" },
+        notice: "runs dotnet format/build/test on the discovered or declared workspaces",
+        owner: (ctx) => {
+            if (ctx.config.dotnet?.disable === true) {
+                return {
+                    side: "consumer",
+                    detail: ".defined.json dotnet.disable",
+                };
+            }
+            if (ctx.config.dotnet?.workspaces !== undefined) {
+                return {
+                    side: "consumer",
+                    detail: ".defined.json dotnet.workspaces",
+                };
+            }
+            return { side: "house", detail: "auto-detected .NET projects" };
+        },
     },
     "dotnet-coverage": {
         kind: "step",

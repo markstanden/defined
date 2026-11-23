@@ -92,6 +92,18 @@ export interface NamingConfig {
     fix?: string;
 }
 
+/** Consumer scope: a positive allowlist over the repo's git inventory. */
+export interface ScopeConfig {
+    /**
+     * Repo-relative selectors (`*` one segment, `**` zero or more, `?` one
+     * character) the content checks may see. Absent = the whole git scope,
+     * which stays the default: narrowing is an explicit opt-in. The scope
+     * filters what is reported and never the working copy, so a build still
+     * sees every file it needs.
+     */
+    include: string[];
+}
+
 /** Consumer OpenTofu module layout (`.defined.json` `tofu` key). */
 export interface TofuConfig {
     /**
@@ -148,6 +160,14 @@ export interface DotnetConfig {
      * seeded owns its copy — remove it with `git rm` if unwanted.
      */
     disable?: boolean;
+    /**
+     * Explicit workspaces (repo-relative `*.sln`, `*.slnx` or `*.csproj`
+     * paths) to restore/format/build/test, in declared order. Replaces
+     * discovery, which needs exactly one solution or one lone project: a repo
+     * gating a subset of a multi-project solution names its workspaces here.
+     * Absent = discovery. Never combined with `disable`.
+     */
+    workspaces?: string[];
 }
 
 /** One declared command or query implementation. */
@@ -195,10 +215,15 @@ export interface DefinedConfig {
     eslint?: EslintConfig;
     /** Managed-workflow switch. Absent key = the workflow is installed. */
     workflow?: WorkflowConfig;
-    /** .NET switch. Absent key = the dotnet steps run when .NET is detected. */
+    /** .NET switch and explicit workspaces. Absent key = discovery applies. */
     dotnet?: DotnetConfig;
     /** Purity/CQS policy. Absent key = the purity step skips. */
     purity?: PurityConfig;
+    /**
+     * Content-check scope. Absent key = the whole git scope, the default.
+     * Present narrows which files the content checks report on.
+     */
+    scope?: ScopeConfig;
 }
 
 /** Empty config: all coverage steps skip, version is empty. */
@@ -614,27 +639,109 @@ function validateWorkflow(raw: unknown): WorkflowConfig | undefined {
     return { disable: entry.disable };
 }
 
-const DOTNET_KEYS = new Set(["disable"]);
+const DOTNET_KEYS = new Set(["disable", "workspaces"]);
+
+const DOTNET_WORKSPACE_SUFFIXES = [".sln", ".slnx", ".csproj"] as const;
+
+/** A repo-relative solution or project path: no glob, no escape, no absolute. */
+function validateDotnetWorkspace(where: string, raw: unknown): string {
+    const path = withoutDotSlash(expectNonEmptyString(where, raw));
+    if (
+        !isRepoRelativePath(path) ||
+        path.includes("*") ||
+        path.includes("?") ||
+        !DOTNET_WORKSPACE_SUFFIXES.some((suffix) => path.endsWith(suffix))
+    ) {
+        throw new Error(
+            `.defined.json: "${where}" must be a repo-relative *.sln, *.slnx or *.csproj path`,
+        );
+    }
+    return path;
+}
+
+function validateDotnetWorkspaces(raw: unknown): string[] {
+    return dedupeBy(
+        expectNonEmptyArray("dotnet.workspaces", raw).map((path, index) =>
+            validateDotnetWorkspace(`dotnet.workspaces[${index}]`, path),
+        ),
+        (path) => path,
+    );
+}
+
+function validateDotnetDisable(value: unknown): boolean {
+    if (typeof value !== "boolean") {
+        throw new TypeError(
+            `.defined.json: "dotnet.disable" must be a boolean`,
+        );
+    }
+    return value;
+}
 
 function validateDotnet(raw: unknown): DotnetConfig | undefined {
     if (raw === undefined || raw === null) {
         return undefined;
     }
-    if (typeof raw !== "object" || Array.isArray(raw)) {
-        throw new TypeError(`.defined.json: "dotnet" must be an object`);
-    }
-    const entry = raw as Record<string, unknown>;
+    const entry = expectObject("dotnet", raw);
     rejectUnknownKeys(entry, DOTNET_KEYS, "dotnet");
-    if (entry.disable === undefined) {
+    const result: DotnetConfig = {
+        ...(entry.disable === undefined
+            ? {}
+            : { disable: validateDotnetDisable(entry.disable) }),
+        ...(entry.workspaces === undefined
+            ? {}
+            : { workspaces: validateDotnetWorkspaces(entry.workspaces) }),
+    };
+    if (Object.keys(result).length === 0) {
         // `dotnet` present but nothing declared: detection applies.
         return undefined;
     }
-    if (typeof entry.disable !== "boolean") {
-        throw new TypeError(
-            `.defined.json: "dotnet.disable" must be a boolean`,
+    if (result.disable === true && result.workspaces !== undefined) {
+        throw new Error(
+            `.defined.json: "dotnet.disable" cannot be combined with "dotnet.workspaces"`,
         );
     }
-    return { disable: entry.disable };
+    return result;
+}
+
+const SCOPE_KEYS = new Set(["include"]);
+
+/**
+ * A content-scope selector: the shared glob dialect with a trailing slash as
+ * sugar for the directory's whole subtree (`terraform/` reads as
+ * `terraform/**`), so the obvious spelling does what the operator means.
+ */
+function validateScopeSelector(where: string, raw: unknown): string {
+    let selector = withoutDotSlash(expectNonEmptyString(where, raw));
+    if (selector.endsWith("/")) {
+        selector += "**";
+    }
+    if (!isRepoRelativePath(selector)) {
+        throw new Error(
+            `.defined.json: "${where}" must be a repo-relative path or glob`,
+        );
+    }
+    return selector;
+}
+
+function validateScope(raw: unknown): ScopeConfig | undefined {
+    if (raw === undefined || raw === null) {
+        return undefined;
+    }
+    const entry = expectObject("scope", raw);
+    rejectUnknownKeys(entry, SCOPE_KEYS, "scope");
+    if (entry.include === undefined) {
+        // `scope` present but nothing declared: the whole git scope applies.
+        return undefined;
+    }
+    return {
+        include: dedupeBy(
+            expectNonEmptyArray("scope.include", entry.include).map(
+                (selector, index) =>
+                    validateScopeSelector(`scope.include[${index}]`, selector),
+            ),
+            (selector) => selector,
+        ),
+    };
 }
 
 const PURITY_KEYS = new Set(["pureModules", "commands", "queries"]);
@@ -800,6 +907,7 @@ function validateParsed(raw: unknown): DefinedConfig {
     const workflow = validateWorkflow(obj.workflow);
     const dotnet = validateDotnet(obj.dotnet);
     const purity = validatePurity(obj.purity);
+    const scope = validateScope(obj.scope);
     if (dotnet?.disable === true && coverage?.dotnet !== undefined) {
         throw new Error(
             `.defined.json: "dotnet.disable" cannot be combined with "coverage.dotnet"`,
@@ -815,6 +923,7 @@ function validateParsed(raw: unknown): DefinedConfig {
         workflow,
         dotnet,
         purity,
+        scope,
     };
 }
 

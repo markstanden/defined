@@ -13,6 +13,7 @@
 // symbol against the source.
 
 import type { PurityConfig, PurityTarget } from "./config.mts";
+import { matchesGlob } from "./glob.mts";
 import { hasJsTsExtension } from "./js-files.mts";
 
 /** One file's command/query declarations, as the baked rule sees them. */
@@ -31,12 +32,11 @@ export interface PurityPolicy {
     cqs: Record<string, PurityFilePolicy>;
 }
 
-const REGEX_SPECIAL = /[.*+?^${}()|[\]\\]/gu;
-
 /**
  * True when the repo-relative `file` matches the positive `selector`.
  * Exact selectors compare literally; `*` never crosses `/`, `**` spans zero or
- * more whole segments, and `?` matches one non-separator character.
+ * more whole segments, and `?` matches one non-separator character. The dialect
+ * itself lives in lib/glob.mts, shared with `scope.include`.
  */
 export function selectorMatches({
     selector,
@@ -45,36 +45,7 @@ export function selectorMatches({
     selector: string;
     file: string;
 }): boolean {
-    if (!selector.includes("*") && !selector.includes("?")) {
-        return selector === file;
-    }
-    return globToRegExp(selector).test(file);
-}
-
-/** Compile a documented glob into an anchored regular expression. */
-function globToRegExp(selector: string): RegExp {
-    let source = "";
-    for (let index = 0; index < selector.length; index += 1) {
-        const char = selector[index]!;
-        if (char === "*") {
-            if (selector[index + 1] === "*") {
-                if (selector[index + 2] === "/") {
-                    source += "(?:[^/]+/)*";
-                    index += 2;
-                } else {
-                    source += ".*";
-                    index += 1;
-                }
-            } else {
-                source += "[^/]*";
-            }
-        } else if (char === "?") {
-            source += "[^/]";
-        } else {
-            source += char.replace(REGEX_SPECIAL, String.raw`\$&`);
-        }
-    }
-    return new RegExp(`^${source}$`, "u");
+    return matchesGlob({ selector, file });
 }
 
 function groupTargets(

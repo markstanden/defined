@@ -335,11 +335,15 @@ async function runTofuVerify({
 export async function runTofuStep({
     ctx,
     trackedFiles,
+    scratchFiles = trackedFiles,
     runner = run,
     readFileFn = readFile,
 }: {
     ctx: TofuRunContext;
+    /** The content-check scope: the *.tf files tofu reports on. */
     trackedFiles: string[];
+    /** The whole git inventory: the working copy is materialised from it. */
+    scratchFiles?: string[];
     runner?: Runner;
     readFileFn?: typeof readFile;
 }): Promise<StepResult> {
@@ -352,7 +356,7 @@ export async function runTofuStep({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
-        files: trackedFiles,
+        files: scratchFiles,
     });
 
     const args = {

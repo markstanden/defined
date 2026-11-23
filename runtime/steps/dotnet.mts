@@ -28,7 +28,8 @@ import {
 } from "../lib/step-result.mts";
 import { ensureScratch, type Scratch } from "../lib/scratch.mts";
 import { run, failureDetail, type CommandResult } from "../../lib/proc.mts";
-import { loadConfig } from "../lib/config.mts";
+import { loadConfig, type DefinedConfig } from "../lib/config.mts";
+import { join } from "node:path";
 
 export interface DotNetRunContext {
     /** Repair (fix) or authoritative verification (no-fix) — see comply #65. */
@@ -131,11 +132,14 @@ async function runRestoreAndFormat({
     workspace,
     workspaceRoot,
     mode,
+    label = "",
 }: {
     runner: Runner;
     workspace: string;
     workspaceRoot: string;
     mode: DotNetRunContext["mode"];
+    /** Suffix naming the workspace when several are gated at once. */
+    label?: string;
 }): Promise<StepResult | null> {
     // Restore inside the container into the shadowed NuGet cache; later
     // --no-restore phases assume this succeeded.
@@ -146,7 +150,7 @@ async function runRestoreAndFormat({
     );
     if (restore.status !== 0) {
         return failed({
-            notice: `dotnet: restore failed: ${failureDetail({ result: restore })}`,
+            notice: `dotnet: restore failed${label}: ${failureDetail({ result: restore })}`,
         });
     }
     // Fix mode: format writes. No-fix runs no mutation; verification below does
@@ -159,7 +163,7 @@ async function runRestoreAndFormat({
         );
         if (formatWrite.status !== 0) {
             return failed({
-                notice: `dotnet: format failed: ${failureDetail({
+                notice: `dotnet: format failed${label}: ${failureDetail({
                     result: formatWrite,
                 })}`,
             });
@@ -177,10 +181,13 @@ async function runVerifyPhase({
     runner,
     workspace,
     workspaceRoot,
+    label = "",
 }: {
     runner: Runner;
     workspace: string;
     workspaceRoot: string;
+    /** Suffix naming the workspace when several are gated at once. */
+    label?: string;
 }): Promise<StepResult | null> {
     const formatCheck = await runDotNetCommand(
         runner,
@@ -189,7 +196,7 @@ async function runVerifyPhase({
     );
     if (formatCheck.status !== 0) {
         return failed({
-            notice: "dotnet: format found diffs (run with --fix)",
+            notice: `dotnet: format found diffs${label} (run with --fix)`,
         });
     }
 
@@ -200,7 +207,7 @@ async function runVerifyPhase({
     );
     if (build.status !== 0) {
         return failed({
-            notice: `dotnet: build failed: ${failureDetail({ result: build })}`,
+            notice: `dotnet: build failed${label}: ${failureDetail({ result: build })}`,
         });
     }
 
@@ -211,64 +218,252 @@ async function runVerifyPhase({
     );
     if (test.status !== 0) {
         return failed({
-            notice: `dotnet: test failed: ${failureDetail({ result: test })}`,
+            notice: `dotnet: test failed${label}: ${failureDetail({ result: test })}`,
         });
     }
     return null;
 }
 
 /**
- * Run the .NET step over the discovered workspace. Repair (fix) mode runs only
- * restore + format; no-fix mode is the single authoritative verification
- * (format check, build, test) (#65). Returns skip when no .NET files tracked;
- * fail naming the failing phase.
+ * Resolve the workspaces to gate: the declared list when `.defined.json` names
+ * one, otherwise the single discovered solution or project.
+ *
+ * A declared workspace must be part of the git inventory — the scratch copy is
+ * materialised from that list, so anything outside it cannot be restored or
+ * built. Returns the failure step result rather than throwing: a stale entry is
+ * the operator's config error, reported like any other finding.
  */
-export async function runDotNetStep({
-    ctx,
+function resolveWorkspaces({
+    configured,
     trackedFiles,
-    runner = run,
+    workspaceRoot,
 }: {
-    ctx: DotNetRunContext;
+    configured: string[];
     trackedFiles: string[];
-    runner?: Runner;
-}): Promise<StepResult> {
-    const config = await loadConfig({ repoRoot: ctx.repoRoot });
+    workspaceRoot: string;
+}): { workspaces: string[] } | { failure: StepResult } {
+    const tracked = new Set(trackedFiles);
+    const missing = configured.filter((workspace) => !tracked.has(workspace));
+    if (missing.length > 0) {
+        return {
+            failure: failed({
+                notice: `dotnet: declared workspace not in the git scope: ${missing.join(", ")}`,
+            }),
+        };
+    }
+    return {
+        workspaces: configured.map((workspace) =>
+            join(workspaceRoot, workspace),
+        ),
+    };
+}
+
+/**
+ * Run the repair phase over every workspace: restore, then format. Returns the
+ * first failure, naming its workspace when more than one is gated.
+ */
+async function runSetupPhases({
+    runner,
+    workspaces,
+    workspaceRoot,
+    mode,
+}: {
+    runner: Runner;
+    workspaces: string[];
+    workspaceRoot: string;
+    mode: DotNetRunContext["mode"];
+}): Promise<StepResult | null> {
+    const named = workspaces.length > 1;
+    for (const workspace of workspaces) {
+        const failure = await runRestoreAndFormat({
+            runner,
+            workspace,
+            workspaceRoot,
+            mode,
+            label: workspaceLabel({ workspace, workspaceRoot, named }),
+        });
+        if (failure !== null) {
+            return failure;
+        }
+    }
+    return null;
+}
+
+/** Run the authoritative verification over every workspace. */
+async function runVerifyPhases({
+    runner,
+    workspaces,
+    workspaceRoot,
+}: {
+    runner: Runner;
+    workspaces: string[];
+    workspaceRoot: string;
+}): Promise<StepResult | null> {
+    const named = workspaces.length > 1;
+    for (const workspace of workspaces) {
+        const failure = await runVerifyPhase({
+            runner,
+            workspace,
+            workspaceRoot,
+            label: workspaceLabel({ workspace, workspaceRoot, named }),
+        });
+        if (failure !== null) {
+            return failure;
+        }
+    }
+    return null;
+}
+
+/** The workspace's repo-relative path as a notice suffix, when worth naming. */
+function workspaceLabel({
+    workspace,
+    workspaceRoot,
+    named,
+}: {
+    workspace: string;
+    workspaceRoot: string;
+    named: boolean;
+}): string {
+    return named ? ` [${workspace.slice(workspaceRoot.length + 1)}]` : "";
+}
+
+/** What the pass covered: the discovered projects or the declared workspaces. */
+function passSummary({
+    configured,
+    projectCount,
+    workspaceCount,
+}: {
+    configured: string[] | undefined;
+    projectCount: number;
+    workspaceCount: number;
+}): string {
+    return configured === undefined
+        ? `${projectCount} project(s)`
+        : `${workspaceCount} workspace(s)`;
+}
+
+/** Skip reasons that apply before any workspace resolution. */
+function dotnetSkip({
+    config,
+    configured,
+    projectCount,
+}: {
+    config: DefinedConfig;
+    configured: string[] | undefined;
+    projectCount: number;
+}): StepResult | null {
     if (config.dotnet?.disable === true) {
         return skipped({ notice: "dotnet: disabled by .defined.json" });
     }
-    const dotnetFiles = filterDotNetFiles({ files: trackedFiles });
-    if (dotnetFiles.length === 0) {
+    if (configured === undefined && projectCount === 0) {
         return skipped({
             notice: "dotnet: no tracked *.csproj/*.sln/*.slnx files",
         });
     }
+    return null;
+}
 
-    const slnxFiles = trackedFiles.filter((f) => f.endsWith(".slnx"));
-    const slnFiles = trackedFiles.filter((f) => f.endsWith(".sln"));
-    const csprojFiles = trackedFiles.filter((f) => f.endsWith(".csproj"));
-    // no-fix (verify/CI) runs against a scratch copy of the git scope under
-    // /tmp: restore/build/test must write obj/bin/TestResults, which a
-    // read-only /repo mount cannot. The scratch is shared with the coverage
-    // step via ctx.scratch (lib/scratch.mts).
-    const workspaceRoot =
-        ctx.mode === "no-fix"
-            ? ensureScratch({
-                  scratch: ctx.scratch,
-                  repoRoot: ctx.repoRoot,
-                  files: trackedFiles,
-              })
-            : ctx.repoRoot;
-    const workspace = discoverWorkspace({
-        repoRoot: workspaceRoot,
-        workspaceEnv: process.env.TOOL_WORKSPACE,
-        slnxFiles,
-        slnFiles,
-        csprojFiles,
+/**
+ * The writable root the workspace commands run in: the repo for a write-capable
+ * invocation, the shared scratch copy for a read-only no-fix pass. Restore,
+ * build and test write obj/bin/TestResults, which a read-only /repo mount
+ * cannot; the scratch is shared with the coverage step via ctx.scratch
+ * (lib/scratch.mts) and materialised from the whole inventory, so a narrowed
+ * content scope never starves a build.
+ */
+function resolveWorkspaceRoot({
+    ctx,
+    scratchFiles,
+}: {
+    ctx: DotNetRunContext;
+    scratchFiles: string[];
+}): string {
+    if (ctx.mode !== "no-fix") {
+        return ctx.repoRoot;
+    }
+    return ensureScratch({
+        scratch: ctx.scratch,
+        repoRoot: ctx.repoRoot,
+        files: scratchFiles,
+    });
+}
+
+/** The declared workspaces, or the single discovered one. */
+function resolveWorkspaceList({
+    configured,
+    trackedFiles,
+    workspaceRoot,
+}: {
+    configured: string[] | undefined;
+    trackedFiles: string[];
+    workspaceRoot: string;
+}): { workspaces: string[] } | { failure: StepResult } {
+    if (configured !== undefined) {
+        return resolveWorkspaces({ configured, trackedFiles, workspaceRoot });
+    }
+    return {
+        workspaces: [
+            discoverWorkspace({
+                repoRoot: workspaceRoot,
+                workspaceEnv: process.env.TOOL_WORKSPACE,
+                slnxFiles: trackedFiles.filter((f) => f.endsWith(".slnx")),
+                slnFiles: trackedFiles.filter((f) => f.endsWith(".sln")),
+                csprojFiles: trackedFiles.filter((f) => f.endsWith(".csproj")),
+            }),
+        ],
+    };
+}
+
+/**
+ * Run the .NET step over the discovered or declared workspaces. Repair (fix)
+ * mode runs only restore + format; no-fix mode is the single authoritative
+ * verification (format check, build, test) (#65). Returns skip when no .NET
+ * files tracked; fail naming the failing phase and, when several workspaces are
+ * gated, the workspace that failed.
+ */
+export async function runDotNetStep({
+    ctx,
+    trackedFiles,
+    scratchFiles = trackedFiles,
+    runner = run,
+}: {
+    ctx: DotNetRunContext;
+    trackedFiles: string[];
+    /** The whole git inventory the scratch copy is materialised from. */
+    scratchFiles?: string[];
+    runner?: Runner;
+}): Promise<StepResult> {
+    const config = await loadConfig({ repoRoot: ctx.repoRoot });
+    const configured = config.dotnet?.workspaces;
+    const dotnetFiles = filterDotNetFiles({ files: trackedFiles });
+    const skip = dotnetSkip({
+        config,
+        configured,
+        projectCount: dotnetFiles.length,
+    });
+    if (skip !== null) {
+        return skip;
+    }
+
+    const workspaceRoot = resolveWorkspaceRoot({ ctx, scratchFiles });
+    const resolved = resolveWorkspaceList({
+        configured,
+        trackedFiles,
+        workspaceRoot,
+    });
+    if ("failure" in resolved) {
+        return resolved.failure;
+    }
+    const { workspaces } = resolved;
+    const summary = passSummary({
+        configured,
+        projectCount: dotnetFiles.length,
+        workspaceCount: workspaces.length,
     });
 
-    const setupFailure = await runRestoreAndFormat({
+    const setupFailure = await runSetupPhases({
         runner,
-        workspace,
+        workspaces,
         workspaceRoot,
         mode: ctx.mode,
     });
@@ -278,13 +473,13 @@ export async function runDotNetStep({
     // Repair ended with a clean mutation: report that, do not verify.
     if (ctx.mode === "fix") {
         return passed({
-            notice: `dotnet: restored and formatted (${dotnetFiles.length} project(s))`,
+            notice: `dotnet: restored and formatted (${summary})`,
         });
     }
 
-    const verifyFailure = await runVerifyPhase({
+    const verifyFailure = await runVerifyPhases({
         runner,
-        workspace,
+        workspaces,
         workspaceRoot,
     });
     if (verifyFailure !== null) {
@@ -292,6 +487,6 @@ export async function runDotNetStep({
     }
 
     return passed({
-        notice: `dotnet: format/build/test clean (${dotnetFiles.length} project(s))`,
+        notice: `dotnet: format/build/test clean (${summary})`,
     });
 }

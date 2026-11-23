@@ -73,6 +73,9 @@ import {
     type StepStatus,
 } from "./lib/step-result.mts";
 import { cleanupScratch, type Scratch } from "./lib/scratch.mts";
+import { loadConfig } from "./lib/config.mts";
+import { resolveScope } from "./lib/scope.mts";
+import { configDrift, type DriftNotice } from "./lib/ownership-drift.mts";
 import { acquireLock, type LockHandle } from "./lib/lock.mts";
 import { createTimings, measure, now, type Timings } from "./lib/timings.mts";
 import { explainTopic, renderExplanation } from "./lib/explain.mts";
@@ -101,6 +104,12 @@ interface StepInput {
     repoRoot: string;
     /** Git-tracked files relative to repoRoot (lib/git.mts). */
     files: string[];
+    /**
+     * The git inventory narrowed by `.defined.json` `scope.include`: the files
+     * a content check may report on. Everything that must see the whole tree
+     * (the scratch copy, config and ignore discovery) uses `files` instead.
+     */
+    checkFiles: string[];
     /** Shared scratch box: the write-capable steps (node/dotnet families, tofu) work in /tmp for no-fix (findings #10, #20; issue #43). */
     scratch?: Scratch;
     /**
@@ -164,6 +173,22 @@ export async function runSmoke({
     return passed({ notice: `container exec ok (${probe.stdout.trim()})` });
 }
 
+/**
+ * Steps whose findings `.defined.json` `scope.include` narrows. Everything else
+ * is gate machinery (bootstrap, the managed workflow, the naming grammar, the
+ * smoke probe) or an explicitly declared consumer command, and keeps the whole
+ * git scope: a scope must never blind the checks that judge the gate's own work.
+ */
+export const SCOPED_STEP_IDS: ReadonlySet<string> = new Set([
+    "node-deps",
+    "node",
+    "eslint",
+    "purity",
+    "shell",
+    "yaml",
+    "tofu",
+]);
+
 const STEPS: Step[] = [
     {
         id: "naming",
@@ -180,30 +205,51 @@ const STEPS: Step[] = [
         // step writes — and the node family waits on it (`needs`), so it takes
         // no shared resource and may overlap the dotnet family (#70).
         id: "node-deps",
-        run: ({ mode, repoRoot, files, scratch, runner }) =>
+        run: ({ mode, repoRoot, files, checkFiles, scratch, runner }) =>
             runNodeDepsStep({
                 ctx: { mode, repoRoot, scratch },
-                trackedFiles: files,
+                trackedFiles: checkFiles,
+                scratchFiles: files,
                 runner,
             }),
     },
     {
         id: "node",
         needs: ["node-deps"],
-        run: ({ mode, repoRoot, files, scratch, runner, cacheDir, notify }) =>
+        run: ({
+            mode,
+            repoRoot,
+            files,
+            checkFiles,
+            scratch,
+            runner,
+            cacheDir,
+            notify,
+        }) =>
             runNodeStep({
                 ctx: { mode, repoRoot, scratch, cacheDir, notify },
-                trackedFiles: files,
+                trackedFiles: checkFiles,
+                scratchFiles: files,
                 runner,
             }),
     },
     {
         id: "eslint",
         needs: ["node-deps"],
-        run: ({ mode, repoRoot, files, scratch, runner, cacheDir, notify }) =>
+        run: ({
+            mode,
+            repoRoot,
+            files,
+            checkFiles,
+            scratch,
+            runner,
+            cacheDir,
+            notify,
+        }) =>
             runEslintStep({
                 ctx: { mode, repoRoot, scratch, cacheDir, notify },
-                trackedFiles: files,
+                trackedFiles: checkFiles,
+                scratchFiles: files,
                 runner,
             }),
     },
@@ -212,10 +258,10 @@ const STEPS: Step[] = [
         // ESLint config, no cache. Fix mode skips it (a policy check is not a
         // repair), so comply's verification pass is the only judge.
         id: "purity",
-        run: ({ mode, repoRoot, files, runner }) =>
+        run: ({ mode, repoRoot, checkFiles, runner }) =>
             runPurityStep({
                 ctx: { mode, repoRoot },
-                trackedFiles: files,
+                trackedFiles: checkFiles,
                 runner,
             }),
     },
@@ -264,20 +310,20 @@ const STEPS: Step[] = [
     },
     {
         id: "shell",
-        run: ({ mode, repoRoot, files, runner }) =>
+        run: ({ mode, repoRoot, checkFiles, runner }) =>
             runShellStep({
                 ctx: { mode, repoRoot },
-                trackedFiles: files,
+                trackedFiles: checkFiles,
                 runner,
             }),
     },
     { id: "smoke", run: runSmoke },
     {
         id: "yaml",
-        run: ({ mode, repoRoot, files, runner }) =>
+        run: ({ mode, repoRoot, checkFiles, runner }) =>
             runYamlStep({
                 ctx: { mode, repoRoot },
-                trackedFiles: files,
+                trackedFiles: checkFiles,
                 runner,
             }),
     },
@@ -293,10 +339,11 @@ const STEPS: Step[] = [
     {
         id: "tofu",
         uses: [CONSUMER_RESOURCE],
-        run: ({ mode, repoRoot, files, scratch, runner }) =>
+        run: ({ mode, repoRoot, files, checkFiles, scratch, runner }) =>
             runTofuStep({
                 ctx: { mode, repoRoot, scratch },
-                trackedFiles: files,
+                trackedFiles: checkFiles,
+                scratchFiles: files,
                 runner,
             }),
     },
@@ -655,6 +702,25 @@ async function runScheduled({
 }
 
 /**
+ * The consumer config facts the orchestrator itself needs: the content-scope
+ * selectors and the advisory drift that does not come from a bootstrap phase.
+ * A malformed config yields neither — the steps that read it report the
+ * failure themselves, once, rather than here as well.
+ */
+async function configContext({
+    repoRoot,
+}: {
+    repoRoot: string;
+}): Promise<{ scope?: string[]; notices: DriftNotice[] }> {
+    try {
+        const config = await loadConfig({ repoRoot });
+        return { scope: config.scope?.include, notices: configDrift(config) };
+    } catch {
+        return { notices: [] };
+    }
+}
+
+/**
  * Run a pass of steps. Repair (`fix`) runs strictly sequentially; verification
  * (`no-fix`) runs with bounded concurrency respecting each step's `needs` and
  * `uses` (#70). Either way results are keyed in `steps` order, so the report is
@@ -666,6 +732,7 @@ export async function runPass({
     mode,
     repoRoot,
     files,
+    scope,
     steps = STEPS,
     timings,
     repoWritable = false,
@@ -677,6 +744,11 @@ export async function runPass({
     mode: StepMode;
     repoRoot: string;
     files: string[];
+    /**
+     * Content-scope selectors (`scope.include`). Absent keeps the whole git
+     * scope, which is the default and the doctrine: the repository is gated.
+     */
+    scope?: string[];
     steps?: readonly Step[];
     /** Opt-in per-step durations, reported under `<mode>/<step>` (#71). */
     timings?: Timings;
@@ -691,12 +763,32 @@ export async function runPass({
     /** Opt-in cache metric sink (`--timings`); silent without it. */
     notify?: (line: string) => void;
 }): Promise<Map<string, StepResult>> {
-    const results = initialiseResults(steps);
+    const scoped = resolveScope({ files, include: scope });
+    // A scope that matches nothing is a *valid* config that would gate nothing,
+    // so it fails every step it would have narrowed rather than letting an
+    // empty run read clean. The gate's own machinery still reports.
+    const failure =
+        scope !== undefined && scoped.length === 0
+            ? `scope: scope.include matches no file in the git scope (${scope.length} selector(s))`
+            : null;
+    const activeSteps: readonly Step[] =
+        failure === null
+            ? steps
+            : steps.map((step) =>
+                  SCOPED_STEP_IDS.has(step.id)
+                      ? {
+                            ...step,
+                            run: async () => errored({ message: failure }),
+                        }
+                      : step,
+              );
+    const results = initialiseResults(activeSteps);
     const scratch: Scratch = { dir: null };
     const input: StepInput = {
         mode,
         repoRoot,
         files,
+        checkFiles: failure === null ? scoped : files,
         scratch,
         repoWritable,
         runner: cancellableRunner({ signal }),
@@ -706,7 +798,7 @@ export async function runPass({
     try {
         if (mode === "fix") {
             await runSequential({
-                steps,
+                steps: activeSteps,
                 results,
                 mode,
                 timings,
@@ -715,7 +807,7 @@ export async function runPass({
             });
         } else {
             await runScheduled({
-                steps,
+                steps: activeSteps,
                 results,
                 mode,
                 timings,
@@ -784,12 +876,14 @@ async function runComply({
     // snapshot (taken in main()) cannot contain. Re-fetch so both passes
     // judge the repo as it exists after setup; otherwise the node step's
     // prettier file list never sees the gate's own seeded files.
+    const scope = (await configContext({ repoRoot })).scope;
     const filesAfterSetup = await trackedFilesFn({ repoRoot });
     const repair = await measure(timings, "fix pass", () =>
         runPassFn({
             mode: "fix",
             repoRoot,
             files: filesAfterSetup,
+            scope,
             timings,
             repoWritable: true,
             signal,
@@ -805,6 +899,7 @@ async function runComply({
             mode: "no-fix",
             repoRoot,
             files: filesAfterRepair,
+            scope,
             timings,
             repoWritable: true,
             signal,
@@ -825,6 +920,10 @@ async function runComply({
 }
 
 /** The verify flow: read-only bootstrap check → complete no-fix pass → result. */
+/**
+ * The verify flow: read-only bootstrap check → complete no-fix pass → result.
+ * `scan` is the same pass with the bootstrap check reported as a skip.
+ */
 async function runVerify({
     repoRoot,
     files,
@@ -852,11 +951,15 @@ async function runVerify({
               checkSetupFn({ startDir: repoRoot }),
           )
         : undefined;
+    // Read the consumer config once for both jobs: the content scope (used by
+    // every verb) and the advisory drift `scan` must still surface.
+    const context = await configContext({ repoRoot });
     const results = await measure(timings, "no-fix pass", () =>
         runPassFn({
             mode: "no-fix",
             repoRoot,
             files,
+            scope: context.scope,
             timings,
             signal,
             cacheDir,
@@ -865,6 +968,9 @@ async function runVerify({
     );
     // `scan` never adopts, so the bootstrap check belongs to the run plan as a
     // clean skip: nothing is compared against gate copies it never installed.
+    // The consumer's own config drift still surfaces: a narrowed scope is the
+    // operator's decision and must be visible where they run the gate.
+    const notices = setup === undefined ? context.notices : [];
     const steps: ReportedStep[] = [
         ...(setup === undefined
             ? [
@@ -878,7 +984,7 @@ async function runVerify({
             : []),
         ...[...results].map(([id, result]) => ({ id, result })),
     ];
-    return buildResult({ setup, steps });
+    return buildResult({ setup, steps, notices });
 }
 
 /** The injectable deps with their production defaults applied. */

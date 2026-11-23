@@ -89,12 +89,16 @@ function toStepResult({
 export async function runNodeDepsStep({
     ctx,
     trackedFiles,
+    scratchFiles = trackedFiles,
     runner = run,
     readFileFn = readFile,
     existsSyncFn = existsSync,
 }: {
     ctx: NodeDepsRunContext;
+    /** The content-check scope: whose manifests get restored. */
     trackedFiles: string[];
+    /** The whole git inventory: the working copy is materialised from it. */
+    scratchFiles?: string[];
     runner?: Runner;
     readFileFn?: typeof readFile;
     existsSyncFn?: Exists;
@@ -113,12 +117,16 @@ export async function runNodeDepsStep({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
-        files: trackedFiles,
+        files: scratchFiles,
     });
     return toStepResult(
         await restoreNodePackages({
             workingRoot,
-            trackedFiles,
+            // Declared packages resolve against the whole repository, not the
+            // content scope: what is restored is build machinery, and a
+            // declaration that names no dir must find its manifest wherever the
+            // repo keeps it.
+            trackedFiles: scratchFiles,
             packages,
             runner,
             existsSyncFn,

@@ -57,12 +57,25 @@ const DISABLE_SWITCHES = [
 ] as const;
 
 /** Consumer overrides that switch off or lower a house check. */
-function configDrift(config: DefinedConfig): DriftNotice[] {
+export function configDrift(config: DefinedConfig): DriftNotice[] {
     const notices = DISABLE_SWITCHES.filter((switchConfig) =>
         switchConfig.on(config),
     ).map((switchConfig) =>
         configNotice(switchConfig.key, switchConfig.message),
     );
+    // A scope is a legitimate narrowing, not a disabled check: it never widens
+    // what passes, but it does shrink what is judged, so it must be visible on
+    // every verb — including `scan`, which never adopts and so runs no bootstrap
+    // check to hang the notice on.
+    const scope = config.scope?.include;
+    if (scope !== undefined) {
+        notices.push(
+            configNotice(
+                "scope.include",
+                `narrows the content checks to ${scope.length} selector(s)`,
+            ),
+        );
+    }
     for (const ecosystem of ["node", "dotnet"] as const) {
         const line = config.coverage?.[ecosystem]?.minimums?.line;
         if (line !== undefined && line < HOUSE_COVERAGE_LINE_MINIMUM) {

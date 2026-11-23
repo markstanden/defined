@@ -4,6 +4,9 @@
 // Run: node --test runtime/comply.test.mts
 
 import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import {
@@ -17,6 +20,7 @@ import {
     runGate,
     runPass,
     runSmoke,
+    SCOPED_STEP_IDS,
     STEP_IDS,
 } from "./comply.mts";
 import { STEP_IDS as EXPLAIN_STEP_IDS } from "./lib/explain.mts";
@@ -1270,4 +1274,150 @@ test("acquireComplyLock_acquired_returnsTheHandleAndDoesNotExit", async () => {
     assert.equal(released, 1, "the caller releases the lock it was given");
     assert.deepEqual(printed, []);
     assert.deepEqual(exits, []);
+});
+
+test("runPass keeps the whole inventory for the scratch and narrows the checks", async () => {
+    // Arrange
+    const seen: { files: string[]; checkFiles: string[] }[] = [];
+    const files = ["src/app/main.ts", "terraform/main.tf"];
+
+    // Act
+    await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files,
+        scope: ["src/**"],
+        steps: [
+            {
+                id: "node",
+                run: async ({ files: all, checkFiles }) => {
+                    seen.push({ files: all, checkFiles });
+                    return passed({});
+                },
+            },
+        ],
+    });
+
+    // Assert
+    assert.deepEqual(seen, [{ files, checkFiles: ["src/app/main.ts"] }]);
+});
+
+test("runPass leaves the whole inventory in place when no scope is declared", async () => {
+    // Arrange
+    const seen: string[][] = [];
+    const files = ["src/app/main.ts", "terraform/main.tf"];
+
+    // Act
+    await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files,
+        steps: [
+            {
+                id: "node",
+                run: async ({ checkFiles }) => {
+                    seen.push(checkFiles);
+                    return passed({});
+                },
+            },
+        ],
+    });
+
+    // Assert
+    assert.deepEqual(seen, [files]);
+});
+
+test("runPass fails the scoped steps when the scope matches nothing", async () => {
+    // Arrange
+    const touched: string[] = [];
+
+    // Act
+    const results = await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: ["src/app/main.ts"],
+        scope: ["docs/**"],
+        steps: [
+            {
+                id: "node",
+                run: async () => {
+                    touched.push("node");
+                    return passed({});
+                },
+            },
+            {
+                id: "workflow",
+                run: async () => {
+                    touched.push("workflow");
+                    return passed({});
+                },
+            },
+        ],
+    });
+
+    // Assert
+    assert.deepEqual(touched, ["workflow"], "gate machinery still runs");
+    assert.equal(results.get("node")?.status, "error");
+    assert.match(
+        results.get("node")?.errors[0]?.message ?? "",
+        /scope: scope\.include matches no file in the git scope \(1 selector\(s\)\)/u,
+    );
+});
+
+test("runPass names every scoped step id in the module scope set", async () => {
+    // Arrange
+    const expected = [
+        "eslint",
+        "node",
+        "node-deps",
+        "purity",
+        "shell",
+        "tofu",
+        "yaml",
+    ];
+
+    // Act
+    const actual = [...SCOPED_STEP_IDS].sort();
+
+    // Assert
+    assert.deepEqual(actual, expected);
+    assert.deepEqual(
+        actual.filter((id) => !STEP_IDS.includes(id)),
+        [],
+        "every scoped id is a real step id",
+    );
+});
+
+test("runGate_scan_surfacesTheConsumerConfigDriftWithoutBootstrap", async () => {
+    // Arrange
+    const repoRoot = await mkdtemp(join(tmpdir(), "quality-scan-scope-"));
+    await writeFile(
+        join(repoRoot, ".defined.json"),
+        JSON.stringify({ scope: { include: ["src/**"] } }),
+    );
+    const printed: string[] = [];
+    try {
+        // Act
+        await runGate({
+            verb: "scan",
+            repoRoot,
+            files: [],
+            deps: {
+                runPassFn: async () => allGreen(),
+                printFn: (line) => printed.push(line),
+                exitFn: () => undefined,
+            },
+        });
+    } finally {
+        await rm(repoRoot, { recursive: true, force: true });
+    }
+
+    // Assert
+    const result = parsePrinted(printed);
+    assert.equal(result.status, "compliant");
+    assert.equal(result.notices?.length, 1);
+    assert.match(
+        result.notices?.[0]?.message ?? "",
+        /scope\.include: narrows the content checks to 1 selector\(s\)/u,
+    );
 });

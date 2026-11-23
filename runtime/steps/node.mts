@@ -229,10 +229,18 @@ export function parsePrettierFindings({
 export async function runNodeStep({
     ctx,
     trackedFiles,
+    scratchFiles = trackedFiles,
     runner = run,
 }: {
     ctx: NodeRunContext;
+    /** The content-check scope: the files prettier reports on. */
     trackedFiles: string[];
+    /**
+     * The whole git inventory. The working copy, the consumer config probe and
+     * the cache identity use it, so narrowing the scope never starves the
+     * scratch or hides a governing `.editorconfig` from the identity.
+     */
+    scratchFiles?: string[];
     runner?: Runner;
 }): Promise<StepResult> {
     const manifests = filterPackageJsons({ files: trackedFiles });
@@ -260,7 +268,7 @@ export async function runNodeStep({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
-        files: trackedFiles,
+        files: scratchFiles,
     });
     const sharedArgs = [
         ...(await prettierConfigArgs({ repoRoot: workingRoot })),
@@ -294,7 +302,7 @@ export async function runNodeStep({
         prettierFiles,
         sharedArgs,
         workingRoot,
-        trackedFiles,
+        trackedFiles: scratchFiles,
         runner,
         summary: `${manifests.length} package(s), ${markdownFiles.length} md, ${prettierFiles.length} parseable`,
     });

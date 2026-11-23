@@ -54,6 +54,12 @@ export interface ReportInput {
     setup?: SetupCheck;
     /** Per-step outcomes, in run-plan order. */
     steps: ReportedStep[];
+    /**
+     * Advisory drift that does not come from the bootstrap phase, so it can
+     * surface on a verb that never runs one (`scan`). Merged after the setup
+     * drift, which keeps comply/verify output unchanged.
+     */
+    notices?: DriftNotice[];
 }
 
 /** A diagnostic carrying the check that produced it. */
@@ -195,7 +201,11 @@ export function mergeRepairErrors({
  * Assemble the canonical result: every check's status plus actionable
  * diagnostics. `bootstrap` leads the results when a setup check is supplied.
  */
-export function buildResult({ setup, steps }: ReportInput): GateResult {
+export function buildResult({
+    setup,
+    steps,
+    notices: extra,
+}: ReportInput): GateResult {
     const results: Record<string, StepStatus> = {};
     const errors: Diagnostic[] = [];
     if (setup) {
@@ -207,7 +217,7 @@ export function buildResult({ setup, steps }: ReportInput): GateResult {
         results[step.id] = step.result.status;
         errors.push(...stepErrors(step));
     }
-    const notices = setup?.drift ?? [];
+    const notices = [...(setup?.drift ?? []), ...(extra ?? [])];
     return {
         status: errors.length > 0 ? "not_compliant" : "compliant",
         results,

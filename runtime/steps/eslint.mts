@@ -425,11 +425,15 @@ async function repairEslint({
 export async function runEslintStep({
     ctx,
     trackedFiles,
+    scratchFiles = trackedFiles,
     runner = run,
     notifyFn = (line) => process.stderr.write(`${line}\n`),
 }: {
     ctx: EslintRunContext;
+    /** The content-check scope: the files eslint reports on. */
     trackedFiles: string[];
+    /** The whole git inventory: working copy and consumer-config probe. */
+    scratchFiles?: string[];
     runner?: Runner;
     notifyFn?: (line: string) => void;
 }): Promise<StepResult> {
@@ -443,14 +447,14 @@ export async function runEslintStep({
         return skipped({ notice: "eslint: no tracked JS/TS files" });
     }
 
-    const kind: ConfigKind = hasConsumerEslintConfig({ files: trackedFiles })
+    const kind: ConfigKind = hasConsumerEslintConfig({ files: scratchFiles })
         ? "repo"
         : "house";
     const workingRoot = resolveWorkingRoot({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
-        files: trackedFiles,
+        files: scratchFiles,
     });
 
     await manageExample({ mode: ctx.mode, kind, workingRoot, notifyFn });
