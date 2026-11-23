@@ -465,6 +465,63 @@ test("runGate_verifyFailingStep_exitsOne", async () => {
     assert.deepEqual(exits, [1]);
 });
 
+test("runGate_scan_skipsTheBootstrapCheckAndRunsTheNoFixPass", async () => {
+    // Arrange
+    const printed: string[] = [];
+    const exits: number[] = [];
+    const calls: string[] = [];
+
+    // Act
+    await runGate({
+        verb: "scan",
+        repoRoot: "/repo",
+        files: ["a.ts"],
+        presentation: "full",
+        deps: {
+            checkSetupFn: async () => {
+                calls.push("setup");
+                return cleanSetup();
+            },
+            runPassFn: async ({ mode, files }) => {
+                calls.push(`pass:${mode}`);
+                assert.deepEqual(files, ["a.ts"]);
+                return allGreen();
+            },
+            printFn: (line) => printed.push(line),
+            exitFn: (code) => exits.push(code),
+        },
+    });
+
+    // Assert — no bootstrap check at all, then exactly one no-fix pass.
+    assert.deepEqual(calls, ["pass:no-fix"]);
+    const result = parsePrinted(printed);
+    assert.equal(result.status, "compliant");
+    assert.equal(result.results.bootstrap, "skip");
+    assert.equal("errors" in result, false, "a clean scan has no diagnostics");
+    assert.deepEqual(exits, []);
+});
+
+test("runGate_scanFailingStep_exitsOne", async () => {
+    // Arrange
+    const exits: number[] = [];
+
+    // Act
+    await runGate({
+        verb: "scan",
+        repoRoot: "/repo",
+        files: [],
+        deps: {
+            checkSetupFn: async () => cleanSetup(),
+            runPassFn: async () => oneFail(),
+            printFn: () => undefined,
+            exitFn: (code) => exits.push(code),
+        },
+    });
+
+    // Assert
+    assert.deepEqual(exits, [1]);
+});
+
 test("runGate_defaultsToMinPresentation", async () => {
     // Arrange
     const printed: string[] = [];
@@ -707,7 +764,7 @@ test("explainStepIds_coverEveryOrchestratorStep", () => {
     );
 });
 
-test("printUsage prints the three-verb usage line with flags", () => {
+test("printUsage prints the result-verb usage line with flags", () => {
     // Arrange
     const lines: string[] = [];
     const original = console.log;
@@ -721,7 +778,7 @@ test("printUsage prints the three-verb usage line with flags", () => {
 
     // Assert
     assert.deepEqual(lines, [
-        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined explain <step-or-rule>",
+        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined scan [--min|--full] [--timings] | defined explain <step-or-rule>",
     ]);
 });
 

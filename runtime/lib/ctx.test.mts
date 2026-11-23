@@ -26,7 +26,7 @@ async function tempGitTree(): Promise<string> {
     return dir;
 }
 
-test("parseCommand_acceptsExactlyComplyAndVerify_defaultingToMin", () => {
+test("parseCommand_acceptsTheResultVerbs_defaultingToMin", () => {
     // Act & Assert
     assert.deepEqual(parseCommand({ argv: ["comply"] }), {
         verb: "comply",
@@ -38,6 +38,14 @@ test("parseCommand_acceptsExactlyComplyAndVerify_defaultingToMin", () => {
     // Act & Assert
     assert.deepEqual(parseCommand({ argv: ["verify"] }), {
         verb: "verify",
+        help: false,
+        presentation: "min",
+        timings: false,
+    });
+
+    // Act & Assert
+    assert.deepEqual(parseCommand({ argv: ["scan"] }), {
+        verb: "scan",
         help: false,
         presentation: "min",
         timings: false,
@@ -81,6 +89,14 @@ test("parseCommand_acceptsTimingsAloneAndAlongsidePresentation", () => {
             timings: true,
         },
     );
+
+    // Act & Assert — scan takes the same presentation surface as the pair.
+    assert.deepEqual(parseCommand({ argv: ["scan", "--full", "--timings"] }), {
+        verb: "scan",
+        help: false,
+        presentation: "full",
+        timings: true,
+    });
 });
 
 test("parseCommand_rejectsConflictingPresentationFlags", () => {

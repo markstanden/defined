@@ -1,8 +1,9 @@
 // lib/ctx.mts — command parsing and run-context assembly for the gate.
 //
-// The public contract is two result verbs (decision #23) plus a read-only
+// The public contract is three result verbs (decision #23) plus a read-only
 // guidance verb: `comply` (bootstrap + repair + verify), `verify` (read-only
-// check) and `explain <step-or-rule>` (offline house guidance, #74). Each result
+// check), `scan` (read-only check without the bootstrap check: never adopts)
+// and `explain <step-or-rule>` (offline house guidance, #74). Each result
 // verb accepts an optional presentation flag: `--min` (default) keeps `status`
 // and every diagnostic; `--full` adds the per-check results map, worth one
 // contextual run and noise thereafter. `--timings` is an independent opt-in
@@ -16,14 +17,14 @@
 import { deriveRepoRoot } from "../../lib/paths.mts";
 import type { Presentation } from "./report.mts";
 
-export type Verb = "comply" | "verify" | "explain";
+export type Verb = "comply" | "verify" | "scan" | "explain";
 export type StepMode = "fix" | "no-fix";
 
 /** Concise output is the default; `--full` opts into the results map. */
 const DEFAULT_PRESENTATION: Presentation = "min";
 
 export interface ParsedCommand {
-    /** The parsed verb: comply, verify or explain. */
+    /** The parsed verb: comply, verify, scan or explain. */
     verb: Verb;
     /** True when `--help` was requested (usage text, exit 2). */
     help: boolean;
@@ -36,7 +37,7 @@ export interface ParsedCommand {
 }
 
 export interface RunContext {
-    /** The parsed verb — comply, verify or explain. */
+    /** The parsed verb — comply, verify, scan or explain. */
     verb: Verb;
     /** The repo this invocation operates on (never the gate's own code). */
     repoRoot: string;
@@ -120,7 +121,9 @@ function parseOutputFlags({ argv }: { argv: string[] }): {
  */
 export function parseCommand({ argv }: { argv: string[] }): ParsedCommand {
     if (argv.length === 0) {
-        throw new Error("missing command — expected 'comply' or 'verify'");
+        throw new Error(
+            "missing command — expected 'comply', 'verify' or 'scan'",
+        );
     }
     if (argv[0] === "-h" || argv[0] === "--help") {
         return parseHelp({ argv });
@@ -129,12 +132,12 @@ export function parseCommand({ argv }: { argv: string[] }): ParsedCommand {
     if (verb === "explain") {
         return parseExplain({ argv });
     }
-    if (verb !== "comply" && verb !== "verify") {
+    if (verb !== "comply" && verb !== "verify" && verb !== "scan") {
         if (RETIRED[verb] !== undefined) {
             throw new Error(RETIRED[verb]!);
         }
         throw new Error(
-            `unknown command '${verb}' — expected 'comply', 'verify' or 'explain'`,
+            `unknown command '${verb}' — expected 'comply', 'verify', 'scan' or 'explain'`,
         );
     }
     const { presentation, timings } = parseOutputFlags({ argv: argv.slice(1) });

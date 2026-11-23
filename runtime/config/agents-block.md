@@ -2,15 +2,16 @@
 
 This project is gated by Mark's portable defined gate. Run `defined comply` —
 bootstrap, repair and verify in one pass. (`defined verify` is the
-pipeline-only read-only check.) A missing ecosystem skips; a missing tool
-fails loudly.
+pipeline-only read-only check; `defined scan` is the install-less read-only
+check that never adopts — no seed files, managed workflow or AGENTS block.)
+A missing ecosystem skips; a missing tool fails loudly.
 
 **When to run it.** After a coherent set of edits, before committing or
 handing work back. One run after a batch beats one per file.
 
-**Reading the result.** Both verbs print one compact JSON line: `status` and
-actionable `errors` — read the errors instead of re-running tools by hand;
-`--full` adds the per-check `results` map on a first, contextual run.
+**Reading the result.** Every result verb prints one compact JSON line:
+`status` and actionable `errors` — read the errors instead of re-running tools
+by hand; `--full` adds the per-check `results` map on a first, contextual run.
 
 **After a run.** `git diff`: repairs are real edits to your tree. Fix
 findings, then rerun — do not repeat an unchanged failing command. If a check

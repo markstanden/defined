@@ -80,15 +80,19 @@ export function brokenFixtureFiles(): Record<string, string> {
 }
 
 /**
- * Write the broken fixture into root, git-init it, and commit so every file is
- * tracked. Returns the repo root.
+ * Write a fixture repo from a file map into root, git-init it, and commit so
+ * every file the map names is tracked. A file the map's `.gitignore` matches
+ * stays present on disk but outside the git scope — exactly the shape a
+ * locally ignored `.defined.json` has in a work repo.
  */
-export async function createBrokenFixture({
+export async function createFixture({
     root,
+    files,
 }: {
     root: string;
+    files: Record<string, string>;
 }): Promise<string> {
-    for (const [path, content] of Object.entries(brokenFixtureFiles())) {
+    for (const [path, content] of Object.entries(files)) {
         await mkdir(join(root, path.split("/").slice(0, -1).join("/")), {
             recursive: true,
         });
@@ -118,8 +122,34 @@ export async function createBrokenFixture({
     await run({ cmd: "git", args: ["add", "-A"], cwd: root });
     await run({
         cmd: "git",
-        args: ["commit", "-qm", "broken fixture"],
+        args: ["commit", "-qm", "fixture"],
         cwd: root,
     });
     return root;
+}
+
+/**
+ * Write the broken fixture into root, git-init it, and commit so every file is
+ * tracked. Returns the repo root.
+ */
+export async function createBrokenFixture({
+    root,
+}: {
+    root: string;
+}): Promise<string> {
+    return createFixture({ root, files: brokenFixtureFiles() });
+}
+
+/**
+ * A minimal clean, unadopted repository: no `.defined.json`, no AGENTS.md, no
+ * seeded defaults, no managed workflow. Content is formatted to the gate's
+ * baked defaults — prettier's pure defaults with no `.editorconfig` in the
+ * repo — so a read-only scan is green and proves the gate demands no adoption.
+ */
+export function cleanFixtureFiles(): Record<string, string> {
+    return {
+        "README.md": "# Fixture\n\nA clean, unadopted repository.\n",
+        "lib/echo.mts":
+            "/**\n * Echoes the supplied value back to the caller.\n *\n * @param value the value to echo; any number is accepted\n * @returns the same value that was supplied\n */\nexport function echo(value: number): number {\n  return value;\n}\n",
+    };
 }
