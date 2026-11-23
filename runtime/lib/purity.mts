@@ -60,40 +60,43 @@ function groupTargets(
 }
 
 /**
- * Resolve the declared policy against the git-scoped file list.
+ * Resolve the declared policy against the gated file list.
+ *
+ * `files` is the content scope (`.defined.json` `scope.include` narrowed, or
+ * the whole git inventory when it is absent) and decides what purity judges.
+ * `allFiles` is the whole git inventory and exists only to diagnose a throw:
+ * it separates a stale selector or target (nothing in the repository matches)
+ * from one pointing outside the declared content scope.
  *
  * Throws when a selector matches no supported file, or a CQS target names a
- * file outside the scope — both are stale-policy errors the operator must fix,
- * not findings about the code. The resulting file order follows the inventory,
+ * file purity cannot judge — both are policy errors the operator must fix, not
+ * findings about the code. The resulting file order follows the inventory,
  * so repeated runs are deterministic.
  */
 export function selectPurityPolicy({
     config,
     files,
+    allFiles = files,
 }: {
     config: PurityConfig;
     files: string[];
+    /** The whole git inventory, for the diagnostic only. Defaults to `files`. */
+    allFiles?: string[];
 }): PurityPolicy {
     const supported = files.filter((file) => hasJsTsExtension({ file }));
+    const supportedAll = allFiles.filter((file) => hasJsTsExtension({ file }));
     const selectors = config.pureModules ?? [];
     for (const selector of selectors) {
-        const matched = supported.some((file) =>
-            selectorMatches({ selector, file }),
-        );
-        if (!matched) {
-            throw new Error(
-                `purity: pureModules selector "${selector}" matches no supported file among the gated files`,
-            );
-        }
+        requireSelectorInScope({ selector, supported, supportedAll });
     }
     const pure = supported.filter((file) =>
         selectors.some((selector) => selectorMatches({ selector, file })),
     );
     for (const target of config.commands ?? []) {
-        requireInScope({ target, files, role: "command" });
+        requireInScope({ target, files, allFiles, role: "command" });
     }
     for (const target of config.queries ?? []) {
-        requireInScope({ target, files, role: "query" });
+        requireInScope({ target, files, allFiles, role: "query" });
     }
     const cqs: Record<string, PurityFilePolicy> = {};
     groupTargets(cqs, config.commands ?? [], "commands");
@@ -101,24 +104,67 @@ export function selectPurityPolicy({
     return { pure, cqs };
 }
 
-/** Throw when a declared CQS target file is not a parseable file in scope. */
+/**
+ * Throw unless `selector` matches at least one supported file purity judges.
+ * A selector matching only outside the gated files names an example and the
+ * two fixes; one matching nothing anywhere is stale.
+ */
+function requireSelectorInScope({
+    selector,
+    supported,
+    supportedAll,
+}: {
+    selector: string;
+    supported: string[];
+    supportedAll: string[];
+}): void {
+    if (supported.some((file) => selectorMatches({ selector, file }))) {
+        return;
+    }
+    const outside = supportedAll.find((file) =>
+        selectorMatches({ selector, file }),
+    );
+    if (outside !== undefined) {
+        throw new Error(
+            `purity: pureModules selector "${selector}" matches only files outside the content scope declared by scope.include (e.g. "${outside}") — widen the scope or remove the selector`,
+        );
+    }
+    throw new Error(
+        `purity: pureModules selector "${selector}" matches no supported file in the git scope`,
+    );
+}
+
+/** Throw when a declared CQS target file is not a parseable file purity judges. */
 function requireInScope({
     target,
     files,
+    allFiles,
     role,
 }: {
     target: PurityTarget;
     files: string[];
+    allFiles: string[];
     role: "command" | "query";
 }): void {
     if (
-        !files.includes(target.file) ||
-        !hasJsTsExtension({ file: target.file })
+        files.includes(target.file) &&
+        hasJsTsExtension({ file: target.file })
     ) {
+        return;
+    }
+    if (!allFiles.includes(target.file)) {
         throw new Error(
-            `purity: ${role} "${target.name}" is declared in "${target.file}", which is not among the gated files`,
+            `purity: ${role} "${target.name}" is declared in "${target.file}", which is not in the git scope`,
         );
     }
+    if (!hasJsTsExtension({ file: target.file })) {
+        throw new Error(
+            `purity: ${role} "${target.name}" is declared in "${target.file}", which is not a parseable JS/TS file`,
+        );
+    }
+    throw new Error(
+        `purity: ${role} "${target.name}" is declared in "${target.file}", which is outside the content scope declared by scope.include — widen the scope or move the declaration`,
+    );
 }
 
 /** Serialise the policy for the baked ESLint config's env channel. */

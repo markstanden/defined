@@ -55,6 +55,14 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
   `notices` input; comply/verify output is unchanged.
 - The glob dialect moved to `runtime/lib/glob.mts`; purity imports it and keeps
   exporting `selectorMatches`, so its documented behaviour is unchanged.
+- Purity distinguishes its two policy errors: a `pureModules` selector or CQS
+  target that matches nothing in the whole inventory is stale ("in the git
+  scope"), while one matching only outside a declared `scope.include` names an
+  example match and the two fixes. `runPurityStep` gains the same
+  `scratchFiles` parameter the node/eslint/tofu steps already take, so
+  `selectPurityPolicy` can see the whole inventory for the diagnostic only.
+  Skipping the selector instead was rejected: a silent no-op is the
+  stale-selector failure the guard exists to prevent.
 
 ## Inferred
 

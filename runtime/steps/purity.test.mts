@@ -112,6 +112,30 @@ test("purity reports a stale selector as an error before invoking ESLint", async
     assert.equal(calls.length, 0);
 });
 
+test("purity names a selector pointing outside the content scope", async () => {
+    // Arrange
+    const dir = await makeRepo({
+        purity: { pureModules: ["legacy/**"] },
+    });
+    const { runner, calls } = recordingRunner();
+
+    // Act
+    const result = await runPurityStep({
+        ctx: { mode: "no-fix", repoRoot: dir },
+        trackedFiles: ["src/a.mts"],
+        scratchFiles: ["src/a.mts", "legacy/a.mts"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(
+        result.notice ?? "",
+        /outside the content scope declared by scope\.include \(e\.g\. "legacy\/a\.mts"\)/u,
+    );
+    assert.equal(calls.length, 0);
+});
+
 test("purity reports a target outside the gated files before invoking ESLint", async () => {
     // Arrange
     const dir = await makeRepo({
@@ -130,7 +154,7 @@ test("purity reports a target outside the gated files before invoking ESLint", a
 
     // Assert
     assert.equal(result.status, "error");
-    assert.match(result.notice ?? "", /not among the gated files/u);
+    assert.match(result.notice ?? "", /not in the git scope/u);
     assert.equal(calls.length, 0);
 });
 

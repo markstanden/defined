@@ -253,10 +253,11 @@ const STEPS: Step[] = [
         // repair), so comply's verification pass is the only judge.
         id: "purity",
         scoped: true,
-        run: ({ mode, repoRoot, checkFiles, runner }) =>
+        run: ({ mode, repoRoot, files, checkFiles, runner }) =>
             runPurityStep({
                 ctx: { mode, repoRoot },
                 trackedFiles: checkFiles,
+                scratchFiles: files,
                 runner,
             }),
     },

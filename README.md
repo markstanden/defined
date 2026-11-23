@@ -441,6 +441,14 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     [`standards/node-purity.md`](standards/node-purity.md). `purity` is uncached
     in v1, so a policy or source change cannot replay a stale green.
 
+    Two declarations are policy errors rather than findings, because a
+    selector that silently judges nothing would read green: a `pureModules`
+    selector matching no supported file, and a CQS target naming a file purity
+    cannot judge. The error says which case it is — a stale path (nothing in
+    the repository matches) or a live one pointing outside a declared
+    `scope.include`, in which case it names an example match and the two ways
+    to resolve it (widen the scope, or move the declaration inside it).
+
     On a host that cannot run the managed GitHub workflow (Azure DevOps, GitLab, a private server), switch off its installation and check — local `comply` still runs every in-container step:
 
     ```jsonc

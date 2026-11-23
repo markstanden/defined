@@ -140,7 +140,7 @@ test("selectPurityPolicy rejects a selector matching no supported file", () => {
     // Act & Assert
     assert.throws(
         () => selectPurityPolicy({ config, files: ["lib/a.ts"] }),
-        /pureModules selector "lib\/missing\.ts" matches no supported file among the gated files/u,
+        /pureModules selector "lib\/missing\.ts" matches no supported file in the git scope/u,
     );
 });
 
@@ -155,7 +155,23 @@ test("selectPurityPolicy rejects a selector matching only unsupported files", ()
                 config,
                 files: ["docs/readme.md", "lib/a.ts"],
             }),
-        /pureModules selector "docs\/\*\.md" matches no supported file among the gated files/u,
+        /pureModules selector "docs\/\*\.md" matches no supported file in the git scope/u,
+    );
+});
+
+test("selectPurityPolicy names a selector that only matches outside the content scope", () => {
+    // Arrange
+    const config: PurityConfig = { pureModules: ["legacy/**"] };
+
+    // Act & Assert
+    assert.throws(
+        () =>
+            selectPurityPolicy({
+                config,
+                files: ["src/a.mts"],
+                allFiles: ["src/a.mts", "legacy/a.mts"],
+            }),
+        /pureModules selector "legacy\/\*\*" matches only files outside the content scope declared by scope\.include \(e\.g\. "legacy\/a\.mts"\)/u,
     );
 });
 
@@ -168,7 +184,38 @@ test("selectPurityPolicy reports a target outside the gated files", () => {
     // Act & Assert
     assert.throws(
         () => selectPurityPolicy({ config, files: ["lib/other.mts"] }),
-        /purity: command "saveReceipt" is declared in "lib\/receipts\.mts", which is not among the gated files/u,
+        /purity: command "saveReceipt" is declared in "lib\/receipts\.mts", which is not in the git scope/u,
+    );
+});
+
+test("selectPurityPolicy names a target declared outside the content scope", () => {
+    // Arrange
+    const config: PurityConfig = {
+        commands: [{ file: "legacy/receipts.mts", name: "saveReceipt" }],
+    };
+
+    // Act & Assert
+    assert.throws(
+        () =>
+            selectPurityPolicy({
+                config,
+                files: ["src/a.mts"],
+                allFiles: ["src/a.mts", "legacy/receipts.mts"],
+            }),
+        /purity: command "saveReceipt" is declared in "legacy\/receipts\.mts", which is outside the content scope declared by scope\.include/u,
+    );
+});
+
+test("selectPurityPolicy reports a target that is not a parseable file", () => {
+    // Arrange
+    const config: PurityConfig = {
+        commands: [{ file: "docs/notes.md", name: "saveReceipt" }],
+    };
+
+    // Act & Assert
+    assert.throws(
+        () => selectPurityPolicy({ config, files: ["docs/notes.md"] }),
+        /purity: command "saveReceipt" is declared in "docs\/notes\.md", which is not a parseable JS\/TS file/u,
     );
 });
 
@@ -181,7 +228,7 @@ test("selectPurityPolicy reports a query target outside the gated files", () => 
     // Act & Assert
     assert.throws(
         () => selectPurityPolicy({ config, files: [] }),
-        /purity: query "readReceipt" is declared in "lib\/receipts\.mts", which is not among the gated files/u,
+        /purity: query "readReceipt" is declared in "lib\/receipts\.mts", which is not in the git scope/u,
     );
 });
 
