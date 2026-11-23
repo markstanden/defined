@@ -55,7 +55,18 @@ async function makeTemp(): Promise<string> {
     return mkdtemp(join(tmpdir(), "quality-fixture-"));
 }
 
-/** Walk every regular file under root and return path → sha256. */
+/**
+ * Walk every regular file under root and return path → sha256, except
+ * `.git/index`.
+ *
+ * The index is git's stat cache, not checkout content: git rewrites it on the
+ * first read after a commit when the recorded stat looks racy, so the gitleaks
+ * step's `git status --ignored` (a read) changes its bytes on a CI runner while
+ * leaving every tracked file and every other `.git` entry alone. Hashing it made
+ * the no-write assertion depend on filesystem timing. Everything else under
+ * `.git` (refs, objects, logs, stray lock files) is still hashed, so a genuine
+ * write or ref update still fails the assertion.
+ */
 function hashTree(root: string): Map<string, string> {
     const hashes = new Map<string, string>();
     const walk = (dir: string): void => {
@@ -64,10 +75,14 @@ function hashTree(root: string): Map<string, string> {
             if (entry.isDirectory()) {
                 walk(full);
             } else if (entry.isFile()) {
+                const path = relative(root, full);
+                if (path === join(".git", "index")) {
+                    continue;
+                }
                 const digest = createHash("sha256")
                     .update(readFileSync(full))
                     .digest("hex");
-                hashes.set(relative(root, full), digest);
+                hashes.set(path, digest);
             }
         }
     };
