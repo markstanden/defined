@@ -1,25 +1,33 @@
-// lib/test-review/declarations.mts — JavaScript/TypeScript test declarations.
+// lib/test-review/declarations.mts — test declarations for the stacks the
+// engine reads.
 //
 // The always-on rules that read a test body need the declaration around it: its
-// name, line, body and the skip/focus modifiers on its head. This module ports
-// the scanner's Jest/Vitest/node:test discovery over offset-preserving masked
-// source (lib/test-review/mask.mts); a declaration quoted inside a string or a
-// comment is data, not a test. A file with no vitest, Jest or node:test marker
-// is not a test file and yields no declarations.
+// name, line, body and the skip/focus modifiers on its head. `scanTestDeclarations`
+// dispatches by path: a JavaScript/TypeScript source is read by the JS scanner
+// over offset-preserving masked source (lib/test-review/mask.mts), a `.cs`
+// source by the C# scanner. A declaration quoted inside a string or a comment
+// is data, not a test. A JS file with no vitest, Jest or node:test marker is
+// not a test file; a C# method with no test attribute block above it is not a
+// test declaration and yields nothing.
 //
 // Public surface:
 //   scanTestDeclarations({ path, content }) — declarations in file order
 //   lineAt({ content, index }) — the 1-based line holding an offset
 //
-// Deliberate ceiling (ponytail): a lexical scanner, not a parser. Titles are
+// Deliberate ceiling (ponytail): a lexical scanner, not a parser. JS titles are
 // classified by their first token, bodies by bracket matching, and a method
-// named `it`/`test`/`specify` on an object is not a declaration. Upgrade to a
-// parser if exotic styles ever earn the dependency.
+// named `it`/`test`/`specify` on an object is not a declaration. C# supports
+// one level of generic arguments and requires at least one modifier on the
+// method; attributes are read from the contiguous lines above the signature,
+// with comment and doc lines walked over but never read as attributes. The
+// mask is JavaScript-shaped, so C# verbatim/interpolated strings may end
+// early. Upgrade to a parser if exotic styles ever earn the dependency.
 
 import { maskTestSource } from "./mask.mts";
 
-/** The test frameworks the JavaScript scanner recognises. */
-export type TestFramework = "node-test" | "jest" | "vitest";
+/** The test frameworks the scanner recognises. */
+export type TestFramework =
+    "node-test" | "jest" | "vitest" | "xunit" | "nunit" | "mstest";
 
 /** One JavaScript/TypeScript test declaration and the body it opens. */
 export interface TestDeclaration {
@@ -35,10 +43,14 @@ export interface TestDeclaration {
     readonly skipped: boolean;
     /** The skip marker as written, when the declaration is skipped. */
     readonly skipMarker?: string;
+    /** The reason the framework records for a skip, when it records one. */
+    readonly skipReason?: string;
     /** Whether the head marks the declaration focused (`.only`). */
     readonly focused: boolean;
     /** The focus marker as written, when the declaration is focused. */
     readonly focusMarker?: string;
+    /** Whether the declaration is parameterised but names no data source. */
+    readonly dataSourceMissing?: boolean;
     /** Raw body text, or `null` when the declaration has no delimited body. */
     readonly body: string | null;
     /** The body with strings and comments blanked, or `null`. */
@@ -351,8 +363,14 @@ function modifierFlags(prefix: string): ModifierFlags {
     return { skipped: true, skipMarker: `${call}.${kind}`, focused: false };
 }
 
+/** The JavaScript frameworks the JS scanner recognises. */
+type JavaScriptFramework = Extract<
+    TestFramework,
+    "node-test" | "jest" | "vitest"
+>;
+
 /** The framework a JavaScript test file is written for, or `null` if none. */
-function frameworkOf(content: string): TestFramework | null {
+function frameworkOf(content: string): JavaScriptFramework | null {
     if (/from\s+["']vitest["']|\bvitest\b/.test(content)) {
         return "vitest";
     }
@@ -374,7 +392,7 @@ const DECLARATION_HEAD =
     /(?<!\.)\b(it|test|specify)(?:\.\w+)?(?:\([^)]*\)|\[[^\]]*\]|`[^`]*`)?\s*\(\s*/g;
 
 /**
- * Read every test declaration in one JavaScript/TypeScript source.
+ * Read every JavaScript/TypeScript test declaration in one source.
  *
  * @param root0 the parameter object
  * @param root0.path Repo-relative path of the file.
@@ -382,7 +400,7 @@ const DECLARATION_HEAD =
  * @returns Declarations in file order, title-less heads left out; empty when
  *   the file carries no framework marker.
  */
-export function scanTestDeclarations({
+function scanJavaScriptDeclarations({
     path,
     content,
 }: {
@@ -426,4 +444,156 @@ export function scanTestDeclarations({
         });
     }
     return tests;
+}
+
+/** A C# method head: modifiers, a return type, a name and its argument list. */
+const DOTNET_METHOD =
+    /^[ \t]*(?:(?:public|private|protected|internal|static|async|virtual|override|sealed|partial|new|unsafe|extern|abstract)\s+)+[A-Za-z_][\w,.?[\]]*(?:<[^>]*>)?[ \t]+([A-Za-z_]\w*)[ \t]*\(/gm;
+
+/** A test attribute that makes the method below it a declaration. */
+const DOTNET_TEST_ATTRIBUTE =
+    /\[\s*(Fact|Theory|Test|TestCase|TestMethod|DataTestMethod|InlineData|MemberData|ClassData|DataRow)\b/u;
+
+/** A line the attribute block above a C# method can span. */
+const DOTNET_ANNOTATION_LINE = /^(?:\[|#\[|\/\*\*|\*|\*\/|\/\/)/u;
+/**
+ * The contiguous attribute lines immediately above a method. Comment and doc
+ * lines are walked over but not returned, so a commented-out `[Fact]` cannot
+ * make the method below it a test. Stops at the first line that is neither an
+ * attribute nor a comment, or at a blank line once the block has started;
+ * capped at 16 lines.
+ */
+function precedingAttributes({
+    content,
+    declarationLine,
+}: {
+    content: string;
+    declarationLine: number;
+}): string {
+    const lines = content.split("\n");
+    const collected: string[] = [];
+    for (
+        let index = declarationLine - 2;
+        index >= 0 && collected.length < 16;
+        index--
+    ) {
+        const trimmed = (lines[index] ?? "").trim();
+        if (trimmed === "") {
+            if (collected.length > 0) {
+                break;
+            }
+            continue;
+        }
+        if (!DOTNET_ANNOTATION_LINE.test(trimmed)) {
+            break;
+        }
+        collected.unshift(trimmed);
+    }
+    return collected.filter((line) => line.startsWith("[")).join("\n");
+}
+
+/** The C# framework an attribute block names. */
+function dotNetFramework(
+    annotations: string,
+): Extract<TestFramework, "xunit" | "nunit" | "mstest"> {
+    if (
+        /\b(?:Fact|Theory|InlineData|MemberData|ClassData)\b/u.test(annotations)
+    ) {
+        return "xunit";
+    }
+    if (/\b(?:TestMethod|DataTestMethod)\b/u.test(annotations)) {
+        return "mstest";
+    }
+    return "nunit";
+}
+
+/**
+ * The reason a C# attribute block records for a skip: the annotation text, an
+ * empty string for a marker with no text, or `null` when the method is not
+ * skipped.
+ */
+function dotNetSkipReason(annotations: string): string | null {
+    const skip = /\bSkip\s*=\s*"([^"]*)"/u.exec(annotations);
+    if (skip !== null) {
+        return skip[1] ?? "";
+    }
+    return /\[Ignore\b/u.test(annotations) ? "" : null;
+}
+
+/** Whether a parameterised C# declaration names no data source. */
+function dotNetDataSourceMissing(annotations: string): boolean {
+    return (
+        /\b(?:Theory|DataTestMethod)\b/u.test(annotations) &&
+        !/\b(?:InlineData|MemberData|ClassData|DataRow|DynamicData)\b/u.test(
+            annotations,
+        )
+    );
+}
+
+/** Read every C# test declaration in one source. */
+function scanDotNetDeclarations({
+    path,
+    content,
+}: {
+    readonly path: string;
+    readonly content: string;
+}): TestDeclaration[] {
+    const masked = maskTestSource(content);
+    const declarations: TestDeclaration[] = [];
+
+    for (const match of content.matchAll(DOTNET_METHOD)) {
+        const index = match.index ?? 0;
+        if (!inCode(content, masked, index)) {
+            continue;
+        }
+        const line = lineAt({ content, index });
+        const annotations = precedingAttributes({
+            content,
+            declarationLine: line,
+        });
+        if (!DOTNET_TEST_ATTRIBUTE.test(annotations)) {
+            continue;
+        }
+        const skipReason = dotNetSkipReason(annotations);
+        const { body, maskedBody, bodyLine } = bodySlice(
+            content,
+            masked,
+            bodySpan(masked, index),
+            line,
+        );
+        declarations.push({
+            path,
+            line,
+            name: match[1] ?? "",
+            framework: dotNetFramework(annotations),
+            skipped: skipReason !== null,
+            ...(skipReason === null || skipReason === "" ? {} : { skipReason }),
+            focused: false,
+            dataSourceMissing: dotNetDataSourceMissing(annotations),
+            body,
+            maskedBody,
+            bodyLine,
+        });
+    }
+    return declarations;
+}
+
+/**
+ * Read every test declaration in one source, by stack.
+ *
+ * @param root0 the parameter object
+ * @param root0.path Repo-relative path of the file; `.cs` selects the C# scanner.
+ * @param root0.content Full contents of the file.
+ * @returns Declarations in file order.
+ */
+export function scanTestDeclarations({
+    path,
+    content,
+}: {
+    readonly path: string;
+    readonly content: string;
+}): TestDeclaration[] {
+    return path.endsWith(".cs")
+        ? scanDotNetDeclarations({ path, content })
+        : scanJavaScriptDeclarations({ path, content });
 }

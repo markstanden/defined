@@ -8,6 +8,11 @@ import { reviewTestSources } from "./rules.mts";
 
 const NODE_IMPORT = 'import { it } from "node:test";\n';
 
+/** One C# test method wrapped in a class; a `[Fact]` method sits at line 4. */
+function xunitMethod(method: string): string {
+    return `public class MathTests\n{\n${method}\n}`;
+}
+
 test("reports a focused test declaration with its marker", () => {
     // Arrange
     const source = {
@@ -829,5 +834,197 @@ test("keeps the lexical await read (documented ceilings)", () => {
     assert.deepEqual(
         found.map((findings) => findings.map((finding) => finding.rule)),
         bodies.map(() => ["unawaited-async-assertion"]),
+    );
+});
+
+test("reports a C# test whose body holds no assertion", () => {
+    // Arrange
+    const content = xunitMethod(
+        "    [Fact]\n    public void Adds()\n    {\n        Setup();\n    }",
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "MathTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => ({
+            rule: finding.rule,
+            line: finding.line,
+        })),
+        [{ rule: "no-assertions", line: 4 }],
+    );
+});
+
+test("counts each C# assertion shape as an assertion", () => {
+    // Arrange
+    const bodies = [
+        "        Assert.Equal(1, value);",
+        "        result.Should().Be(2);",
+        "        Should.Throw<Exception>(() => Run());",
+        "        mock.Verify(value);",
+        "        AssertInvariants(engine);",
+        "        Expect(Page).ToHaveTitleAsync(expectedTitle);",
+        "        value.ShouldThrow<ArgumentException>();",
+        "        result.ShouldBeOfType<UnauthorizedResult>();",
+    ].map((line) =>
+        xunitMethod(
+            `    [Fact]\n    public void Adds()\n    {\n${line}\n    }`,
+        ),
+    );
+
+    // Act
+    const found = bodies.map((content) =>
+        reviewTestSources([{ path: "MathTests.cs", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        bodies.map(() => []),
+    );
+});
+
+test("reports a theory with no data source", () => {
+    // Arrange
+    const content = xunitMethod(
+        "    [Theory]\n    public void Adds(int a, int b)\n    {\n        Assert.Equal(a + b, Add(a, b));\n    }",
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "MathTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => ({
+            rule: finding.rule,
+            line: finding.line,
+        })),
+        [{ rule: "theory-without-data", line: 4 }],
+    );
+    assert.match(findings[0]?.message ?? "", /zero cases/u);
+});
+
+test("stays silent for a theory with inline data", () => {
+    // Arrange
+    const content = xunitMethod(
+        "    [Theory]\n    [InlineData(1, 2)]\n    public void Adds(int a, int b)\n    {\n        Assert.Equal(a + b, Add(a, b));\n    }",
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "MathTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("stays silent for a fact", () => {
+    // Arrange
+    const content = xunitMethod(
+        "    [Fact]\n    public void Adds()\n    {\n        Assert.Equal(3, Add(1, 2));\n    }",
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "MathTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("parks a C# skip with an annotation reason", () => {
+    // Arrange
+    const content = xunitMethod(
+        '    [Fact(Skip = "flaky until #12")]\n    public void Adds()\n    {\n        Assert.Equal(1, value);\n    }',
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "MathTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports a C# skip with no annotation reason", () => {
+    // Arrange
+    const contents = [
+        xunitMethod(
+            '    [Fact(Skip = "")]\n    public void Adds()\n    {\n        Assert.Equal(1, value);\n    }',
+        ),
+        xunitMethod(
+            "    [Test]\n    [Ignore]\n    public void Adds()\n    {\n        Assert.Equal(1, value);\n    }",
+        ),
+        xunitMethod(
+            '    // parked: #123\n    [Fact(Skip = "")]\n    public void Adds()\n    {\n        Assert.Equal(1, value);\n    }',
+        ),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "MathTests.cs", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        [["skipped-test"], ["skipped-test"], []],
+    );
+});
+
+test("reports a C# assertion of a literal against itself", () => {
+    // Arrange
+    const bodies = [
+        "        Assert.Equal(3, 3);",
+        "        Assert.True(true);",
+    ].map((line) =>
+        xunitMethod(
+            `    [Fact]\n    public void Adds()\n    {\n${line}\n    }`,
+        ),
+    );
+
+    // Act
+    const found = bodies.map((content) =>
+        reviewTestSources([{ path: "MathTests.cs", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        bodies.map(() => ["literal-tautology"]),
+    );
+});
+
+test("leaves different C# operands alone", () => {
+    // Arrange
+    const content = xunitMethod(
+        "    [Fact]\n    public void Adds()\n    {\n        Assert.Equal(actual, expected);\n    }",
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "MathTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports an unawaited C# async assertion", () => {
+    // Arrange
+    const methods = [
+        "        Assert.ThrowsAsync<ArgumentException>(() => Run());",
+        "        await Assert.ThrowsAsync<ArgumentException>(() => Run());",
+    ].map((line) =>
+        xunitMethod(
+            `    [Fact]\n    public async Task Adds()\n    {\n${line}\n    }`,
+        ),
+    );
+
+    // Act
+    const found = methods.map((content) =>
+        reviewTestSources([{ path: "MathTests.cs", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        [["unawaited-async-assertion"], []],
     );
 });

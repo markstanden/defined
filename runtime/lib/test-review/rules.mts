@@ -17,30 +17,41 @@
 //
 // `skipped-test` reads the declaration layer: a declaration marked to skip is
 // a defect unless a reason or ticket parks it. A ticket reference (`#123`,
-// `PROJ-123`, a URL) in the declaration's own line or the contiguous comment
-// block above it parks the skip; a C# `Skip = "…"` or PHPUnit
-// `markTestSkipped("…")` reason will too once those stacks land.
+// `PROJ-123`, a URL) in the declaration's own line, the contiguous comment
+// block above it, or the C# attribute block parks the skip; a reason the
+// framework records in its annotation (C# `Skip = "…"`) always does.
+//
+// `theory-without-data` reads the C# declaration layer: a `[Theory]` or
+// `[DataTestMethod]` with no `InlineData`/`MemberData`/`ClassData`/`DataRow`/
+// `DynamicData` runs zero cases and reports green. A JS `it.each` empty table
+// is not read yet.
 //
 // `literal-tautology` reads each declaration's masked body: a comparison of a
 // literal with itself, or an expression with itself, cannot fail for any input.
 // `commented-out-assertion` reads the raw body lines: an assertion left in a
 // comment never runs, so nothing is checked at that point. The oracle's rules
-// for other stacks (C#, PHPUnit, Python) land with those declaration layers.
+// for other stacks (PHPUnit, Python) land with those declaration layers.
 //
-// The tautology patterns cover the Jest/Vitest `expect` shapes; the first
-// pattern to claim a position wins, so a literal compared with itself reports
-// once, as a literal. A comment-led line is read from the raw body, so a
-// fixture string whose own line begins with a comment marker reads as a
+// The tautology patterns cover the Jest/Vitest `expect` shapes and the
+// xUnit/NUnit `Assert` shapes (`Assert.Equal(3, 3)`, `Assert.True(true)`); the
+// first pattern to claim a position wins, so a literal compared with itself
+// reports once, as a literal. A comment-led line is read from the raw body, so
+// a fixture string whose own line begins with a comment marker reads as a
 // comment — the scanner shares that shape.
 //
-// `no-assertions` counts the JavaScript assertion shapes in the masked body:
-// the assertion verb directly (`expect(`/`assert(`/`should(`), the verb with an
-// uppercase suffix (`assertOk(`, an assertion helper by name), and the dotted
-// statics (`assert.equal(`, `should.match(`). A helper that merely delegates
-// (`check(...)`) does not count, so a body of helpers reports. A skipped
-// declaration is left to `skipped-test`: a parked skip may legitimately carry
-// no assertion until its ticket lands, and reporting both would double the
-// defect.
+// `no-assertions` counts the assertion shapes of the declaration's framework in
+// the masked body. For JavaScript: the assertion verb directly
+// (`expect(`/`assert(`/`should(`), the verb with an uppercase suffix
+// (`assertOk(`, an assertion helper by name), and the dotted statics
+// (`assert.equal(`, `should.match(`). For .NET: `Assert.*`, `StringAssert.*`,
+// `CollectionAssert.*`, FluentAssertions `Should()`/`.Should.Be…`, Moq
+// `Verify(`, a helper named with the verb (`AssertInvariants(`), Playwright's
+// `Expect(`, and Shouldly's generic forms (`ShouldThrow<…>`). The oracle misses
+// the last three and so reports five false positives across the C# corpus. A
+// helper that merely delegates (`check(...)`) does not count, so a body of
+// helpers reports. A skipped declaration is left to `skipped-test`: a parked
+// skip may legitimately carry no assertion until its ticket lands, and
+// reporting both would double the defect.
 //
 // `unawaited-async-assertion` reads a block body's statements: a `.rejects`
 // assertion (or the C# `ThrowsAsync`/`ThrowAsync` shape, which the C# layer
@@ -65,13 +76,14 @@
 // call text appears in masked code, not only at a declaration head.
 
 import { lineAt, scanTestDeclarations } from "./declarations.mts";
-import type { TestDeclaration } from "./declarations.mts";
+import type { TestDeclaration, TestFramework } from "./declarations.mts";
 import { maskTestSource } from "./mask.mts";
 
 /** The rule ids the always-on pass can report. */
 export const ALWAYS_ON_RULES = [
     "focused-test",
     "focused-suite",
+    "theory-without-data",
     "skipped-test",
     "literal-tautology",
     "commented-out-assertion",
@@ -151,7 +163,7 @@ function parkedSkip({
     for (let index = line - 2; index >= 0; index--) {
         const raw = lines[index] ?? "";
         const trimmed = raw.trim();
-        if (trimmed === "" || !/^(?:\/\/|\/\*|\*|\*\/)/.test(trimmed)) {
+        if (trimmed === "" || !/^(?:\/\/|\/\*|\*|\*\/|\[)/u.test(trimmed)) {
             break;
         }
         context.unshift(raw);
@@ -170,6 +182,7 @@ function skippedFindings({
     return declarations.flatMap((declaration): TestHygieneFinding[] => {
         if (
             !declaration.skipped ||
+            (declaration.skipReason ?? "").trim() !== "" ||
             parkedSkip({ content: source.content, line: declaration.line })
         ) {
             return [];
@@ -202,6 +215,23 @@ const TAUTOLOGY_RULES: ReadonlyArray<{
         pattern:
             /\bexpect\s*\(\s*([\w.]+)\s*\)\s*\.to(?:Be|Equal)\s*\(\s*\1\s*\)/g,
         derivation: "both operands are the same expression",
+    },
+    {
+        pattern:
+            /\bAssert\.(?:Equal|AreEqual)\s*\(\s*(true|false|-?\d+(?:\.\d+)?)\s*,\s*\1\s*[,)]/g,
+        derivation: "both operands of the assertion are the same literal",
+    },
+    {
+        pattern: /\bAssert\.AreEqual\s*\(\s*([\w.]+)\s*,\s*\1\s*[,)]/g,
+        derivation: "both operands are the same expression",
+    },
+    {
+        pattern: /\bAssert\.(?:True|IsTrue)\s*\(\s*true\s*[,)]/g,
+        derivation: "the asserted value is the literal true",
+    },
+    {
+        pattern: /\bAssert\.(?:False|IsFalse)\s*\(\s*false\s*[,)]/g,
+        derivation: "the asserted value is the literal false",
     },
 ];
 
@@ -280,10 +310,32 @@ const ASSERTION_VERB = /\b(?:Assert|assert|expect|should|verify)\b/;
 
 /** Assertion call shapes the JavaScript frameworks share. */
 const JS_ASSERTION_CALLS: readonly RegExp[] = [
-    /\b(?:expect|assert|should)(?:[A-Z]\w*)?\s*\(/,
-    /\bassert\.\w+/,
-    /\bshould\.\w+/,
+    /\b(?:expect|assert|should)(?:[A-Z]\w*)?\s*\(/u,
+    /\bassert\.\w+/u,
+    /\bshould\.\w+/u,
 ];
+
+/** Assertion call shapes the .NET frameworks share. */
+const DOTNET_ASSERTION_CALLS: readonly RegExp[] = [
+    /\bAssert\.\w+/u,
+    /\bStringAssert\.\w+/u,
+    /\bCollectionAssert\.\w+/u,
+    /\b(?:Assert|Verify|Expect)(?:[A-Z]\w*)?\s*[(<]/u,
+    /\.Should\s*\(/u,
+    /\bAnd\.\w+\s*\(/u,
+    /\bShould(?:Be|Not|Have|Contain|Match|Start|End|Equal|Satisfy|Throw)\w*\s*[(<]/u,
+    /\bShould\.(?:Throw|NotThrow|CompleteIn)\w*\s*[(<]/u,
+];
+
+/** Assertion call shapes, keyed by the framework the declaration is for. */
+const ASSERTION_CALLS: Readonly<Record<TestFramework, readonly RegExp[]>> = {
+    jest: JS_ASSERTION_CALLS,
+    vitest: JS_ASSERTION_CALLS,
+    "node-test": JS_ASSERTION_CALLS,
+    xunit: DOTNET_ASSERTION_CALLS,
+    nunit: DOTNET_ASSERTION_CALLS,
+    mstest: DOTNET_ASSERTION_CALLS,
+};
 
 /** An assertion call shape inside comment text. */
 const ASSERTION_CALL =
@@ -327,6 +379,32 @@ function commentedAssertionFindings({
     });
 }
 
+/**
+ * Parameterised declarations the scanner found no data source for: the
+ * runner executes zero cases and reports green.
+ */
+function theoryWithoutDataFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        if (declaration.dataSourceMissing !== true) {
+            return [];
+        }
+        return [
+            {
+                rule: "theory-without-data",
+                file: source.path,
+                line: declaration.line,
+                message: `parameterised test declaration "${declaration.name}" names no data source: the runner executes zero cases`,
+            },
+        ];
+    });
+}
+
 /** Findings for declarations whose body makes no assertion at all. */
 function noAssertionFindings({
     source,
@@ -340,7 +418,9 @@ function noAssertionFindings({
         if (
             body === null ||
             declaration.skipped ||
-            JS_ASSERTION_CALLS.some((pattern) => pattern.test(body))
+            ASSERTION_CALLS[declaration.framework].some((pattern) =>
+                pattern.test(body),
+            )
         ) {
             return [];
         }
@@ -541,6 +621,7 @@ function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
                 `focused suite declaration "${marker}": every other suite in the file is skipped`,
         }),
         ...skippedFindings({ source, declarations }),
+        ...theoryWithoutDataFindings({ source, declarations }),
         ...tautologyFindings({ source, declarations }),
         ...commentedAssertionFindings({ source, declarations }),
         ...noAssertionFindings({ source, declarations }),
