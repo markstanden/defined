@@ -387,6 +387,10 @@ function frameworkOf(content: string): JavaScriptFramework | null {
  * One declaration head: `it(`, `it.each(cases)(`, `test.only(` and the like.
  * A head may not follow a `.`: `regex.test(...)` is a method call, not a test
  * declaration, and its arguments are not titles.
+ *
+ * Sonar S5843 (complexity 24, limit 20): the alternation is the declaration
+ * grammar the oracle parity was measured against. Splitting the literal would
+ * fork that grammar; kept deliberately.
  */
 const DECLARATION_HEAD =
     /(?<!\.)\b(it|test|specify)(?:\.\w+)?(?:\([^)]*\)|\[[^\]]*\]|`[^`]*`)?\s*\(\s*/g;
@@ -446,7 +450,13 @@ function scanJavaScriptDeclarations({
     return tests;
 }
 
-/** A C# method head: modifiers, a return type, a name and its argument list. */
+/**
+ * A C# method head: modifiers, a return type, a name and its argument list.
+ *
+ * Sonar S5843 (complexity 32, limit 20): the modifier run and the type/name
+ * split are one grammar, pinned by the declaration tests and the corpus
+ * parity. Splitting the literal would fork that grammar; kept deliberately.
+ */
 const DOTNET_METHOD =
     /^[ \t]*(?:(?:public|private|protected|internal|static|async|virtual|override|sealed|partial|new|unsafe|extern|abstract)\s+)+[A-Za-z_][\w,.?[\]]*(?:<[^>]*>)?[ \t]+([A-Za-z_]\w*)[ \t]*\(/gm;
 

@@ -163,7 +163,7 @@ function matchFindings({
 }
 
 /** A ticket reference that parks a skip beside a declaration. */
-const TICKET = /(?:#\d+\b|\b[A-Z][A-Z0-9]{1,}-\d+\b|https?:\/\/\S+)/;
+const TICKET = /(?:#\d+\b|\b[A-Z][A-Z0-9]+-\d+\b|https?:\/\/\S+)/;
 
 /**
  * Whether a skip is parked: its own line or the contiguous comment block
@@ -499,7 +499,7 @@ function unawaitedAssertionFindings({
         const body = declaration.maskedBody;
         // A delimited block body starts at its brace; an arrow expression
         // starts at its first token and returns implicitly.
-        if (body === null || !body.startsWith("{")) {
+        if (!body?.startsWith("{")) {
             return [];
         }
         return [...body.matchAll(ASYNC_ASSERTION)].flatMap(
@@ -564,7 +564,8 @@ function flagThenAssert({
         return false;
     }
     return [...contents.matchAll(/\b([A-Za-z_$][\w$]*)\s*=(?!=)/gu)].some(
-        (match) => new RegExp(`\\b${match[1] ?? ""}\\b`, "u").test(after),
+        (match) =>
+            new RegExp(String.raw`\b${match[1] ?? ""}\b`, "u").test(after),
     );
 }
 
@@ -729,7 +730,10 @@ function compareFindings(
     if (left.line !== right.line) {
         return left.line - right.line;
     }
-    return left.rule < right.rule ? -1 : left.rule > right.rule ? 1 : 0;
+    if (left.rule === right.rule) {
+        return 0;
+    }
+    return left.rule < right.rule ? -1 : 1;
 }
 
 /**
