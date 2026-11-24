@@ -1,4 +1,5 @@
-// steps/test-hygiene.mts — always-on test-hygiene defects over tracked sources.
+// steps/test-hygiene.mts — test-hygiene defects over tracked sources, plus the
+// review tier for `scan --files`.
 //
 // Tools:    none — the rules live in runtime/lib/test-review/ and travel with
 //           the image, so this step needs no consumer dependency, config or
@@ -7,11 +8,15 @@
 //           fix pass and judges once in the authoritative no-fix pass.
 // Scope:    a scoped step — `.defined.json` `scope.include` narrows the files,
 //           exactly as it narrows every other step that judges consumer
-//           content.
+//           content. The `scan --files` list replaces that scope for this step
+//           and adds the review tier; every other step still judges the
+//           repository as configured.
 //
 // A defect here is a test that silently does not run, does not assert, or
-// cannot fail; the rule catalogue and its tiers live in
-// standards/testing/test-review.md, which `defined explain test-hygiene` serves.
+// cannot fail; a review lead may have a legitimate shape and is suppressed by
+// a why-note beside it. The rule catalogue, tiers and grammar live in
+// standards/testing/test-review.md, which `defined explain test-hygiene`
+// serves.
 
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -137,7 +142,9 @@ export async function runTestHygieneStep({
     if (typeof sources === "string") {
         return errored({ message: sources });
     }
-    const findings = reviewTestSources(sources);
+    const findings = reviewTestSources(sources, {
+        review: reviewFiles !== undefined,
+    });
     if (findings.length === 0) {
         return passed({
             notice: `test-hygiene: ${files.length} file(s) clean`,
