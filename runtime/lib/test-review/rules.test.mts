@@ -161,7 +161,8 @@ test("orders findings by file, then line, then rule", () => {
     const sources = [
         {
             path: "b.test.ts",
-            content: 'fdescribe("suite", () => {});\ntest.only("works", () => {});',
+            content:
+                'fdescribe("suite", () => {});\ntest.only("works", () => {});',
         },
         {
             path: "a.test.ts",
@@ -175,7 +176,9 @@ test("orders findings by file, then line, then rule", () => {
 
     // Assert
     assert.deepEqual(
-        found.map((finding) => `${finding.file}:${finding.line}:${finding.rule}`),
+        found.map(
+            (finding) => `${finding.file}:${finding.line}:${finding.rule}`,
+        ),
         [
             "a.test.ts:1:focused-suite",
             "a.test.ts:1:focused-test",
