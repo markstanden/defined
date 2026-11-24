@@ -70,6 +70,15 @@
 // documented exception — a lexical read of flow, not a parser's. A promise
 // `.catch(...)` callback is not a catch block and is ignored.
 //
+// The OpenCollection rules read request and environment files rather than test
+// declarations (lib/test-review/opencollection.mts): `no-tests` is a request
+// declaring neither a runtime assertion nor a tests script with code;
+// `hardcoded-host` is a literal scheme and host in the request url;
+// `plaintext-credential` is a literal credential inside `http.auth`, its value
+// always withheld; `unlabelled-secret-var` is a credential-named environment
+// variable holding a literal value and not marked `secret: true`. They are
+// bounded to collection hygiene — never a repo-wide secrets sweep.
+//
 // Deliberate ceiling (ponytail): the marker regex reads contiguous call text,
 // so `it` split from `.only` across lines reads as unfocused — the scanner's
 // declaration head has the same shape. The marker also matches wherever the
@@ -78,6 +87,11 @@
 import { lineAt, scanTestDeclarations } from "./declarations.mts";
 import type { TestDeclaration, TestFramework } from "./declarations.mts";
 import { maskTestSource } from "./mask.mts";
+import {
+    isEnvironmentPath,
+    readCollectionRequest,
+    readEnvironmentVariables,
+} from "./opencollection.mts";
 
 /** The rule ids the always-on pass can report. */
 export const ALWAYS_ON_RULES = [
@@ -90,6 +104,10 @@ export const ALWAYS_ON_RULES = [
     "no-assertions",
     "unawaited-async-assertion",
     "swallowed-exception",
+    "no-tests",
+    "hardcoded-host",
+    "plaintext-credential",
+    "unlabelled-secret-var",
 ] as const;
 
 /** One always-on test-hygiene rule id. */
@@ -596,6 +614,74 @@ function swallowedExceptionFindings({
     });
 }
 
+/** Name fragments that mark an environment variable as credential-like. */
+const SECRET_NAME =
+    /(?:token|secret|password|passwd|api[_-]?key|apikey|credential|authoriz(?:ation|ed))|auth(?!or)/iu;
+
+/** Findings for an OpenCollection request file. */
+function collectionFindings(source: TestReviewSource): TestHygieneFinding[] {
+    const request = readCollectionRequest({
+        path: source.path,
+        content: source.content,
+    });
+    if (request === null) {
+        return [];
+    }
+    const findings: TestHygieneFinding[] = [];
+    if (!request.hasAssertions && !request.hasTestsScript) {
+        findings.push({
+            rule: "no-tests",
+            file: source.path,
+            line: 1,
+            message: `OpenCollection request "${request.name}" declares no assertions and no tests script: nothing checks the response`,
+        });
+    }
+    if (request.url !== null) {
+        findings.push({
+            rule: "hardcoded-host",
+            file: source.path,
+            line: request.url.line,
+            message: `OpenCollection request "${request.name}" pins a literal scheme and host: "${request.url.text}" — use a variable so the request runs against any environment`,
+        });
+    }
+    if (request.credential !== null) {
+        findings.push({
+            rule: "plaintext-credential",
+            file: source.path,
+            line: request.credential.line,
+            message: `OpenCollection request "${request.name}" carries a literal credential: "${request.credential.text}" — the value is withheld; use an environment variable`,
+        });
+    }
+    return findings;
+}
+
+/** Findings for an OpenCollection environment file. */
+function environmentFindings(source: TestReviewSource): TestHygieneFinding[] {
+    if (!isEnvironmentPath(source.path)) {
+        return [];
+    }
+    return readEnvironmentVariables(source.content).flatMap(
+        (variable): TestHygieneFinding[] => {
+            if (
+                !SECRET_NAME.test(variable.name) ||
+                variable.secret ||
+                variable.value === "" ||
+                variable.value.startsWith("{{")
+            ) {
+                return [];
+            }
+            return [
+                {
+                    rule: "unlabelled-secret-var",
+                    file: source.path,
+                    line: variable.line,
+                    message: `environment variable "${variable.name}" holds a literal value and is not marked secret: true, so the value is committed`,
+                },
+            ];
+        },
+    );
+}
+
 /** All findings from one source, in line order. */
 function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
     const masked = maskTestSource(source.content);
@@ -604,6 +690,8 @@ function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
         content: source.content,
     });
     return [
+        ...collectionFindings(source),
+        ...environmentFindings(source),
         ...matchFindings({
             source,
             masked,
