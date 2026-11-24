@@ -22,6 +22,11 @@ import { join } from "node:path";
 import { loadConfig, type DefinedConfig } from "./config.mts";
 import { standardsDir } from "./config-path.mts";
 import { CONSUMER_ESLINT_CONFIGS } from "./eslint-config.mts";
+import {
+    ALWAYS_ON_RULES,
+    LEAD_RULES,
+    REVIEW_RULES,
+} from "./test-review/rules.mts";
 
 export type OwnerSide = "house" | "consumer" | "mixed" | "n/a";
 
@@ -163,7 +168,7 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
     "test-hygiene": {
         kind: "step",
         docRel: "testing/test-review.md",
-        notice: "always-on test-hygiene defects: does the test run, and can it fail",
+        notice: "test-hygiene defects and review leads: does the test run, and can it fail",
         owner: house("runtime/lib/test-review/"),
     },
     "node-checks": {
@@ -289,45 +294,15 @@ const YAMLLINT_RULES = new Set([
     "quoted-strings",
 ]);
 
-/** The test-hygiene rule ids documented in standards/testing/test-review.md. */
+/**
+ * The test-hygiene rule ids documented in standards/testing/test-review.md.
+ * The engine's catalogue is the one home for the ids; the doc-driven test in
+ * explain.test.mts guards the two against drift.
+ */
 const TEST_REVIEW_RULES: ReadonlySet<string> = new Set([
-    "focused-test",
-    "focused-suite",
-    "theory-without-data",
-    "unawaited-async-assertion",
-    "no-assertions",
-    "literal-tautology",
-    "commented-out-assertion",
-    "swallowed-exception",
-    "skipped-test",
-    "no-tests",
-    "hardcoded-host",
-    "plaintext-credential",
-    "unlabelled-secret-var",
-    "missing-structure",
-    "multi-statement-act",
-    "compound-assertion",
-    "conditional-assertion",
-    "assertion-in-loop",
-    "else-branch-assertion",
-    "ambient-clock",
-    "sleep",
-    "randomness",
-    "ambient-environment",
-    "ambient-locale",
-    "real-network",
-    "real-filesystem",
-    "process-spawn",
-    "debug-output",
-    "identical-body-shape",
-    "single-row-parameterised",
-    "literal-expectation",
-    "computed-expectation",
-    "computed-title",
-    "property-trigger-unmet",
-    "single-line-summary",
-    "status-only-tests",
-    "legacy-bru-present",
+    ...ALWAYS_ON_RULES,
+    ...REVIEW_RULES,
+    ...LEAD_RULES,
 ]);
 
 const SHELLCHECK_RE = /^SC\d{3,4}$/u;

@@ -10,16 +10,15 @@ skills read this output instead of carrying their own copy of the rules.
 The read-only `test-hygiene` step serves all three surfaces, and the caller
 selects scope, never rules:
 
-| surface                         | scope                   | rules                                                  | purpose                             |
-| ------------------------------- | ----------------------- | ------------------------------------------------------ | ----------------------------------- |
-| `defined verify` / `comply`     | whole git inventory     | always-on defects                                      | merge gate, CI                      |
-| `defined scan`                  | whole git inventory     | always-on defects                                      | install-less try-out, ungated repos |
-| `defined scan --files <paths…>` | exactly the named files | always-on defects today; the review tier when it lands | the review pass                     |
+| surface                         | scope                   | rules                                 | purpose                             |
+| ------------------------------- | ----------------------- | ------------------------------------- | ----------------------------------- |
+| `defined verify` / `comply`     | whole git inventory     | always-on defects                     | merge gate, CI                      |
+| `defined scan`                  | whole git inventory     | always-on defects                     | install-less try-out, ungated repos |
+| `defined scan --files <paths…>` | exactly the named files | always-on defects and the review tier | the review pass                     |
 
 - The rule set is chosen by the step, not the caller. `--files` scopes the
-  always-on rules to exactly those files; the review tier is the next
-  increment and is not in the engine yet. No flag selects an individual rule or
-  a tier on its own.
+  always-on rules and adds the review tier to exactly those files. No flag
+  selects an individual rule or a tier on its own.
 - The named files scope the test-hygiene rules. Every other step still judges
   the repository as configured, so a selector-driven step (purity, tofu) is
   never narrowed out from under its own declaration.
@@ -65,11 +64,11 @@ selects scope, never rules:
 The three secrets rules are bounded to test-collection hygiene — test files and
 OpenCollection requests/environments — and are never a repo-wide secrets sweep.
 
-## Review tier (planned — not yet in the engine)
+## Review tier
 
-The engine ships the always-on rules only. These leads, and the suppression
-grammar below, land with the review-tier increment; until then they describe
-the review pass, not a gate verdict.
+These leads fail the `--files` pass until they are fixed or suppressed. A
+legitimate shape carries a why-note (see Suppression); the reviewer still owns
+the judgement.
 
 | rule id                 | lead to read                                                                                                                                                                                                                                                                |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -88,6 +87,7 @@ the review pass, not a gate verdict.
 | `real-filesystem`       | real file, directory or temp-path access: the test needs a writable host.                                                                                                                                                                                                   |
 | `process-spawn`         | a child process started: the test needs the host's binaries.                                                                                                                                                                                                                |
 | `debug-output`          | console or debug output left in a test.                                                                                                                                                                                                                                     |
+| `suppression-note`      | a why-note that names an always-on defect, an unknown or wrong-case id, or gives a vacuous reason: it suppresses nothing.                                                                                                                                                   |
 
 A determinism lead is legitimate when the effect is the subject: a clock
 boundary, a serialisation test over a real temporary file. Control it and say so
@@ -123,10 +123,8 @@ complexity (`eslint`), module purity and CQS (`purity`), identifier naming
 
 ## Suppression
 
-Reserved for the review tier: the engine does not read notes yet, and an
-always-on defect has no escape even when the grammar lands.
-
-A review-tier lead is suppressed by a note beside the test, in one grammar:
+A review-tier lead is suppressed by a note beside the test, in one grammar.
+An always-on defect has no escape even though the note parses.
 
 ```text
 // Why use <rule-id> here: <reason>
@@ -146,6 +144,9 @@ A review-tier lead is suppressed by a note beside the test, in one grammar:
 - **Exact id.** The token is the rule id, case-sensitive. A misspelt id
   suppresses nothing and is reported as an unknown suppression. `property` is the
   one accepted alias for `property-trigger-unmet`; there are no other aliases.
+  A note naming an intent lead the gate does not own (`computed-title`,
+  `property-trigger-unmet`, …) is accepted and inert: it records the reviewer's
+  reason without silencing a gate rule, so `computed-title` still has no escape.
 - **Reason mandatory.** The reason must say how the construct is controlled, or
   why the rule does not apply. Empty, `legitimate`, `intentional`, `required`
   and similar restatements are vacuous, and a vacuous note is a finding.
@@ -174,4 +175,10 @@ A review-tier lead is suppressed by a note beside the test, in one grammar:
   title is not inventoried.
 - An alias or an indirect call can hide an effect from a pattern rule. The gate
   proves the shapes it names, not the absence of everything else.
+- A vacuous reason is a pinned stop-list, not a judgement: empty, `legitimate`,
+  `intentional`, `required`, `by design` and their siblings report. A reason
+  outside the list always passes, even a bad one.
+- Notes are read only in the contiguous comment block above a test declaration.
+  A note above production code, a suite or a file is neither applied nor
+  reported.
 - The engine never measures coverage and never estimates it.
