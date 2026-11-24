@@ -75,10 +75,12 @@ A `.defined.json` is honoured when present — including a **gitignored** one:
 config is read from the mounted repo, never from the git scope, so a
 work-repo config can stay uncommitted. Put `.defined.json` in
 `.git/info/exclude` and `scan` runs your declared checks and coverage
-thresholds locally. Two caveats: CI never sees an ignored config (a fresh
-clone has no file), and declared commands run against a copy of the git scope,
-so gitignored fixtures or `.env` files are absent there — the same rule
-`verify` follows.
+thresholds locally. Three caveats: CI never sees an ignored config (a fresh
+clone has no file), so a `scope.include` kept out of the commit narrows local
+runs only and `scan` says so in its `notices`; declared commands run against a
+copy of the git scope, so gitignored fixtures or `.env` files are absent there —
+the same rule `verify` follows; and a repo-owned `.prettierignore` must itself
+be in the git scope to travel, so a gitignored one has no effect on `scan`.
 
 Consumer commands are never guessed and never taken from argv: `node.checks`,
 `coverage.*.command` and `naming.command` run only when `.defined.json`
@@ -123,12 +125,14 @@ the plan and noise on every run after that:
   affects `status` or the exit code. Each entry is
   `{ "kind": "config" | "seeded", "message", "file"? }`: `config` means a
   `.defined.json` override weakens the house floor (an `eslint`/`dotnet`/
-  `workflow` `disable` switch, or a coverage line minimum below the house
-  default of 80), and `seeded` means a project-owned seeded default
-  (`.editorconfig`, `.gitattributes`, `Directory.Build.props`) differs from the
-  image copy. Managed-file drift is not a notice — that stays a bootstrap
-  failure. `scan` has no bootstrap check, so it emits neither bootstrap errors
-  nor ownership notices.
+  `workflow` `disable` switch, a coverage line minimum below the house default
+  of 80, or a `scope.include` that narrows what the content checks judge), and
+  `seeded` means a project-owned seeded default (`.editorconfig`,
+  `.gitattributes`, `Directory.Build.props`) differs from the image copy.
+  Managed-file drift is not a notice — that stays a bootstrap failure. `scan`
+  has no bootstrap check, so it emits no bootstrap errors, but it does report
+  `config` notices: a narrowed scope must be visible on the verb a work repo
+  actually runs.
 - **`results`** — every check in the run plan, including skipped ones, keyed by
   stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Present with `--full`
   only. On `scan`, `bootstrap` is `skip`.
@@ -437,6 +441,14 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     [`standards/node-purity.md`](standards/node-purity.md). `purity` is uncached
     in v1, so a policy or source change cannot replay a stale green.
 
+    Two declarations are policy errors rather than findings, because a
+    selector that silently judges nothing would read green: a `pureModules`
+    selector matching no supported file, and a CQS target naming a file purity
+    cannot judge. The error says which case it is — a stale path (nothing in
+    the repository matches) or a live one pointing outside a declared
+    `scope.include`, in which case it names an example match and the two ways
+    to resolve it (widen the scope, or move the declaration inside it).
+
     On a host that cannot run the managed GitHub workflow (Azure DevOps, GitLab, a private server), switch off its installation and check — local `comply` still runs every in-container step:
 
     ```jsonc
@@ -458,8 +470,27 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
 
     That turns the `dotnet` and `dotnet-coverage` steps off and stops the
     seeding; an already-seeded copy is yours — `git rm` it if unwanted. It
-    cannot be combined with `coverage.dotnet`; the config parse rejects that
-    combination.
+    cannot be combined with `coverage.dotnet` or `dotnet.workspaces`; the config
+    parse rejects both combinations.
+
+    A repo gating part of a multi-project solution names its workspaces
+    explicitly. This replaces discovery, which needs exactly one solution or one
+    lone project and refuses to guess between several:
+
+    ```jsonc
+    "dotnet": {
+        "workspaces": [
+            "tests/FunctionAppLoyalty.Tests/FunctionAppLoyalty.Tests.csproj",
+        ],
+    }
+    ```
+
+    Each entry is a repo-relative `*.sln`, `*.slnx` or `*.csproj`, must be part
+    of the git scope (the working copy is materialised from it), and is
+    restored, format-checked, built and tested in declared order. A declared
+    entry outside the scope fails the step naming itself. `dotnet-coverage`
+    still waits on the `dotnet` step, so a passing scoped workspace is also what
+    unblocks a scoped `coverage.dotnet` command.
 
     The `tofu` step runs `fmt`, `tflint`, `init` and `validate` — `fmt` over the
     tracked `.tf` files, and the rest once per module directory (the top-most
@@ -470,6 +501,32 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     ```jsonc
     "tofu": { "dirs": ["infrastructure"] }
     ```
+
+    **Narrowing the content scope** — the repository is the gate's scope by
+    default, and that stays the doctrine. A repo that is not yet house-clean
+    everywhere can declare which files the content checks judge:
+
+    ```jsonc
+    "scope": {
+        "include": ["src/FunctionAppLoyalty/**", "tests/FunctionAppLoyalty.Tests/**"],
+    }
+    ```
+
+    Selectors use the same documented glob as `purity.pureModules` (`*` one
+    segment, `**` zero or more, `?` one character) and a trailing `/` means the
+    whole subtree. The scope filters what the `node`, `eslint`, `shell`, `yaml`,
+    `tofu` and `purity` checks _report on_; it never narrows the working copy or
+    the dependency restore, so a pinned `dotnet.workspaces` build still sees
+    every file it references and a config-declared Prettier/ESLint plugin still
+    resolves from its manifest, and it never touches gate machinery such as the
+    managed workflow check. A scope that matches no file in the git scope is a
+    config error, not a clean run.
+
+    Two consequences to keep in mind. `scan` reports the narrowed scope as a
+    `notices` entry, so a green run says what it did not look at. And a config
+    kept out of the commit (`.git/info/exclude`) narrows local runs only: CI, if
+    the repo ever runs the gate, still judges the whole repository, so local
+    green stops implying merge green for that repo.
 
     **Coverage command examples** — the command must land the report at a fixed
     path: `coverage/lcov.info` (node) or `coverage.cobertura.xml` /

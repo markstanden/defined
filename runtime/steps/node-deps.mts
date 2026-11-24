@@ -94,6 +94,11 @@ export async function runNodeDepsStep({
     existsSyncFn = existsSync,
 }: {
     ctx: NodeDepsRunContext;
+    /**
+     * The whole git inventory: dependency restore is machinery, so the content
+     * scope never narrows it — a config-declared plugin must resolve wherever
+     * its manifest lives.
+     */
     trackedFiles: string[];
     runner?: Runner;
     readFileFn?: typeof readFile;

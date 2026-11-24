@@ -229,14 +229,26 @@ export function parsePrettierFindings({
 export async function runNodeStep({
     ctx,
     trackedFiles,
+    scratchFiles = trackedFiles,
     runner = run,
 }: {
     ctx: NodeRunContext;
+    /** The content-check scope: the files prettier reports on. */
     trackedFiles: string[];
+    /**
+     * The whole git inventory. The working copy, the consumer config probe and
+     * the cache identity use it, so narrowing the scope never starves the
+     * scratch or hides a governing `.editorconfig` from the identity.
+     */
+    scratchFiles?: string[];
     runner?: Runner;
 }): Promise<StepResult> {
-    const manifests = filterPackageJsons({ files: trackedFiles });
-    const markdownFiles = filterMarkdownFiles({ files: trackedFiles });
+    // What kind of project this is — Node, docs, or neither — is a whole-repo
+    // fact, so both probes read the full inventory: a scope that names only
+    // source files must not silence prettier on them. The files it checks are
+    // the scoped list.
+    const manifests = filterPackageJsons({ files: scratchFiles });
+    const markdownFiles = filterMarkdownFiles({ files: scratchFiles });
     if (manifests.length === 0 && markdownFiles.length === 0) {
         return skipped({
             notice: "node: no tracked package.json or *.md files",
@@ -260,7 +272,7 @@ export async function runNodeStep({
         mode: ctx.mode,
         repoRoot: ctx.repoRoot,
         scratch: ctx.scratch,
-        files: trackedFiles,
+        files: scratchFiles,
     });
     const sharedArgs = [
         ...(await prettierConfigArgs({ repoRoot: workingRoot })),
@@ -294,7 +306,7 @@ export async function runNodeStep({
         prettierFiles,
         sharedArgs,
         workingRoot,
-        trackedFiles,
+        trackedFiles: scratchFiles,
         runner,
         summary: `${manifests.length} package(s), ${markdownFiles.length} md, ${prettierFiles.length} parseable`,
     });

@@ -11,7 +11,7 @@ import { test } from "node:test";
 
 import type { DefinedConfig } from "./config.mts";
 import type { ManagedFile } from "./managed-files.mts";
-import { ownershipDrift } from "./ownership-drift.mts";
+import { configDrift, ownershipDrift } from "./ownership-drift.mts";
 
 const EMPTY_CONFIG: DefinedConfig = { version: "" };
 
@@ -327,4 +327,50 @@ test("ownershipDrift_managedFileDiffers_isNotAdvisoryDrift", async () => {
             );
         },
     );
+});
+
+test("ownershipDrift_scopeInclude_reportsTheNarrowedScope", async () => {
+    // Arrange
+    await withSourceDir(
+        { ".editorconfig": "root = true\n" },
+        async (sourceDir) => {
+            await withRepo(
+                { ".editorconfig": "root = true\n" },
+                async (repoRoot) => {
+                    // Act
+                    const notices = await ownershipDrift({
+                        config: {
+                            version: "",
+                            scope: { include: ["src/**", "tests/**"] },
+                        },
+                        sourceDir,
+                        files: [seededFile(".editorconfig", ".editorconfig")],
+                        repoRoot,
+                    });
+
+                    // Assert
+                    assert.equal(notices.length, 1);
+                    assert.equal(notices[0].kind, "config");
+                    assert.equal(notices[0].file, ".defined.json");
+                    assert.match(
+                        notices[0].message,
+                        /scope\.include: narrows the content checks to 2 selector\(s\)/u,
+                    );
+                },
+            );
+        },
+    );
+});
+
+test("configDrift_reportsScopeWithoutTheBootstrapPhase", () => {
+    // Act
+    const notices = configDrift({
+        version: "",
+        scope: { include: ["src/**"] },
+    });
+
+    // Assert
+    assert.equal(notices.length, 1);
+    assert.equal(notices[0].kind, "config");
+    assert.match(notices[0].message, /1 selector\(s\)/u);
 });

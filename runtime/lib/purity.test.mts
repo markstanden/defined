@@ -159,7 +159,23 @@ test("selectPurityPolicy rejects a selector matching only unsupported files", ()
     );
 });
 
-test("selectPurityPolicy reports a target outside the git scope", () => {
+test("selectPurityPolicy names a selector that only matches outside the content scope", () => {
+    // Arrange
+    const config: PurityConfig = { pureModules: ["legacy/**"] };
+
+    // Act & Assert
+    assert.throws(
+        () =>
+            selectPurityPolicy({
+                config,
+                files: ["src/a.mts"],
+                allFiles: ["src/a.mts", "legacy/a.mts"],
+            }),
+        /pureModules selector "legacy\/\*\*" matches only files outside the content scope declared by scope\.include \(e\.g\. "legacy\/a\.mts"\)/u,
+    );
+});
+
+test("selectPurityPolicy reports a target outside the gated files", () => {
     // Arrange
     const config: PurityConfig = {
         commands: [{ file: "lib/receipts.mts", name: "saveReceipt" }],
@@ -172,7 +188,38 @@ test("selectPurityPolicy reports a target outside the git scope", () => {
     );
 });
 
-test("selectPurityPolicy reports a query target outside the git scope", () => {
+test("selectPurityPolicy names a target declared outside the content scope", () => {
+    // Arrange
+    const config: PurityConfig = {
+        commands: [{ file: "legacy/receipts.mts", name: "saveReceipt" }],
+    };
+
+    // Act & Assert
+    assert.throws(
+        () =>
+            selectPurityPolicy({
+                config,
+                files: ["src/a.mts"],
+                allFiles: ["src/a.mts", "legacy/receipts.mts"],
+            }),
+        /purity: command "saveReceipt" is declared in "legacy\/receipts\.mts", which is outside the content scope declared by scope\.include/u,
+    );
+});
+
+test("selectPurityPolicy reports a target that is not a parseable file", () => {
+    // Arrange
+    const config: PurityConfig = {
+        commands: [{ file: "docs/notes.md", name: "saveReceipt" }],
+    };
+
+    // Act & Assert
+    assert.throws(
+        () => selectPurityPolicy({ config, files: ["docs/notes.md"] }),
+        /purity: command "saveReceipt" is declared in "docs\/notes\.md", which is not a parseable JS\/TS file/u,
+    );
+});
+
+test("selectPurityPolicy reports a query target outside the gated files", () => {
     // Arrange
     const config: PurityConfig = {
         queries: [{ file: "lib/receipts.mts", name: "readReceipt" }],
