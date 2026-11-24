@@ -111,6 +111,23 @@ test("readNote keeps a wrong-case id for the catalogue to reject", () => {
     assert.equal(note?.rule, "Ambient-Clock");
 });
 
+test("readNote tolerates whitespace before the note colon", () => {
+    // Arrange
+    const lines = [
+        "// Why use sleep here : the delay proves the polling loop gives up",
+        "// Why use sleep : the delay proves the polling loop gives up",
+    ];
+
+    // Act
+    const notes = lines.map((text) => readNote(text));
+
+    // Assert
+    assert.deepEqual(notes, [
+        { rule: "sleep", reason: "the delay proves the polling loop gives up" },
+        { rule: "sleep", reason: "the delay proves the polling loop gives up" },
+    ]);
+});
+
 test("resolveRule applies the one documented alias", () => {
     // Arrange
     const rules = ["property", "ambient-clock", "property-trigger-unmet"];

@@ -51,7 +51,7 @@ export const VACUOUS_REASONS: ReadonlySet<string> = new Set([
 
 /** The note frame, applied to a line with its comment marker removed. */
 const NOTE_FRAME =
-    /^\s*why\s+(?:not\s+)?use\s+([a-z][a-z0-9-]*)(?:\s+here)?:(.*)$/iu;
+    /^\s*why\s+(?:not\s+)?use\s+([a-z][a-z0-9-]*)(?:\s+here)?\s*:(.*)$/iu;
 
 /** The comment marker a note line starts with. */
 const NOTE_MARKER = /^[ \t]*(?:\/\/+|\/\*+|\*+\/?|--|#)[ \t]*/u;
