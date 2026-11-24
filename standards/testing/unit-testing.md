@@ -1,9 +1,11 @@
 # C# testing standards (xUnit)
 
 Reviewer and agent guidance. The `defined` gate runs `dotnet
-format/build/test`; it does **not** enforce these structures, names or patterns —
-treat this as the agreed convention for reviews and agent work, not a
-mechanically-checked contract.
+format/build/test` and the test-hygiene rules in
+[`test-review.md`](test-review.md) — always-on defects on every run, structure
+and determinism leads in a named-file review pass. It does **not** mechanically
+check every structure, name or pattern below: treat those as the agreed
+convention for reviews and agent work.
 
 **Stack**: xUnit, Moq, Shouldly.
 

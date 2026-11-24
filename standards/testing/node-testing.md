@@ -1,7 +1,10 @@
 # Node testing and quality standards
 
 House conventions for Node/TypeScript projects, mirroring
-[`unit-testing.md`](unit-testing.md) for .NET.
+[`unit-testing.md`](unit-testing.md) for .NET. The test-hygiene rule ids, their
+tiers and the suppression grammar live in
+[`test-review.md`](test-review.md); this doc keeps the stack-specific
+conventions.
 
 ## What the gate enforces
 
@@ -24,8 +27,9 @@ rule:
 - **Assertions**: `node:assert/strict`.
 - **Structure**: label the phases `// Arrange`, `// Act`, `// Assert` inside the
   test body, one behaviour per test — a failing test name should say what broke.
-  This is a ratchet: required for new and changed tests, and for historical
-  tests as each area is retrofit. Where one statement both exercises the unit
+  A missing label is the `missing-structure` review lead. This is a ratchet:
+  required for new and changed tests, and for historical tests as each area is
+  retrofit. Where one statement both exercises the unit
   and asserts on it, use the single label `// Act & Assert` rather than
   pretending the phases split. A body with no setup has no Arrange phase: omit
   the label rather than inventing one, and do not add ceremony to satisfy a
@@ -36,8 +40,8 @@ rule:
   invariant versus an after-the-fact side effect, any two `Act` steps. Leave
   the commonplace pairing alone: one act with one outcome plus its echo.
 - **Assertion helpers carry the verb**: name a helper `assertX(...)` (e.g.
-  `assertLoadRejects`), never `rejectsLoad(...)`. The reader and the review
-  scanner both look for the verb; without it a helper reads as "no assertions".
+  `assertLoadRejects`), never `rejectsLoad(...)`. The reader and the gate both
+  look for the verb; without it a helper reads as "no assertions".
 - **Colocation**: tests live next to the module as `<module>.test.mts`.
 - **No test grab-bags**: one test file per module.
 

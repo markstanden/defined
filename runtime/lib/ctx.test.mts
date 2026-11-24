@@ -2,7 +2,7 @@
 // Run: node --test runtime/lib/ctx.test.mts
 
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -227,4 +227,72 @@ test("createRunContext_derivesRepoRootViaGitMarkerWalkUp", async () => {
     assert.equal(ctx.verb, "verify");
     assert.equal(ctx.presentation, "min");
     assert.equal(ctx.timings, true);
+});
+
+test("parseCommand_acceptsFilesValuesForScan", () => {
+    // Act & Assert
+    assert.deepEqual(
+        parseCommand({
+            argv: ["scan", "--files", "a.test.ts", "b.cs", "--full"],
+        }),
+        {
+            verb: "scan",
+            help: false,
+            presentation: "full",
+            timings: false,
+            files: ["a.test.ts", "b.cs"],
+        },
+    );
+});
+
+test("parseCommand_rejectsFilesWithoutValues", () => {
+    // Act & Assert
+    assert.throws(
+        () => parseCommand({ argv: ["scan", "--files"] }),
+        /at least one path/u,
+    );
+});
+
+test("parseCommand_rejectsFilesForVerify", () => {
+    // Act & Assert
+    assert.throws(
+        () => parseCommand({ argv: ["verify", "--files", "a.test.ts"] }),
+        /scan flag/u,
+    );
+});
+
+test("createRunContext_resolvesNamedFilesAgainstTheRepo", async () => {
+    // Arrange
+    const dir = await tempGitTree();
+    await mkdir(join(dir, "tests"));
+    await writeFile(join(dir, "tests", "a.test.ts"), "", { flag: "w" });
+
+    // Act
+    const ctx = await createRunContext({
+        verb: "scan",
+        startDir: dir,
+        presentation: "min",
+        timings: false,
+        files: ["tests/a.test.ts"],
+    });
+
+    // Assert
+    assert.deepEqual(ctx.files, ["tests/a.test.ts"]);
+});
+
+test("createRunContext_rejectsANamedFileThatDoesNotExist", async () => {
+    // Arrange
+    const dir = await tempGitTree();
+
+    // Act & Assert
+    await assert.rejects(
+        createRunContext({
+            verb: "scan",
+            startDir: dir,
+            presentation: "min",
+            timings: false,
+            files: ["missing.test.ts"],
+        }),
+        /no such file/u,
+    );
 });

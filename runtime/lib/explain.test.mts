@@ -2,6 +2,7 @@
 // Run: node --test runtime/lib/explain.test.mts
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { explainTopic, renderExplanation, STEP_IDS } from "./explain.mts";
@@ -280,6 +281,51 @@ test("explainTopic_purityRules_routeToThePurityDoc", async () => {
         explanations.map((explanation) => [explanation.kind, explanation.doc]),
         topics.map(() => ["rule", "standards/node-purity.md"]),
     );
+});
+
+/** Rule ids listed in the test-review standards tables, in document order. */
+function documentedTestReviewRules(): string[] {
+    const doc = readFileSync(
+        new URL("../../standards/testing/test-review.md", import.meta.url),
+        "utf8",
+    );
+    return [...doc.matchAll(/^\| `([a-z][a-z-]+)` /gmu)].map(
+        (match) => match[1]!,
+    );
+}
+
+test("explainTopic_everyDocumentedTestReviewRule_routesToTheTestReviewDoc", async () => {
+    // Arrange
+    const topics = documentedTestReviewRules();
+
+    // Act
+    const explanations = await Promise.all(
+        topics.map((topic) =>
+            explainTopic({ topic, repoRoot: "/repo", deps: fakeDeps() }),
+        ),
+    );
+
+    // Assert
+    assert.ok(topics.length >= 30, "the doc lists the rule catalogue");
+    assert.deepEqual(
+        explanations.map((explanation) => [explanation.kind, explanation.doc]),
+        topics.map(() => ["rule", "standards/testing/test-review.md"]),
+    );
+});
+
+test("explainTopic_testReviewRule_isHouseOwned", async () => {
+    // Act
+    const explanation = await explainTopic({
+        topic: "compound-assertion",
+        repoRoot: "/repo",
+        deps: fakeDeps(),
+    });
+
+    // Assert
+    assert.deepEqual(explanation.owner, {
+        side: "house",
+        detail: "runtime/lib/test-review/",
+    });
 });
 
 test("explainTopic_purityOwner_isConsumerWhenDeclaredAndNotApplicableOtherwise", async () => {
