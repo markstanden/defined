@@ -37,6 +37,13 @@
 // assert are not both labelled, `multi-statement-act` when the act region
 // holds more than one depth-0 statement. Labels are read from the raw body
 // with strings blanked, never from the masked body, which has no comments.
+// The assertion-shape quartet reads the masked body's blocks with
+// bracket-matched spans: an assertion inside an `if` guard or block
+// (`conditional-assertion`), a loop or `.forEach` callback
+// (`assertion-in-loop`), an asserting `else` (`else-branch-assertion`), and a
+// boolean assertion joining two conditions with `&&` or `||`
+// (`compound-assertion`). An else-if chain fires both conditional and
+// else-branch rules, as the scanner does.
 //
 // `literal-tautology` reads each declaration's masked body: a comparison of a
 // literal with itself, or an expression with itself, cannot fail for any input.
@@ -126,6 +133,10 @@ export const ALWAYS_ON_RULES = [
 export const REVIEW_RULES = [
     "missing-structure",
     "multi-statement-act",
+    "compound-assertion",
+    "conditional-assertion",
+    "assertion-in-loop",
+    "else-branch-assertion",
     "ambient-clock",
     "sleep",
     "randomness",
@@ -709,13 +720,19 @@ function unawaitedAssertionFindings({
 /** A catch clause with its block. A promise `.catch(` does not match. */
 const CATCH_OPEN = /\b(?<!\.)catch\s*(?:(?:\([^)]*\))\s*)?\{/g;
 
-/** Index of the brace closing the one at `open`, or the last index. */
-function blockEnd(text: string, open: number): number {
+/**
+ * Index of the bracket closing the one at `open`, or the last index when the
+ * body is unbalanced. Only the bracket kind at `open` is matched; the text is
+ * already masked, so a bracket inside a string cannot close the block.
+ */
+function matchingClose(text: string, open: number): number {
+    const opener = text[open] ?? "";
+    const closer = opener === "{" ? "}" : ")";
     let depth = 0;
     for (let index = open; index < text.length; index++) {
-        if (text[index] === "{") {
+        if (text[index] === opener) {
             depth++;
-        } else if (text[index] === "}") {
+        } else if (text[index] === closer) {
             depth--;
             if (depth === 0) {
                 return index;
@@ -723,6 +740,24 @@ function blockEnd(text: string, open: number): number {
         }
     }
     return text.length - 1;
+}
+
+/** Index of the bracket opening the block closed at `close`, or `-1`. */
+function matchingOpen(text: string, close: number): number {
+    const closer = text[close] ?? "";
+    const opener = closer === "}" ? "{" : ")";
+    let depth = 0;
+    for (let index = close; index >= 0; index--) {
+        if (text[index] === closer) {
+            depth++;
+        } else if (text[index] === opener) {
+            depth--;
+            if (depth === 0) {
+                return index;
+            }
+        }
+    }
+    return -1;
 }
 
 /**
@@ -765,7 +800,7 @@ function swallowedExceptionFindings({
             (match): TestHygieneFinding[] => {
                 const index = match.index ?? 0;
                 const open = index + match[0].length - 1;
-                const close = blockEnd(body, open);
+                const close = matchingClose(body, open);
                 const contents = body.slice(open + 1, close);
                 if (
                     ASSERTION_VERB.test(contents) ||
@@ -1042,6 +1077,266 @@ function multiStatementActFinding(
     };
 }
 
+/** A conditional block that can hold an assertion. */
+const CONDITIONAL_OPEN = /\bif\s*\([^)]*\)\s*\{/g;
+
+/** A braceless conditional whose body is an assertion. */
+const CONDITIONAL_BARE_CALL =
+    /\bif\s*\([^)]*\)\s*(?=(?:Assert|Assertions|assert|expect|Should)[.(])/g;
+
+/** The Python one-liner: `if cond: assert ...`. */
+const CONDITIONAL_BARE_PYTHON = /\bif\b[^:{]*:[ \t]*(?=assert\b)/g;
+
+/** A loop block that can hold an assertion. */
+const LOOP_OPEN = /\b(?:for|foreach|while)\s*\([^)]*\)\s*\{/g;
+
+/** A call whose callback can hold an assertion. */
+const FOR_EACH_CALL = /\.forEach\s*\(/g;
+
+/** An `else` clause with a block. */
+const ELSE_BLOCK = /\belse\s*\{/g;
+
+/** A braceless `else` whose statement is an assertion. */
+const ELSE_BARE =
+    /\belse\b(?!\s*if\b)\s*(?=(?:Assert|Assertions|assert|expect|Should)[.(])/g;
+
+/**
+ * Boolean assertion calls whose operand can join two conditions. The
+ * capital-`A` `Assert.` family is the assertion framework's own class; any
+ * other receiver (`fc.assert`, `t.assert`) is treated as a wrapper and stays
+ * silent.
+ */
+const BOOLEAN_ASSERTION =
+    /\b(?:Assert\.(?:True|IsTrue|False|IsFalse|That)|(?<![\w$.])(?:assert(?:\.ok)?|assertTrue|assertFalse))\s*\(/g;
+
+/**
+ * The receiver immediately before a `.forEach` match, so evidence names the
+ * call: `items.forEach(`.
+ */
+function receiverBefore(body: string, start: number): string {
+    let index = start;
+    while (index > 0 && /[A-Za-z0-9_$.]/.test(body[index - 1] ?? "")) {
+        index--;
+    }
+    return body.slice(index, start);
+}
+
+/** A block header without its opening brace, so evidence reads `if (x)`. */
+function headerText(text: string): string {
+    const trimmed = text.trimEnd();
+    return trimmed.endsWith("{") ? trimmed.slice(0, -1).trimEnd() : trimmed;
+}
+
+/** Whether the branch immediately before `else` also holds an assertion. */
+function previousBranchAsserts(body: string, elseIndex: number): boolean {
+    let before = elseIndex - 1;
+    while (before >= 0 && /\s/.test(body[before] ?? "")) {
+        before--;
+    }
+    if (body[before] === "}") {
+        const open = matchingOpen(body, before);
+        return open >= 0 && ASSERTION_VERB.test(body.slice(open + 1, before));
+    }
+    if (body[before] === ";") {
+        const statement = body.slice(statementStart(body, before), before + 1);
+        return /^\s*if\s*\(/.test(statement) && ASSERTION_VERB.test(statement);
+    }
+    return false;
+}
+
+/** Matches of a block-opening pattern whose bracket-matched block asserts. */
+function assertionBlocks({
+    body,
+    pattern,
+    evidenceOf,
+}: {
+    body: string;
+    pattern: RegExp;
+    evidenceOf: (body: string, index: number, matchText: string) => string;
+}): Array<{ index: number; evidence: string }> {
+    return [...body.matchAll(pattern)].flatMap((match) => {
+        const index = match.index ?? 0;
+        const open = index + match[0].length - 1;
+        const close = matchingClose(body, open);
+        if (!ASSERTION_VERB.test(body.slice(open + 1, close))) {
+            return [];
+        }
+        return [{ index, evidence: evidenceOf(body, index, match[0]) }];
+    });
+}
+
+/** One finding for a matched assertion shape inside a block. */
+function assertionFinding({
+    declaration,
+    body,
+    rule,
+    match,
+    message,
+}: {
+    declaration: TestDeclaration;
+    body: string;
+    rule: ReviewRule;
+    match: { index: number; evidence: string };
+    message: (evidence: string) => string;
+}): TestHygieneFinding {
+    return {
+        rule,
+        file: declaration.path,
+        line: lineInBody({
+            body,
+            bodyLine: declaration.bodyLine,
+            index: match.index,
+        }),
+        message: message(match.evidence),
+    };
+}
+
+/** Assertions inside a conditional block or a braceless guard. */
+function conditionalAssertionFindings({
+    declarations,
+}: {
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (body === null) {
+            return [];
+        }
+        const blocks = assertionBlocks({
+            body,
+            pattern: CONDITIONAL_OPEN,
+            evidenceOf: (_body, _index, text) => headerText(text),
+        });
+        const bare = [CONDITIONAL_BARE_CALL, CONDITIONAL_BARE_PYTHON].flatMap(
+            (pattern) =>
+                [...body.matchAll(pattern)].map((match) => ({
+                    index: match.index ?? 0,
+                    evidence: headerText(match[0]),
+                })),
+        );
+        return [...blocks, ...bare].map((match) =>
+            assertionFinding({
+                declaration,
+                body,
+                rule: "conditional-assertion",
+                match,
+                message: (evidence) =>
+                    `assertion guarded by a conditional in test "${declaration.name}": "${collapse(evidence)}" — it may never run, let alone fail`,
+            }),
+        );
+    });
+}
+
+/** Assertions inside a loop body or a forEach callback. */
+function loopAssertionFindings({
+    declarations,
+}: {
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (body === null) {
+            return [];
+        }
+        const loops = assertionBlocks({
+            body,
+            pattern: LOOP_OPEN,
+            evidenceOf: (_body, _index, text) => headerText(text),
+        });
+        const callbacks = assertionBlocks({
+            body,
+            pattern: FOR_EACH_CALL,
+            evidenceOf: (text, index) => `${receiverBefore(text, index)}.forEach(`,
+        });
+        return [...loops, ...callbacks].map((match) =>
+            assertionFinding({
+                declaration,
+                body,
+                rule: "assertion-in-loop",
+                match,
+                message: (evidence) =>
+                    `assertion inside a loop in test "${declaration.name}": "${collapse(evidence)}" — several cases reported as one test, only the first failure visible`,
+            }),
+        );
+    });
+}
+
+/** Assertions in an else branch: the outcome depends on the branch taken. */
+function elseBranchFindings({
+    declarations,
+}: {
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (body === null) {
+            return [];
+        }
+        const blocks = assertionBlocks({
+            body,
+            pattern: ELSE_BLOCK,
+            evidenceOf: () => "",
+        }).map((match) => ({
+            ...match,
+            evidence: previousBranchAsserts(body, match.index)
+                ? "both branches assert"
+                : "else branch asserts",
+        }));
+        const bare = [...body.matchAll(ELSE_BARE)].map((match) => ({
+            index: match.index ?? 0,
+            evidence: previousBranchAsserts(body, match.index ?? 0)
+                ? "both branches assert"
+                : "else branch asserts",
+        }));
+        return [...blocks, ...bare].map((match) =>
+            assertionFinding({
+                declaration,
+                body,
+                rule: "else-branch-assertion",
+                match,
+                message: (evidence) =>
+                    `asserting else branch in test "${declaration.name}": ${evidence} — a different outcome per branch should be parameterised or split`,
+            }),
+        );
+    });
+}
+
+/** Two conditions joined in one boolean assertion: one ambiguous failure. */
+function compoundAssertionFindings({
+    declarations,
+}: {
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (body === null) {
+            return [];
+        }
+        return [...body.matchAll(BOOLEAN_ASSERTION)].flatMap(
+            (match): TestHygieneFinding[] => {
+                const index = match.index ?? 0;
+                const open = index + match[0].length - 1;
+                const close = matchingClose(body, open);
+                if (!/[&|]{2}/.test(body.slice(open + 1, close))) {
+                    return [];
+                }
+                return [
+                    {
+                        rule: "compound-assertion",
+                        file: declaration.path,
+                        line: lineInBody({
+                            body,
+                            bodyLine: declaration.bodyLine,
+                            index,
+                        }),
+                        message: `compound boolean assertion in test "${declaration.name}": "${collapse((declaration.body ?? body).slice(index, close + 1))}" — the failure message cannot say which condition broke`,
+                    },
+                ];
+            },
+        );
+    });
+}
+
 /** One source's structure leads: phase coverage and the act region's shape. */
 function structureFindings({
     source,
@@ -1107,6 +1402,10 @@ function sourceFindings(
         ...unawaitedAssertionFindings({ source, declarations }),
         ...swallowedExceptionFindings({ source, declarations }),
         ...(review ? structureFindings({ source, declarations }) : []),
+        ...(review ? conditionalAssertionFindings({ declarations }) : []),
+        ...(review ? loopAssertionFindings({ declarations }) : []),
+        ...(review ? elseBranchFindings({ declarations }) : []),
+        ...(review ? compoundAssertionFindings({ declarations }) : []),
         ...(review ? determinismFindings({ source, declarations }) : []),
     ];
 }

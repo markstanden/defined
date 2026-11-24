@@ -1531,3 +1531,314 @@ test("skips a single-expression arrow body entirely", () => {
     // Assert
     assert.deepEqual(structureRulesOf(findings), []);
 });
+
+/** The findings one rule reports for a single declaration body. */
+function findingsOf(
+    content: string,
+    rule: string,
+): ReturnType<typeof reviewTestSources> {
+    return reviewTestSources([{ path: "a.test.ts", content }], {
+        review: true,
+    }).filter((finding) => finding.rule === rule);
+}
+
+test("reports an assertion inside a conditional block", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    if (result > 0) {",
+            "        assert.ok(result);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const [finding] = findingsOf(content, "conditional-assertion");
+
+    // Assert
+    assert.equal(finding?.line, 3);
+    assert.match(finding?.message ?? "", /if \(result > 0\)/u);
+    assert.match(finding?.message ?? "", /may never run/u);
+});
+
+test("stays silent when a conditional block holds no assertion", () => {
+    // Arrange
+    const content = declaredBody(
+        ["    if (result > 0) {", "        count++;", "    }"].join("\n"),
+    );
+
+    // Act
+    const findings = findingsOf(content, "conditional-assertion");
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports an assertion inside a loop block", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    foreach (var item in items) {",
+            "        Assert.Equal(1, item.Count);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const [finding] = findingsOf(content, "assertion-in-loop");
+
+    // Assert
+    assert.match(finding?.message ?? "", /foreach \(var item in items\)/u);
+    assert.match(finding?.message ?? "", /only the first failure/u);
+});
+
+test("reports an assertion inside a forEach callback", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    items.forEach((item) => {",
+            "        assert.ok(item);",
+            "    });",
+        ].join("\n"),
+    );
+
+    // Act
+    const [finding] = findingsOf(content, "assertion-in-loop");
+
+    // Assert
+    assert.match(finding?.message ?? "", /items\.forEach\(/u);
+});
+
+test("stays silent when a loop holds no assertion", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    foreach (var item in items) {",
+            "        total += item.Count;",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = findingsOf(content, "assertion-in-loop");
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports every braceless conditional assertion shape", () => {
+    // Arrange
+    const bodies = [
+        "    if (isReady) Assert.True(ok);",
+        "    if (isReady)\n        Assert.True(ok);",
+        "    if ready: assert result == 1",
+    ].map((body) => declaredBody(body));
+
+    // Act
+    const found = bodies.map((content) =>
+        findingsOf(content, "conditional-assertion").map(
+            (finding) => finding.rule,
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        bodies.map(() => ["conditional-assertion"]),
+    );
+});
+
+test("stays silent when a braceless conditional holds no assertion", () => {
+    // Arrange
+    const content = declaredBody("    if (isReady) cleanup();");
+
+    // Act
+    const findings = findingsOf(content, "conditional-assertion");
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports both branches asserting", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    if (isPremium) {",
+            "        Assert.Equal(Tier.Premium, result);",
+            "    } else {",
+            "        Assert.Equal(Tier.Standard, result);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const [finding] = findingsOf(content, "else-branch-assertion");
+
+    // Assert
+    assert.equal(finding?.line, 5);
+    assert.match(finding?.message ?? "", /both branches assert/u);
+    assert.match(finding?.message ?? "", /parameterised or split/u);
+});
+
+test("reports an asserting else under a non-asserting branch", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    if (verbose) {",
+            "        Log(result);",
+            "    } else {",
+            "        Assert.Equal(1, result);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const [finding] = findingsOf(content, "else-branch-assertion");
+
+    // Assert
+    assert.match(finding?.message ?? "", /else branch asserts/u);
+});
+
+test("stays silent when the else branch holds no assertion", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    if (ready) {",
+            "        Assert.True(ok);",
+            "    } else {",
+            "        cleanup();",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = findingsOf(content, "else-branch-assertion");
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports every braceless else assertion shape", () => {
+    // Arrange
+    const bodies = [
+        ["    if (ok) Do();", "    else Assert.True(b);"],
+        ["    if (ok) Assert.True(a);", "    else Assert.True(b);"],
+    ].map((lines) => declaredBody(lines.join("\n")));
+
+    // Act
+    const found = bodies.map((content) =>
+        findingsOf(content, "else-branch-assertion").map(
+            (finding) => finding.rule,
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        bodies.map(() => ["else-branch-assertion"]),
+    );
+});
+
+test("reports the final else of an else-if chain once", () => {
+    // Arrange
+    const content = declaredBody(
+        [
+            "    if (a) {",
+            "        Assert.Equal(1, x);",
+            "    } else if (b) {",
+            "        Assert.Equal(2, x);",
+            "    } else {",
+            "        Assert.Equal(3, x);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const found = findingsOf(content, "else-branch-assertion");
+
+    // Assert
+    assert.deepEqual(
+        found.map((finding) => finding.rule),
+        ["else-branch-assertion"],
+    );
+});
+
+test("reports two conditions joined in one boolean assertion", () => {
+    // Arrange
+    const content = declaredBody(
+        "    Assert.True(first == 1 && second == 2);",
+    );
+
+    // Act
+    const [finding] = findingsOf(content, "compound-assertion");
+
+    // Assert
+    assert.match(finding?.message ?? "", /first == 1/u);
+    assert.match(finding?.message ?? "", /which condition broke/u);
+});
+
+test("reports every boolean assertion family", () => {
+    // Arrange
+    const bodies = [
+        "Assert.That(first == 1 && second == 2, Is.True);",
+        "Assert.False(ready || queued);",
+        "Assert.IsTrue(a && b);",
+        "Assert.IsFalse(a || b);",
+        "assert(a && b);",
+        "assert.ok(a || b);",
+        "assertTrue(a && b);",
+        "assertFalse(a || b);",
+    ].map((body) => declaredBody(`    ${body}`));
+
+    // Act
+    const found = bodies.map((content) =>
+        findingsOf(content, "compound-assertion").map(
+            (finding) => finding.rule,
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        bodies.map(() => ["compound-assertion"]),
+    );
+});
+
+test("stays silent for a single boolean", () => {
+    // Arrange
+    const content = declaredBody("    Assert.True(ready);");
+
+    // Act
+    const findings = findingsOf(content, "compound-assertion");
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("stays silent for a property runner and a receiver-qualified assert", () => {
+    // Arrange
+    const bodies = [
+        [
+            "    fc.assert(",
+            "        fc.property(fc.boolean(), fc.boolean(), (a, b) => {",
+            "            return (a && b) === (a && b);",
+            "        }),",
+            "    );",
+        ],
+        ["    suite.assert(a && b);"],
+        ["    t.assert(a && b);"],
+    ].map((lines) => declaredBody(lines.join("\n")));
+
+    // Act
+    const found = bodies.map((content) =>
+        findingsOf(content, "compound-assertion").map(
+            (finding) => finding.rule,
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        bodies.map(() => []),
+    );
+});
