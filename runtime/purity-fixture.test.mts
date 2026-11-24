@@ -96,6 +96,9 @@ async function makeGitRepo(files: Record<string, string>): Promise<string> {
         ["init", "-q"],
         ["config", "user.email", "fixture@test"],
         ["config", "user.name", "fixture"],
+        // Never inherit the host's signing policy: an expired gpg-agent turns
+        // this commit into a pinentry prompt and a 60s timeout.
+        ["config", "commit.gpgsign", "false"],
         ["config", "maintenance.auto", "false"],
         ["config", "gc.auto", "0"],
         ["add", "-A"],

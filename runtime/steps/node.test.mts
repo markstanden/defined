@@ -137,6 +137,49 @@ test("runNodeStep runs prettier for a docs-only repo (no package.json)", async (
     }
 });
 
+test("a narrowed content scope still checks in-scope files when the repo trigger is outside it", async () => {
+    // Arrange
+    const cases: { label: string; tree: Record<string, string> }[] = [
+        {
+            label: "manifest outside the scope",
+            tree: {
+                "package.json": "{}\n",
+                "src/app.ts": "const a = 1;\n",
+            },
+        },
+        {
+            label: "markdown outside the scope",
+            tree: {
+                "README.md": "# title\n",
+                "src/app.ts": "const a = 1;\n",
+            },
+        },
+    ];
+
+    for (const { label, tree } of cases) {
+        const root = await makeTempDir("quality-node-");
+        await writeTree(root, tree);
+        const scratch = { dir: null };
+        const { runner, calls } = recordingRunner();
+        try {
+            // Act
+            const result = await runNodeStep({
+                ctx: { ...baseCtx, repoRoot: root, scratch },
+                trackedFiles: ["src/app.ts"],
+                scratchFiles: Object.keys(tree),
+                runner,
+            });
+
+            // Assert
+            assert.equal(result.status, "pass", label);
+            assert.equal(calls.length, 1, label);
+            assert.equal(calls[0]!.args.at(-1), "src/app.ts", label);
+        } finally {
+            cleanupScratch(scratch);
+        }
+    }
+});
+
 test("check mode runs prettier --check in the scratch working root with the git-scoped file list", async () => {
     // Arrange
     const root = await makeTempDir("quality-node-");
@@ -505,6 +548,57 @@ test("added and deleted files are handled by the per-file keys", async () => {
 
     // Assert
     assert.deepEqual(afterDelete.calls, [], "a.md stays a hit");
+});
+
+test("an editorconfig outside the scope still invalidates the cached verdicts", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-node-cache-scope-config-");
+    await writeTree(root, {
+        "README.md": "# t\n",
+        ".editorconfig": "root = true\n",
+        "src/app.ts": "const a = 1;\n",
+    });
+    const cacheDir = await makeTempDir("quality-node-cache-");
+    const ctx = {
+        ...baseCtx,
+        repoRoot: root,
+        scratch: { dir: root },
+        cacheDir,
+    };
+    const scratchFiles = ["README.md", ".editorconfig", "src/app.ts"];
+
+    const first = checkedRunner(new Set());
+    await runNodeStep({
+        ctx,
+        trackedFiles: ["src/app.ts"],
+        scratchFiles,
+        runner: first.runner,
+    });
+    assert.deepEqual(first.calls, [["src/app.ts"]]);
+
+    // The root .editorconfig governs the in-scope file, so editing it must
+    // change the cache identity even though the file itself is out of scope.
+    await writeFile(
+        join(root, ".editorconfig"),
+        "root = true\n[*]\nindent_style = tab\n",
+    );
+    const second = checkedRunner(new Set());
+
+    // Act
+    const result = await runNodeStep({
+        ctx,
+        trackedFiles: ["src/app.ts"],
+        scratchFiles,
+        runner: second.runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    assert.deepEqual(
+        second.calls,
+        [["src/app.ts"]],
+        "the governing config change re-checks the file",
+    );
 });
 
 test("cached and uncached runs agree on the verdict", async () => {

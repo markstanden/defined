@@ -3,7 +3,7 @@
 // Run: node --test runtime/steps/dotnet.test.mts
 
 import assert from "node:assert/strict";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -322,5 +322,205 @@ test("runDotNetStep skips when dotnet is disabled by .defined.json", async () =>
         calls.length,
         0,
         "the switch wins even with .NET files tracked",
+    );
+});
+
+/** A temp repo holding two projects and no solution: discovery alone throws. */
+async function makeTwoProjectRepo(): Promise<string> {
+    const repoRoot = await makeTempDir("quality-dotnet-");
+    for (const [dir, name] of [
+        ["a", "A"],
+        ["b", "B"],
+    ] as const) {
+        await mkdir(join(repoRoot, dir), { recursive: true });
+        await writeFile(
+            join(repoRoot, dir, `${name}.csproj`),
+            '<Project Sdk="Microsoft.NET.Sdk"/>',
+        );
+    }
+    return repoRoot;
+}
+
+/** Write a .defined.json into a temp repo. */
+async function writeConfig(
+    repoRoot: string,
+    config: Record<string, unknown>,
+): Promise<void> {
+    await writeFile(join(repoRoot, ".defined.json"), JSON.stringify(config));
+}
+
+test("declared workspaces replace discovery when the repo has several projects", async () => {
+    // Arrange
+    const repoRoot = await makeTwoProjectRepo();
+    await writeConfig(repoRoot, {
+        dotnet: { workspaces: ["a/A.csproj", "b/B.csproj"] },
+    });
+    const scratch = { dir: null as string | null };
+    const { runner, calls } = fakeRunner({}, true);
+
+    // Act
+    const result = await runDotNetStep({
+        ctx: { mode: "no-fix", repoRoot, scratch },
+        trackedFiles: ["a/A.csproj", "b/B.csproj"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    assert.ok((result.notice ?? "").includes("2 workspace(s)"));
+    // Each workspace is restored, format-checked, built and tested, in the
+    // declared order: (verb, project) pairs, ignoring flags and cwd.
+    const phases = calls.map(([cmd, verb, ...rest]) => {
+        const project = rest.find((arg) => arg.endsWith(".csproj"));
+        return `${cmd} ${verb} ${project?.slice(scratch.dir!.length + 1) ?? ""}`.trim();
+    });
+    assert.deepEqual(phases, [
+        "dotnet restore a/A.csproj",
+        "dotnet restore b/B.csproj",
+        "dotnet format a/A.csproj",
+        "dotnet build a/A.csproj",
+        "dotnet test a/A.csproj",
+        "dotnet format b/B.csproj",
+        "dotnet build b/B.csproj",
+        "dotnet test b/B.csproj",
+    ]);
+    cleanupScratch(scratch);
+});
+
+test("a failing declared workspace names itself and stops the run", async () => {
+    // Arrange
+    const repoRoot = await makeTwoProjectRepo();
+    await writeConfig(repoRoot, {
+        dotnet: { workspaces: ["a/A.csproj", "b/B.csproj"] },
+    });
+    const scratch = { dir: null as string | null };
+    const calls: string[][] = [];
+    const runner = (async ({
+        cmd,
+        args,
+        cwd,
+    }: {
+        cmd: string;
+        args: string[];
+        cwd?: string;
+    }) => {
+        calls.push([cmd, ...args, cwd ?? ""]);
+        const buildB =
+            args[0] === "build" && (args[1] ?? "").includes("B.csproj");
+        return buildB
+            ? { status: 1, stdout: "", stderr: "boom" }
+            : { status: 0, stdout: "", stderr: "" };
+    }) as typeof import("../../lib/proc.mts").run;
+
+    // Act
+    const result = await runDotNetStep({
+        ctx: { mode: "no-fix", repoRoot, scratch },
+        trackedFiles: ["a/A.csproj", "b/B.csproj"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "fail");
+    assert.match(result.notice ?? "", /dotnet: build failed \[b\/B\.csproj\]/u);
+    const testedA = calls.some(
+        (call) => call[0] === "dotnet" && call[1] === "test",
+    );
+    assert.equal(testedA, true, "the first workspace completed its checks");
+    cleanupScratch(scratch);
+});
+
+test("a failing format check names its workspace", async () => {
+    // Arrange
+    const repoRoot = await makeTwoProjectRepo();
+    await writeConfig(repoRoot, {
+        dotnet: { workspaces: ["a/A.csproj", "b/B.csproj"] },
+    });
+    const scratch = { dir: null as string | null };
+    const calls: string[][] = [];
+    const runner = (async ({
+        cmd,
+        args,
+        cwd,
+    }: {
+        cmd: string;
+        args: string[];
+        cwd?: string;
+    }) => {
+        calls.push([cmd, ...args, cwd ?? ""]);
+        const formatB =
+            args[0] === "format" &&
+            args.some((arg) => arg.includes("B.csproj"));
+        return formatB
+            ? { status: 1, stdout: "", stderr: "diff" }
+            : { status: 0, stdout: "", stderr: "" };
+    }) as typeof import("../../lib/proc.mts").run;
+
+    // Act
+    const result = await runDotNetStep({
+        ctx: { mode: "no-fix", repoRoot, scratch },
+        trackedFiles: ["a/A.csproj", "b/B.csproj"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "fail");
+    assert.match(
+        result.notice ?? "",
+        /dotnet: format found diffs \[b\/B\.csproj\] \(run with --fix\)/u,
+    );
+    const builtB = calls.some(
+        (call) =>
+            call[1] === "build" && call.some((arg) => arg.includes("B.csproj")),
+    );
+    assert.equal(builtB, false, "the run stops at the first failing workspace");
+    cleanupScratch(scratch);
+});
+
+test("a declared workspace outside the git scope fails before restore", async () => {
+    // Arrange
+    const repoRoot = await makeDotnetRepo();
+    await writeConfig(repoRoot, {
+        dotnet: { workspaces: ["missing/C.csproj"] },
+    });
+    const scratch = { dir: null as string | null };
+    const { runner, calls } = fakeRunner({}, true);
+
+    // Act
+    const result = await runDotNetStep({
+        ctx: { mode: "no-fix", repoRoot, scratch },
+        trackedFiles: ["MyProj.csproj"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "fail");
+    assert.match(
+        result.notice ?? "",
+        /declared workspace not in the git scope: missing\/C\.csproj/u,
+    );
+    assert.deepEqual(calls, []);
+    cleanupScratch(scratch);
+});
+
+test("declared workspaces restore and format each in fix mode", async () => {
+    // Arrange
+    const repoRoot = await makeTwoProjectRepo();
+    await writeConfig(repoRoot, {
+        dotnet: { workspaces: ["a/A.csproj", "b/B.csproj"] },
+    });
+    const { runner, calls } = fakeRunner({}, true);
+
+    // Act
+    const result = await runDotNetStep({
+        ctx: { mode: "fix", repoRoot },
+        trackedFiles: ["a/A.csproj", "b/B.csproj"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    assert.deepEqual(
+        calls.map(([cmd, verb]) => `${cmd} ${verb}`),
+        ["dotnet restore", "dotnet format", "dotnet restore", "dotnet format"],
     );
 });

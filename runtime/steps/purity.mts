@@ -11,9 +11,10 @@
 //   purityVerdict({ result, selected, repoRoot }) — classify one ESLint run
 //
 // Fix mode skips the step: it is a policy check, never a repair pass. A missing
-// declaration skips before any parser work. A stale selector or target outside
-// the git scope is an execution error, not a silent pass. Findings carry the
-// stable rule id, file, line, column and an actionable message.
+// declaration skips before any parser work. A stale selector, or one pointing
+// outside the declared content scope, is an execution error, not a silent pass.
+// Findings carry the stable rule id, file, line, column and an actionable
+// message.
 
 import { relative } from "node:path";
 
@@ -308,16 +309,23 @@ function verdict({
 
 /**
  * Run the opt-in purity/CQS policy. Skips in fix mode and when `.defined.json`
- * declares nothing; otherwise selects the git-scoped files, runs one baked
- * ESLint pass with the policy in the environment, and classifies the result.
+ * declares nothing; otherwise selects the gated files, runs one baked ESLint
+ * pass with the policy in the environment, and classifies the result.
  */
 export async function runPurityStep({
     ctx,
     trackedFiles,
+    scratchFiles = trackedFiles,
     runner = run,
 }: {
     ctx: PurityRunContext;
+    /** The content-check scope: the files purity judges. */
     trackedFiles: string[];
+    /**
+     * The whole git inventory, used only to tell a stale selector or target
+     * from one pointing outside the declared content scope.
+     */
+    scratchFiles?: string[];
     runner?: Runner;
 }): Promise<StepResult> {
     if (ctx.mode === "fix") {
@@ -334,6 +342,7 @@ export async function runPurityStep({
         policy = selectPurityPolicy({
             config: config.purity,
             files: trackedFiles,
+            allFiles: scratchFiles,
         });
     } catch (err) {
         return errored({

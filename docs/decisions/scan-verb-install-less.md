@@ -15,11 +15,12 @@ Summary: A third result verb, `scan`, runs the gate's lint/scan steps read-only 
   repo (missing managed workflow and AGENTS block), so it cannot be used as a
   try-out on a repo you do not own.
 - `scan` is the verify flow with `checkSetup` skipped. It reports
-  `results.bootstrap: "skip"`, emits no bootstrap errors and no ownership
-  notices, never takes the comply lock, mounts the repo read-only, and runs the
-  identical no-fix pass (scratch copies for write-capable steps). The single
-  JSON result line, `--min`/`--full`/`--timings` and the exit contract are
-  unchanged.
+  `results.bootstrap: "skip"`, emits no bootstrap errors, never takes the
+  comply lock, mounts the repo read-only, and runs the identical no-fix pass
+  (scratch copies for write-capable steps). The single JSON result line,
+  `--min`/`--full`/`--timings` and the exit contract are unchanged. (Amended by
+  [scope-and-workspaces](scope-and-workspaces.md): `scan` now reports `config`
+  notices, so a narrowed content scope is visible where a work repo runs it.)
 - Consumer commands stay declarations-only: `node.checks`,
   `coverage.*.command` and `naming.command` run only when `.defined.json`
   declares them. With no config those steps report `skip`. There is no
