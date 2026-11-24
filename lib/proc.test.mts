@@ -115,9 +115,9 @@ test("run honours cwd for the invoked command", async () => {
 test("run passes a supplied environment to the command", async () => {
     // Act
     const result = await run({
-        cmd: "sh",
+        cmd: "/bin/sh",
         args: ["-c", "printf '%s' \"$DEFINED_TEST_ENV\""],
-        env: { ...process.env, DEFINED_TEST_ENV: "local-bin" },
+        env: { DEFINED_TEST_ENV: "local-bin" },
     });
 
     // Assert
@@ -212,50 +212,52 @@ test("run bounds captured output and flags truncation", async () => {
 
 test("failureDetail names the outcome and keeps the output", () => {
     // Arrange
-    const cases: Array<{ label: string; input: CommandResult; re: RegExp }> = [
+    const cases: Array<{ input: CommandResult; expected: string }> = [
         {
-            label: "nonzero exit",
             input: result({ status: 3, stderr: "boom" }),
-            re: /^exit 3: boom$/u,
+            expected: "exit 3: boom",
         },
         {
-            label: "signal",
             input: result({ status: null, signal: "SIGKILL" }),
-            re: /^killed by SIGKILL: no output$/u,
+            expected:
+                "killed by SIGKILL: no output — no diagnostics captured; a reporter may have consumed them",
         },
         {
-            label: "timeout",
             input: result({ status: null, timedOut: true }),
-            re: /^timed out: no output$/u,
+            expected:
+                "timed out: no output — no diagnostics captured; a reporter may have consumed them",
         },
         {
-            label: "cancellation",
             input: result({ status: null, cancelled: true }),
-            re: /^cancelled: no output$/u,
+            expected:
+                "cancelled: no output — no diagnostics captured; a reporter may have consumed them",
         },
         {
-            label: "no exit code",
             input: result({ status: null }),
-            re: /^did not exit: no output$/u,
+            expected:
+                "did not exit: no output — no diagnostics captured; a reporter may have consumed them",
         },
         {
-            label: "truncated non-zero exit",
+            input: result({ status: 1 }),
+            expected:
+                "exit 1: no output — no diagnostics captured; a reporter may have consumed them",
+        },
+        {
             input: result({ status: 1, stderr: "x", truncated: true }),
-            re: /^exit 1 \(output truncated\): x$/u,
+            expected: "exit 1 (output truncated): x",
         },
         {
-            label: "clean exit is just the output",
             input: result({ status: 0, stdout: "hi", truncated: true }),
-            re: /^hi$/u,
+            expected: "hi",
         },
     ];
 
-    // Act & Assert — one call per case, checked against its expected outcome.
-    for (const { label, input, re } of cases) {
-        assert.match(
-            failureDetail({ result: input }),
-            re,
-            `${label} should render its outcome`,
-        );
-    }
+    // Act
+    const details = cases.map(({ input }) => failureDetail({ result: input }));
+
+    // Assert
+    assert.deepEqual(
+        details,
+        cases.map(({ expected }) => expected),
+    );
 });
