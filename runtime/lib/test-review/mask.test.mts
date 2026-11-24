@@ -85,6 +85,51 @@ test("maskTestSource does not let an apostrophe in a comment open a literal", ()
     );
 });
 
+test("maskTestSource keeps comment text verbatim in comments-keep mode", () => {
+    // Arrange
+    const content = [
+        "// the repo's report: \"quoted\" and it.only()",
+        'const a = "text"; // trailing note',
+        '/* block "fixture" */ const b = 1;',
+    ].join("\n");
+    const expected = [
+        "// the repo's report: \"quoted\" and it.only()",
+        `const a = ${" ".repeat(6)}; // trailing note`,
+        '/* block "fixture" */ const b = 1;',
+    ].join("\n");
+
+    // Act
+    const masked = maskTestSource(content, { comments: "keep" });
+
+    // Assert
+    assert.equal(masked, expected);
+});
+
+test("maskTestSource keeps an apostrophe in a comment from opening a literal in comments-keep mode", () => {
+    // Arrange
+    const content = "// don't\nconst kept = 1;";
+
+    // Act
+    const masked = maskTestSource(content, { comments: "keep" });
+
+    // Assert
+    assert.equal(masked, content);
+});
+
+test("maskTestSource blanks comments by default", () => {
+    // Arrange
+    const content = "// note\n/* block */ const b = 1;";
+
+    // Act
+    const masked = maskTestSource(content);
+
+    // Assert
+    assert.equal(
+        masked,
+        `${" ".repeat(7)}\n${" ".repeat(11)} const b = 1;`,
+    );
+});
+
 test("maskTestSource masks an unterminated literal to the end of the source", () => {
     // Arrange
     const content = 'const text = "abc';

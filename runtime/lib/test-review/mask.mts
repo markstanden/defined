@@ -7,11 +7,13 @@
 // to the right line.
 //
 // Public surface:
-//   maskTestSource(content) — the masked source, same length as the input
+//   maskTestSource(content, { comments }) — the masked source, same length as
+//   the input; `comments: "keep"` blanks strings but leaves comment text
+//   verbatim for rules that read phase labels out of comments.
 //
 // A quote inside a comment never opens a literal: line and block comments are
-// consumed before quotes are considered. An unterminated literal masks to the
-// end of the source, matching the scanner's reading.
+// consumed before quotes are considered, in both modes. An unterminated literal
+// masks to the end of the source, matching the scanner's reading.
 //
 // Deliberate ceiling (ponytail): a text scanner, not a parser. A quote inside a
 // regex literal opens a literal, and the code inside a template interpolation is
@@ -20,6 +22,9 @@
 // ever earn the dependency.
 
 type Quote = '"' | "'" | "`";
+
+/** Whether comment text is blanked (`blank`) or kept (`keep`). */
+export type MaskComments = "blank" | "keep";
 
 type MaskMode = "code" | "line-comment" | "block-comment" | "literal";
 
@@ -33,6 +38,14 @@ interface Step {
     state: MaskState;
 }
 
+interface Walk {
+    content: string;
+    out: string[];
+    index: number;
+    /** Keep comment text verbatim for rules that read labels from comments. */
+    keep: boolean;
+}
+
 const CODE: MaskState = { mode: "code", quote: null };
 
 /** Replace one character with a space unless it is the newline we preserve. */
@@ -42,29 +55,21 @@ function blank({ out, index }: { out: string[]; index: number }): void {
     }
 }
 
-/** Enter a line comment, blanking both slashes. */
-function startLineComment({
-    out,
-    index,
-}: {
-    out: string[];
-    index: number;
-}): Step {
-    out[index] = " ";
-    out[index + 1] = " ";
+/** Enter a line comment, blanking both slashes unless comments are kept. */
+function startLineComment({ out, index, keep }: Walk): Step {
+    if (!keep) {
+        out[index] = " ";
+        out[index + 1] = " ";
+    }
     return { next: index + 2, state: { mode: "line-comment", quote: null } };
 }
 
-/** Enter a block comment, blanking both delimiters. */
-function startBlockComment({
-    out,
-    index,
-}: {
-    out: string[];
-    index: number;
-}): Step {
-    out[index] = " ";
-    out[index + 1] = " ";
+/** Enter a block comment, blanking both delimiters unless comments are kept. */
+function startBlockComment({ out, index, keep }: Walk): Step {
+    if (!keep) {
+        out[index] = " ";
+        out[index + 1] = " ";
+    }
     return { next: index + 2, state: { mode: "block-comment", quote: null } };
 }
 
@@ -83,22 +88,14 @@ function startLiteral({
 }
 
 /** Consume one source character in code state. */
-function stepCode({
-    content,
-    out,
-    index,
-}: {
-    content: string;
-    out: string[];
-    index: number;
-}): Step {
+function stepCode({ content, out, index, keep }: Walk): Step {
     const char = content[index];
     const next = content[index + 1];
     if (char === "/" && next === "/") {
-        return startLineComment({ out, index });
+        return startLineComment({ content, out, index, keep });
     }
     if (char === "/" && next === "*") {
-        return startBlockComment({ out, index });
+        return startBlockComment({ content, out, index, keep });
     }
     if (char === '"' || char === "'" || char === "`") {
         return startLiteral({ out, index, quote: char });
@@ -107,38 +104,28 @@ function stepCode({
 }
 
 /** Consume one character of a line comment. */
-function stepLineComment({
-    content,
-    out,
-    index,
-}: {
-    content: string;
-    out: string[];
-    index: number;
-}): Step {
+function stepLineComment({ content, out, index, keep }: Walk): Step {
     if (content[index] === "\n") {
         return { next: index + 1, state: CODE };
     }
-    blank({ out, index });
+    if (!keep) {
+        blank({ out, index });
+    }
     return { next: index + 1, state: { mode: "line-comment", quote: null } };
 }
 
 /** Consume one character of a block comment, closing on the delimiter. */
-function stepBlockComment({
-    content,
-    out,
-    index,
-}: {
-    content: string;
-    out: string[];
-    index: number;
-}): Step {
+function stepBlockComment({ content, out, index, keep }: Walk): Step {
     if (content[index] === "*" && content[index + 1] === "/") {
-        out[index] = " ";
-        out[index + 1] = " ";
+        if (!keep) {
+            out[index] = " ";
+            out[index + 1] = " ";
+        }
         return { next: index + 2, state: CODE };
     }
-    blank({ out, index });
+    if (!keep) {
+        blank({ out, index });
+    }
     return { next: index + 1, state: { mode: "block-comment", quote: null } };
 }
 
@@ -172,22 +159,12 @@ function stepLiteral({
 }
 
 /** Consume the character at `index` in the current state. */
-function consume({
-    content,
-    out,
-    index,
-    state,
-}: {
-    content: string;
-    out: string[];
-    index: number;
-    state: MaskState;
-}): Step {
+function consume({ content, out, index, keep, state }: Walk & { state: MaskState }): Step {
     if (state.mode === "line-comment") {
-        return stepLineComment({ content, out, index });
+        return stepLineComment({ content, out, index, keep });
     }
     if (state.mode === "block-comment") {
-        return stepBlockComment({ content, out, index });
+        return stepBlockComment({ content, out, index, keep });
     }
     if (state.mode === "literal") {
         return stepLiteral({
@@ -197,21 +174,27 @@ function consume({
             quote: state.quote ?? '"',
         });
     }
-    return stepCode({ content, out, index });
+    return stepCode({ content, out, index, keep });
 }
 
 /**
  * Blank strings and comments without changing the source's length or lines.
  *
  * @param content Raw test-source text.
+ * @param options Masking options; `comments: "keep"` leaves comment text
+ *   verbatim so rules can read phase labels from it.
  * @returns The masked text, aligned with `content` offset for offset.
  */
-export function maskTestSource(content: string): string {
+export function maskTestSource(
+    content: string,
+    options: { readonly comments?: MaskComments } = {},
+): string {
     const out = content.split("");
+    const keep = options.comments === "keep";
     let state: MaskState = CODE;
     let index = 0;
     while (index < content.length) {
-        const step = consume({ content, out, index, state });
+        const step = consume({ content, out, index, keep, state });
         state = step.state;
         index = step.next;
     }
