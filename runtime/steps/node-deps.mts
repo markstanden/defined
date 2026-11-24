@@ -24,7 +24,7 @@
 // load from where the dependencies actually are.
 // The runner and existsSync are injected so tests need no host binaries.
 
-import { existsSync } from "node:fs";
+import { cpSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
 import {
@@ -92,6 +92,7 @@ export async function runNodeDepsStep({
     runner = run,
     readFileFn = readFile,
     existsSyncFn = existsSync,
+    copyFn = cpSync,
 }: {
     ctx: NodeDepsRunContext;
     /**
@@ -103,6 +104,8 @@ export async function runNodeDepsStep({
     runner?: Runner;
     readFileFn?: typeof readFile;
     existsSyncFn?: Exists;
+    /** The copy seam; a test injects a copy that races the source. */
+    copyFn?: typeof cpSync;
 }): Promise<StepResult> {
     const config = await loadConfig({ repoRoot: ctx.repoRoot, readFileFn });
     const packages = packagesToRestore({
@@ -128,6 +131,7 @@ export async function runNodeDepsStep({
             runner,
             existsSyncFn,
             warmRoot: ctx.mode === "no-fix" ? ctx.repoRoot : undefined,
+            copyFn,
         }),
     );
 }

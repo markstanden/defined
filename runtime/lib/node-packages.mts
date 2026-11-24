@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { run, failureDetail, type CommandResult } from "../../lib/proc.mts";
 import { hasConsumerPrettierConfig } from "./prettier-config.mts";
 import { hasConsumerEslintConfig } from "./eslint-config.mts";
+import { snapshotTree, treeChanged } from "./scratch.mts";
 
 type Runner = typeof run;
 type Exists = typeof existsSync;
@@ -246,8 +247,10 @@ function manifestsMatch({
  * command and the no-lockfile npm fallback are nondeterministic), and the
  * manifest + lockfile bytes must match between the two roots. Reuse is a copy
  * into the working root — or nothing at all when the working root *is* the
- * warm root. A failed copy (the source can vanish mid-copy under a concurrent
- * rebuild) reports false and the caller reinstalls (#67).
+ * warm root. The copy is bracketed by the source tree's stat identity: a copy
+ * that raced a concurrent rebuild (a comply fix pass reinstalls in place) is
+ * discarded, so a torn tree is never reported as reused (#67). A source that
+ * vanished mid-copy also reports false and the caller reinstalls.
  */
 function reuseWarmTree({
     warmRoot,
@@ -284,13 +287,13 @@ function reuseWarmTree({
     if (workingRoot === warmRoot) {
         return true;
     }
+    const source = join(warmRoot, dir, "node_modules");
     try {
-        copyFn(
-            join(warmRoot, dir, "node_modules"),
-            join(workingRoot, dir, "node_modules"),
-            { recursive: true },
-        );
-        return true;
+        const before = snapshotTree(source);
+        copyFn(source, join(workingRoot, dir, "node_modules"), {
+            recursive: true,
+        });
+        return !treeChanged(before, snapshotTree(source));
     } catch {
         return false;
     }

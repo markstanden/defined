@@ -4,7 +4,7 @@
 // Run: node --test runtime/lib/node-packages.test.mts
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -75,29 +75,28 @@ test("defaultInstall picks the lockfile's package manager, npm as fallback", () 
     // Arrange
     const existsIn = (present: string[]) => (path: string) =>
         present.some((p) => path.endsWith(p));
+    const cases = [
+        { present: ["package-lock.json"], expected: "npm ci" },
+        {
+            present: ["yarn.lock"],
+            expected: "yarn install --frozen-lockfile",
+        },
+        {
+            present: ["pnpm-lock.yaml"],
+            expected: "pnpm install --frozen-lockfile",
+        },
+        { present: [], expected: "npm install" },
+    ];
 
-    // Act & Assert
-    assert.equal(
-        defaultInstall({
-            packageDir: "/pkg",
-            exists: existsIn(["package-lock.json"]),
-        }),
-        "npm ci",
+    // Act
+    const installs = cases.map(({ present }) =>
+        defaultInstall({ packageDir: "/pkg", exists: existsIn(present) }),
     );
-    assert.equal(
-        defaultInstall({ packageDir: "/pkg", exists: existsIn(["yarn.lock"]) }),
-        "yarn install --frozen-lockfile",
-    );
-    assert.equal(
-        defaultInstall({
-            packageDir: "/pkg",
-            exists: existsIn(["pnpm-lock.yaml"]),
-        }),
-        "pnpm install --frozen-lockfile",
-    );
-    assert.equal(
-        defaultInstall({ packageDir: "/pkg", exists: () => false }),
-        "npm install",
+
+    // Assert
+    assert.deepEqual(
+        installs,
+        cases.map(({ expected }) => expected),
     );
 });
 
@@ -154,21 +153,17 @@ test("packagesToRestore skips the ESLint-triggered root when ESLint is disabled"
 });
 
 test("packagesToRestore dedupes two declarations for the same package", () => {
-    // Act & Assert
-    assert.deepEqual(
-        packagesToRestore({
-            declared: [{ dir: "" }],
-            trackedFiles: ["package.json"],
-        }),
-        [{ dir: "" }],
-    );
-    assert.deepEqual(
-        packagesToRestore({
-            declared: [{ dir: "app" }],
-            trackedFiles: ["app/package.json"],
-        }),
-        [{ dir: "app" }],
-    );
+    // Arrange
+    const cases = [
+        { declared: [{ dir: "" }], trackedFiles: ["package.json"] },
+        { declared: [{ dir: "app" }], trackedFiles: ["app/package.json"] },
+    ];
+
+    // Act
+    const restored = cases.map((declaration) => packagesToRestore(declaration));
+
+    // Assert
+    assert.deepEqual(restored, [[{ dir: "" }], [{ dir: "app" }]]);
 });
 
 test("packagesToRestore never duplicates a declared root and honours its opt-out", () => {
@@ -334,6 +329,35 @@ test("restoreNodePackages falls back to an install when the copy fails", async (
         copyFn: () => {
             throw new Error("source vanished mid-copy");
         },
+    });
+
+    // Assert
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+});
+
+test("restoreNodePackages discards a warm copy that changes mid-copy", async () => {
+    // Arrange
+    const { repo, scratch } = await warmFixture();
+    const { runner, calls } = fakeRunner({}, true);
+    const source = join(repo, "node_modules/.warm");
+    let first = true;
+    const copyFn: typeof cpSync = (from: string, to: string) => {
+        cpSync(from, to, { recursive: true });
+        if (first) {
+            first = false;
+            appendFileSync(source, "rebuilt under the copy\n");
+        }
+    };
+
+    // Act
+    const result = await restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
+        copyFn,
     });
 
     // Assert
