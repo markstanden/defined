@@ -293,7 +293,6 @@ function readSuppressions({
     return { suppressed, faults };
 }
 
-
 /** A focused test call: every other test in the suite is skipped. */
 const FOCUSED_TEST = /\b(it|test|specify)\.only\b/g;
 
@@ -504,7 +503,6 @@ function determinismFindings({
         },
     );
 }
-
 
 const TAUTOLOGY_RULES: ReadonlyArray<{
     readonly pattern: RegExp;
@@ -1015,8 +1013,7 @@ const PHASE_WORD = /\b(arrange|act|assert)\b/gi;
  * end of the comment. A dot (`Assert.Equal`) or prose (`Arrange the folder`)
  * does not.
  */
-const PHASE_FOLLOWER =
-    /^[ \t]*(?:\*\/[ \t]*)?(?:[&/,+]|and\b|[:—–-]|$)/i;
+const PHASE_FOLLOWER = /^[ \t]*(?:\*\/[ \t]*)?(?:[&/,+]|and\b|[:—–-]|$)/i;
 
 /** One body line's phase labels. */
 interface PhaseEntry {
@@ -1302,29 +1299,32 @@ function conditionalAssertionFindings({
             if (body === null || suppressed.has("conditional-assertion")) {
                 return [];
             }
-        const blocks = assertionBlocks({
-            body,
-            pattern: CONDITIONAL_OPEN,
-            evidenceOf: (_body, _index, text) => headerText(text),
-        });
-        const bare = [CONDITIONAL_BARE_CALL, CONDITIONAL_BARE_PYTHON].flatMap(
-            (pattern) =>
+            const blocks = assertionBlocks({
+                body,
+                pattern: CONDITIONAL_OPEN,
+                evidenceOf: (_body, _index, text) => headerText(text),
+            });
+            const bare = [
+                CONDITIONAL_BARE_CALL,
+                CONDITIONAL_BARE_PYTHON,
+            ].flatMap((pattern) =>
                 [...body.matchAll(pattern)].map((match) => ({
                     index: match.index ?? 0,
                     evidence: headerText(match[0]),
                 })),
-        );
-        return [...blocks, ...bare].map((match) =>
-            assertionFinding({
-                declaration,
-                body,
-                rule: "conditional-assertion",
-                match,
-                message: (evidence) =>
-                    `assertion guarded by a conditional in test "${declaration.name}": "${collapse(evidence)}" — it may never run, let alone fail`,
-            }),
-        );
-    });
+            );
+            return [...blocks, ...bare].map((match) =>
+                assertionFinding({
+                    declaration,
+                    body,
+                    rule: "conditional-assertion",
+                    match,
+                    message: (evidence) =>
+                        `assertion guarded by a conditional in test "${declaration.name}": "${collapse(evidence)}" — it may never run, let alone fail`,
+                }),
+            );
+        },
+    );
 }
 
 /** Assertions inside a loop body or a forEach callback. */
@@ -1339,27 +1339,29 @@ function loopAssertionFindings({
             if (body === null || suppressed.has("assertion-in-loop")) {
                 return [];
             }
-        const loops = assertionBlocks({
-            body,
-            pattern: LOOP_OPEN,
-            evidenceOf: (_body, _index, text) => headerText(text),
-        });
-        const callbacks = assertionBlocks({
-            body,
-            pattern: FOR_EACH_CALL,
-            evidenceOf: (text, index) => `${receiverBefore(text, index)}.forEach(`,
-        });
-        return [...loops, ...callbacks].map((match) =>
-            assertionFinding({
-                declaration,
+            const loops = assertionBlocks({
                 body,
-                rule: "assertion-in-loop",
-                match,
-                message: (evidence) =>
-                    `assertion inside a loop in test "${declaration.name}": "${collapse(evidence)}" — several cases reported as one test, only the first failure visible`,
-            }),
-        );
-    });
+                pattern: LOOP_OPEN,
+                evidenceOf: (_body, _index, text) => headerText(text),
+            });
+            const callbacks = assertionBlocks({
+                body,
+                pattern: FOR_EACH_CALL,
+                evidenceOf: (text, index) =>
+                    `${receiverBefore(text, index)}.forEach(`,
+            });
+            return [...loops, ...callbacks].map((match) =>
+                assertionFinding({
+                    declaration,
+                    body,
+                    rule: "assertion-in-loop",
+                    match,
+                    message: (evidence) =>
+                        `assertion inside a loop in test "${declaration.name}": "${collapse(evidence)}" — several cases reported as one test, only the first failure visible`,
+                }),
+            );
+        },
+    );
 }
 
 /** Assertions in an else branch: the outcome depends on the branch taken. */
@@ -1374,33 +1376,34 @@ function elseBranchFindings({
             if (body === null || suppressed.has("else-branch-assertion")) {
                 return [];
             }
-        const blocks = assertionBlocks({
-            body,
-            pattern: ELSE_BLOCK,
-            evidenceOf: () => "",
-        }).map((match) => ({
-            ...match,
-            evidence: previousBranchAsserts(body, match.index)
-                ? "both branches assert"
-                : "else branch asserts",
-        }));
-        const bare = [...body.matchAll(ELSE_BARE)].map((match) => ({
-            index: match.index ?? 0,
-            evidence: previousBranchAsserts(body, match.index ?? 0)
-                ? "both branches assert"
-                : "else branch asserts",
-        }));
-        return [...blocks, ...bare].map((match) =>
-            assertionFinding({
-                declaration,
+            const blocks = assertionBlocks({
                 body,
-                rule: "else-branch-assertion",
-                match,
-                message: (evidence) =>
-                    `asserting else branch in test "${declaration.name}": ${evidence} — a different outcome per branch should be parameterised or split`,
-            }),
-        );
-    });
+                pattern: ELSE_BLOCK,
+                evidenceOf: () => "",
+            }).map((match) => ({
+                ...match,
+                evidence: previousBranchAsserts(body, match.index)
+                    ? "both branches assert"
+                    : "else branch asserts",
+            }));
+            const bare = [...body.matchAll(ELSE_BARE)].map((match) => ({
+                index: match.index ?? 0,
+                evidence: previousBranchAsserts(body, match.index ?? 0)
+                    ? "both branches assert"
+                    : "else branch asserts",
+            }));
+            return [...blocks, ...bare].map((match) =>
+                assertionFinding({
+                    declaration,
+                    body,
+                    rule: "else-branch-assertion",
+                    match,
+                    message: (evidence) =>
+                        `asserting else branch in test "${declaration.name}": ${evidence} — a different outcome per branch should be parameterised or split`,
+                }),
+            );
+        },
+    );
 }
 
 /** Two conditions joined in one boolean assertion: one ambiguous failure. */
@@ -1415,37 +1418,36 @@ function compoundAssertionFindings({
             if (body === null || suppressed.has("compound-assertion")) {
                 return [];
             }
-        return [...body.matchAll(BOOLEAN_ASSERTION)].flatMap(
-            (match): TestHygieneFinding[] => {
-                const index = match.index ?? 0;
-                const open = index + match[0].length - 1;
-                const close = matchingClose(body, open);
-                if (!/[&|]{2}/.test(body.slice(open + 1, close))) {
-                    return [];
-                }
-                return [
-                    {
-                        rule: "compound-assertion",
-                        file: declaration.path,
-                        line: lineInBody({
-                            body,
-                            bodyLine: declaration.bodyLine,
-                            index,
-                        }),
-                        message: `compound boolean assertion in test "${declaration.name}": "${collapse((declaration.body ?? body).slice(index, close + 1))}" — the failure message cannot say which condition broke`,
-                    },
-                ];
-            },
-        );
-    });
+            return [...body.matchAll(BOOLEAN_ASSERTION)].flatMap(
+                (match): TestHygieneFinding[] => {
+                    const index = match.index ?? 0;
+                    const open = index + match[0].length - 1;
+                    const close = matchingClose(body, open);
+                    if (!/[&|]{2}/.test(body.slice(open + 1, close))) {
+                        return [];
+                    }
+                    return [
+                        {
+                            rule: "compound-assertion",
+                            file: declaration.path,
+                            line: lineInBody({
+                                body,
+                                bodyLine: declaration.bodyLine,
+                                index,
+                            }),
+                            message: `compound boolean assertion in test "${declaration.name}": "${collapse((declaration.body ?? body).slice(index, close + 1))}" — the failure message cannot say which condition broke`,
+                        },
+                    ];
+                },
+            );
+        },
+    );
 }
 
 /** One source's structure leads: phase coverage and the act region's shape. */
 function structureFindings({
-    source,
     entries,
 }: {
-    source: TestReviewSource;
     entries: readonly ReviewedDeclaration[];
 }): TestHygieneFinding[] {
     return entries.flatMap(
@@ -1526,7 +1528,7 @@ function sourceFindings(
         ...(review
             ? [
                   ...suppressions.flatMap((entry) => entry.faults),
-                  ...structureFindings({ source, entries }),
+                  ...structureFindings({ entries }),
                   ...conditionalAssertionFindings({ entries }),
                   ...loopAssertionFindings({ entries }),
                   ...elseBranchFindings({ entries }),
@@ -1558,7 +1560,8 @@ function compareFindings(
  * Run the rule set over the named sources.
  *
  * @param sources Files to read, already read from disk by the caller.
- * @param options `review: true` adds the review-tier leads; every other
+ * @param options the parameter object
+ * @param options.review `true` adds the review-tier leads; every other
  *   surface reports the always-on defects only.
  * @returns Findings ordered by file, line and rule.
  */

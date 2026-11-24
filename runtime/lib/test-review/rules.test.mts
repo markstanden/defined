@@ -1143,7 +1143,6 @@ test("does not report a determinism name quoted inside a string", () => {
     assert.deepEqual(reviewRulesOf(findings), []);
 });
 
-
 /** The structure rule ids a finding list holds. */
 function structureRulesOf(
     findings: ReturnType<typeof reviewTestSources>,
@@ -1332,10 +1331,7 @@ test("does not count an assertion call or a commented assertion as a label", () 
     const source = {
         path: "a.test.ts",
         content: declaredBody(
-            [
-                "    // Assert.Equal(1, 1)",
-                "    Assert.Equal(1, 1);",
-            ].join("\n"),
+            ["    // Assert.Equal(1, 1)", "    Assert.Equal(1, 1);"].join("\n"),
         ),
     };
 
@@ -1352,8 +1348,7 @@ test("stays silent for a declaration with no delimited body", () => {
     // Arrange
     const source = {
         path: "a.test.ts",
-        content:
-            'import { test } from "node:test";\ntest("no body", done);',
+        content: 'import { test } from "node:test";\ntest("no body", done);',
     };
 
     // Act
@@ -1385,10 +1380,7 @@ test("reports a discrete act region with two statements", () => {
 
     // Assert
     assert.equal(finding?.line, 3);
-    assert.match(
-        finding?.message ?? "",
-        /region: Act; statements: 2/u,
-    );
+    assert.match(finding?.message ?? "", /region: Act; statements: 2/u);
 });
 
 test("reports a combined region with two statements", () => {
@@ -1545,11 +1537,9 @@ function findingsOf(
 test("reports an assertion inside a conditional block", () => {
     // Arrange
     const content = declaredBody(
-        [
-            "    if (result > 0) {",
-            "        assert.ok(result);",
-            "    }",
-        ].join("\n"),
+        ["    if (result > 0) {", "        assert.ok(result);", "    }"].join(
+            "\n",
+        ),
     );
 
     // Act
@@ -1765,9 +1755,7 @@ test("reports the final else of an else-if chain once", () => {
 
 test("reports two conditions joined in one boolean assertion", () => {
     // Arrange
-    const content = declaredBody(
-        "    Assert.True(first == 1 && second == 2);",
-    );
+    const content = declaredBody("    Assert.True(first == 1 && second == 2);");
 
     // Act
     const [finding] = findingsOf(content, "compound-assertion");
@@ -1868,10 +1856,9 @@ test("a why-note suppresses its review lead and is not itself a finding", () => 
     );
 
     // Act
-    const findings = reviewTestSources(
-        [{ path: "a.test.ts", content }],
-        { review: true },
-    );
+    const findings = reviewTestSources([{ path: "a.test.ts", content }], {
+        review: true,
+    });
 
     // Assert
     assert.deepEqual(
@@ -1885,7 +1872,7 @@ test("verify reports the lead and no note, whatever the note says", () => {
     const content = notedTest(
         "// Why use focused-test here: the focused run is intentional",
         "    // Act & Assert\n    assert.ok(true);",
-    ).replace('test("waits"', "test.only(\"waits\"");
+    ).replace('test("waits"', 'test.only("waits"');
 
     // Act
     const findings = reviewTestSources([{ path: "a.test.ts", content }]);
@@ -1902,7 +1889,7 @@ test("an always-on attempt is a suppression-note fault in review mode", () => {
     const content = notedTest(
         "// Why use focused-test here: the focused run is intentional",
         "    // Act & Assert\n    assert.ok(true);",
-    ).replace('test("waits"', "test.only(\"waits\"");
+    ).replace('test("waits"', 'test.only("waits"');
 
     // Act
     const faults = findingsOf(content, "suppression-note").filter((finding) =>
@@ -1934,7 +1921,10 @@ test("a misspelt or wrong-case id suppresses nothing and reports", () => {
     );
 
     // Assert
-    assert.deepEqual(found, notes.map(() => ["suppression-note", "sleep"]));
+    assert.deepEqual(
+        found,
+        notes.map(() => ["suppression-note", "sleep"]),
+    );
 });
 
 test("a vacuous reason reports and suppresses nothing", () => {
@@ -1945,10 +1935,9 @@ test("a vacuous reason reports and suppresses nothing", () => {
     );
 
     // Act
-    const findings = reviewTestSources(
-        [{ path: "a.test.ts", content }],
-        { review: true },
-    );
+    const findings = reviewTestSources([{ path: "a.test.ts", content }], {
+        review: true,
+    });
 
     // Assert
     assert.deepEqual(
@@ -1975,7 +1964,10 @@ test("notes naming an intent lead and the alias are accepted and inert", () => {
     );
 
     // Assert
-    assert.deepEqual(found, notes.map(() => []));
+    assert.deepEqual(
+        found,
+        notes.map(() => []),
+    );
 });
 
 test("a note separated by a blank line suppresses nothing", () => {
@@ -1990,10 +1982,9 @@ test("a note separated by a blank line suppresses nothing", () => {
     ].join("\n");
 
     // Act
-    const findings = reviewTestSources(
-        [{ path: "a.test.ts", content }],
-        { review: true },
-    );
+    const findings = reviewTestSources([{ path: "a.test.ts", content }], {
+        review: true,
+    });
 
     // Assert
     assert.deepEqual(
@@ -2016,10 +2007,9 @@ test("a note above one declaration does not suppress another", () => {
     ].join("\n");
 
     // Act
-    const findings = reviewTestSources(
-        [{ path: "a.test.ts", content }],
-        { review: true },
-    );
+    const findings = reviewTestSources([{ path: "a.test.ts", content }], {
+        review: true,
+    });
 
     // Assert
     assert.deepEqual(

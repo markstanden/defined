@@ -6,6 +6,11 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
 import { explainTopic, renderExplanation, STEP_IDS } from "./explain.mts";
+import {
+    ALWAYS_ON_RULES,
+    LEAD_RULES,
+    REVIEW_RULES,
+} from "./test-review/rules.mts";
 import type { DefinedConfig } from "./config.mts";
 
 /** Deps that never touch the filesystem: fake docs, fake config, fake probe. */
@@ -310,6 +315,24 @@ test("explainTopic_everyDocumentedTestReviewRule_routesToTheTestReviewDoc", asyn
     assert.deepEqual(
         explanations.map((explanation) => [explanation.kind, explanation.doc]),
         topics.map(() => ["rule", "standards/testing/test-review.md"]),
+    );
+});
+
+test("explainTopic_everyEngineTestReviewRule_routesToTheTestReviewDoc", async () => {
+    // Arrange
+    const topics = [...ALWAYS_ON_RULES, ...REVIEW_RULES, ...LEAD_RULES];
+
+    // Act
+    const explanations = await Promise.all(
+        topics.map((topic) =>
+            explainTopic({ topic, repoRoot: "/repo", deps: fakeDeps() }),
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        explanations.map((explanation) => explanation.doc),
+        topics.map(() => "standards/testing/test-review.md"),
     );
 });
 

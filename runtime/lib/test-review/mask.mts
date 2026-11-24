@@ -159,7 +159,13 @@ function stepLiteral({
 }
 
 /** Consume the character at `index` in the current state. */
-function consume({ content, out, index, keep, state }: Walk & { state: MaskState }): Step {
+function consume({
+    content,
+    out,
+    index,
+    keep,
+    state,
+}: Walk & { state: MaskState }): Step {
     if (state.mode === "line-comment") {
         return stepLineComment({ content, out, index, keep });
     }
@@ -181,8 +187,9 @@ function consume({ content, out, index, keep, state }: Walk & { state: MaskState
  * Blank strings and comments without changing the source's length or lines.
  *
  * @param content Raw test-source text.
- * @param options Masking options; `comments: "keep"` leaves comment text
- *   verbatim so rules can read phase labels from it.
+ * @param options Masking options.
+ * @param options.comments `"keep"` leaves comment text verbatim so rules can
+ *   read phase labels from it; the default blanks it.
  * @returns The masked text, aligned with `content` offset for offset.
  */
 export function maskTestSource(

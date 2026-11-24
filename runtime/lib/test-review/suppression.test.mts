@@ -142,13 +142,5 @@ test("isVacuous rejects restatements and accepts a statement of control", () => 
     const vacuous = reasons.map((reason) => isVacuous(reason));
 
     // Assert
-    assert.deepEqual(vacuous, [
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
-        false,
-    ]);
+    assert.deepEqual(vacuous, [true, true, true, true, true, true, false]);
 });
