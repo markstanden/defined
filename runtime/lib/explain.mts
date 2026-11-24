@@ -57,6 +57,7 @@ export const STEP_IDS: readonly string[] = [
     "node",
     "eslint",
     "purity",
+    "test-hygiene",
     "node-checks",
     "node-coverage",
     "dotnet",
@@ -158,6 +159,12 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
         docRel: "node-purity.md",
         notice: "opt-in pure modules and command/query contracts from .defined.json purity",
         owner: purityOwner,
+    },
+    "test-hygiene": {
+        kind: "step",
+        docRel: "testing/test-review.md",
+        notice: "always-on test-hygiene defects: does the test run, and can it fail",
+        owner: house("runtime/lib/test-review/"),
     },
     "node-checks": {
         kind: "step",

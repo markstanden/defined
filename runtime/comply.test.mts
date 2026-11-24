@@ -1367,7 +1367,15 @@ test("runPass fails the scoped steps when the scope matches nothing", async () =
 
 test("the run plan scopes exactly the content checks", async () => {
     // Arrange
-    const expected = ["eslint", "node", "purity", "shell", "tofu", "yaml"];
+    const expected = [
+        "eslint",
+        "node",
+        "purity",
+        "shell",
+        "test-hygiene",
+        "tofu",
+        "yaml",
+    ];
 
     // Act
     const actual = [...SCOPED_STEP_IDS].sort();

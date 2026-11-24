@@ -538,6 +538,12 @@ function scanDotNetDeclarations({
     readonly path: string;
     readonly content: string;
 }): TestDeclaration[] {
+    // Cheap file-level gate, like the JS framework marker: a source with no
+    // test attribute anywhere cannot declare a test, so the method scan is
+    // skipped for production files.
+    if (!DOTNET_TEST_ATTRIBUTE.test(content)) {
+        return [];
+    }
     const masked = maskTestSource(content);
     const declarations: TestDeclaration[] = [];
 

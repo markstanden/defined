@@ -60,6 +60,7 @@ import { runNodeStep } from "./steps/node.mts";
 import { runNodeCoverageStep } from "./steps/node-coverage.mts";
 import { runPurityStep } from "./steps/purity.mts";
 import { runShellStep } from "./steps/shell.mts";
+import { runTestHygieneStep } from "./steps/test-hygiene.mts";
 import { runTofuStep } from "./steps/tofu.mts";
 import { runWorkflowStep } from "./steps/workflow.mts";
 import { runYamlStep } from "./steps/yaml.mts";
@@ -259,6 +260,19 @@ const STEPS: Step[] = [
                 trackedFiles: checkFiles,
                 scratchFiles: files,
                 runner,
+            }),
+    },
+    {
+        // Read-only and image-owned: the rules travel with the image, so no
+        // dependency on node-deps, no consumer config and no cache. Fix mode
+        // skips it (there is nothing to repair), so comply's verification pass
+        // is the only judge.
+        id: "test-hygiene",
+        scoped: true,
+        run: ({ mode, repoRoot, checkFiles }) =>
+            runTestHygieneStep({
+                ctx: { mode, repoRoot },
+                trackedFiles: checkFiles,
             }),
     },
     {
