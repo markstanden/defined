@@ -4,7 +4,13 @@
 // Run: node --test runtime/lib/node-packages.test.mts
 
 import assert from "node:assert/strict";
-import { appendFileSync, cpSync, existsSync } from "node:fs";
+import {
+    appendFileSync,
+    cpSync,
+    existsSync,
+    symlinkSync,
+    writeFileSync,
+} from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -341,6 +347,11 @@ test("restoreNodePackages discards a warm copy that changes mid-copy", async () 
     const { repo, scratch } = await warmFixture();
     const { runner, calls } = fakeRunner({}, true);
     const source = join(repo, "node_modules/.warm");
+    let destinationPresentAtInstall: boolean | null = null;
+    const checkingRunner: typeof runner = async (input) => {
+        destinationPresentAtInstall = existsSync(join(scratch, "node_modules"));
+        return runner(input);
+    };
     let first = true;
     const copyFn: typeof cpSync = (from: string, to: string) => {
         cpSync(from, to, { recursive: true });
@@ -355,9 +366,60 @@ test("restoreNodePackages discards a warm copy that changes mid-copy", async () 
         workingRoot: scratch,
         trackedFiles: ["package.json", "package-lock.json"],
         packages: [{ dir: "" }],
+        runner: checkingRunner,
+        warmRoot: repo,
+        copyFn,
+    });
+
+    // Assert
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+    assert.equal(destinationPresentAtInstall, false);
+});
+
+test("restoreNodePackages discards a warm copy that gains an entry mid-copy", async () => {
+    // Arrange
+    const { repo, scratch } = await warmFixture();
+    const { runner, calls } = fakeRunner({}, true);
+    let first = true;
+    const copyFn: typeof cpSync = (from: string, to: string) => {
+        cpSync(from, to, { recursive: true });
+        if (first) {
+            first = false;
+            writeFileSync(join(repo, "node_modules/added.js"), "new\n");
+        }
+    };
+
+    // Act
+    const result = await restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
         runner,
         warmRoot: repo,
         copyFn,
+    });
+
+    // Assert
+    assert.deepEqual(result, { failures: [], restored: 1, reused: 0 });
+    assert.equal(calls.length, 1);
+});
+
+test("restoreNodePackages never reuses a symlinked warm tree", async () => {
+    // Arrange
+    const { repo, scratch } = await warmFixture({ repoTree: false });
+    const store = await makeTempDir("quality-node-packages-store-");
+    await writeTree(store, { ".warm": "warm tree\n" });
+    symlinkSync(store, join(repo, "node_modules"), "dir");
+    const { runner, calls } = fakeRunner({}, true);
+
+    // Act
+    const result = await restoreNodePackages({
+        workingRoot: scratch,
+        trackedFiles: ["package.json", "package-lock.json"],
+        packages: [{ dir: "" }],
+        runner,
+        warmRoot: repo,
     });
 
     // Assert

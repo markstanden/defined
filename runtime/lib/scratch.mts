@@ -81,10 +81,7 @@ function walkTree(
  * @param files Relative file paths.
  * @returns Entry path → `mtimeMs:size` or `missing`.
  */
-export function snapshotFiles(
-    root: string,
-    files: readonly string[],
-): TreeSnapshot {
+function snapshotFiles(root: string, files: readonly string[]): TreeSnapshot {
     const entries = new Map<string, string>();
     for (const relative of files) {
         try {

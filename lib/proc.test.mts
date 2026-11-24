@@ -219,28 +219,23 @@ test("failureDetail names the outcome and keeps the output", () => {
         },
         {
             input: result({ status: null, signal: "SIGKILL" }),
-            expected:
-                "killed by SIGKILL: no output — no diagnostics captured; a reporter may have consumed them",
+            expected: "killed by SIGKILL: no output",
         },
         {
             input: result({ status: null, timedOut: true }),
-            expected:
-                "timed out: no output — no diagnostics captured; a reporter may have consumed them",
+            expected: "timed out: no output",
         },
         {
             input: result({ status: null, cancelled: true }),
-            expected:
-                "cancelled: no output — no diagnostics captured; a reporter may have consumed them",
+            expected: "cancelled: no output",
         },
         {
             input: result({ status: null }),
-            expected:
-                "did not exit: no output — no diagnostics captured; a reporter may have consumed them",
+            expected: "did not exit: no output",
         },
         {
             input: result({ status: 1 }),
-            expected:
-                "exit 1: no output — no diagnostics captured; a reporter may have consumed them",
+            expected: "exit 1: no output",
         },
         {
             input: result({ status: 1, stderr: "x", truncated: true }),

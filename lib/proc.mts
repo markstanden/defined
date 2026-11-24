@@ -296,18 +296,15 @@ export function run(
 /**
  * A command result as actionable diagnostic text. Prefers stdout (test/build
  * failures land there), then stderr; when neither has text the cause still
- * shows, with an honest hint: an empty render often means a reporter consumed
- * the diagnostics, not that the command was silent. A non-plain outcome —
- * timeout, cancellation, signal, truncation — is named, so a killed or capped
- * command can never read as bare "no output".
+ * shows. A non-plain outcome — timeout, cancellation, signal, truncation — is
+ * named, so a killed or capped command can never read as bare "no output".
  */
 export function failureDetail({ result }: { result: CommandResult }): string {
     const output =
         [result.stdout, result.stderr]
             .map((stream) => stream.trim())
             .filter((stream) => stream !== "")
-            .join("\n") ||
-        "no output — no diagnostics captured; a reporter may have consumed them";
+            .join("\n") || "no output";
     const label = outcomeLabel({ result });
     return label === "" ? output : `${label}: ${output}`;
 }

@@ -143,16 +143,32 @@ test("parseLcov rejects a malformed hit counter (the reported reproduction)", ()
     );
 });
 
+/** The message a rejected call throws, or "accepted" when it does not. */
+function rejectionMessage(fn: () => unknown): string {
+    try {
+        fn();
+    } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+    }
+    return "accepted";
+}
+
 test("parseLcov rejects negative, fractional and infinite counters", () => {
     // Arrange
-    for (const bad of ["-1", "1.5", "Infinity", "NaN", "0x10", ""]) {
-        // Act & Assert
-        assert.throws(
-            () => parseLcov({ content: `LF:10\nLH:${bad}\n` }),
-            /is not a non-negative integer/u,
-            `LH:${bad} must be rejected`,
-        );
-    }
+    const badCounters = ["-1", "1.5", "Infinity", "NaN", "0x10", ""];
+
+    // Act
+    const messages = badCounters.map((bad) =>
+        rejectionMessage(() => parseLcov({ content: `LF:10\nLH:${bad}\n` })),
+    );
+
+    // Assert
+    assert.deepEqual(
+        messages,
+        badCounters.map(
+            (bad) => `LH counter '${bad}' is not a non-negative integer`,
+        ),
+    );
 });
 
 test("parseLcov rejects a hit count exceeding found in any record", () => {
@@ -575,6 +591,30 @@ test("fails when the coverage command fails", async () => {
     assert.match(result.notice ?? "", /coverage command failed/u);
 });
 
+test("names captured-empty output as possibly consumed by the reporter", async () => {
+    // Arrange
+    const dir = await makeTempDir("quality-nc-");
+    await setupCoverageRepo({
+        root: dir,
+        config: { version: TEST_SHA, coverage: { node: { command: "false" } } },
+    });
+
+    // Act
+    const { result } = await runCoverageScenario({
+        step: runNodeCoverageStep,
+        repoRoot: dir,
+        scratchDir: dir,
+        trackedFiles: ["package.json"],
+        runnerOutcomes: { sh: { status: 1 } },
+    });
+
+    // Assert
+    assert.match(
+        result.notice ?? "",
+        /coverage command failed: exit 1: no output — no diagnostics captured; a coverage reporter may have consumed them/u,
+    );
+});
+
 test("fails when the command writes no lcov.info", async () => {
     // Arrange
     const dir = await makeTempDir("quality-nc-");
@@ -711,34 +751,45 @@ test("gates line coverage against the effective minimum", async () => {
             status: "pass",
         },
     ] as const;
-    for (const { label, minimums, lh, re, status } of SCENARIOS) {
-        const config: Record<string, unknown> = {
-            version: TEST_SHA,
-            coverage: { node: { command: "npm t" } },
-        };
-        if (minimums) {
-            (
-                config.coverage as { node: { minimums?: unknown } }
-            ).node.minimums = minimums;
-        }
-        const dir = await makeTempDir("quality-nc-");
-        await setupCoverageRepo({
-            root: dir,
-            config,
-            reportPath: "coverage/lcov.info",
-            reportContent: ["LF:100", `LH:${lh}`].join("\n"),
-        });
-        const { result } = await runCoverageScenario({
-            step: runNodeCoverageStep,
-            repoRoot: dir,
-            scratchDir: dir,
-            trackedFiles: ["package.json"],
-        });
 
-        // Act & Assert
-        assert.equal(result.status, status, label);
-        assert.match(result.notice ?? "", re, label);
-    }
+    // Act
+    const outcomes = await Promise.all(
+        SCENARIOS.map(async ({ minimums, lh }) => {
+            const config: Record<string, unknown> = {
+                version: TEST_SHA,
+                coverage: { node: { command: "npm t" } },
+            };
+            if (minimums) {
+                (
+                    config.coverage as { node: { minimums?: unknown } }
+                ).node.minimums = minimums;
+            }
+            const dir = await makeTempDir("quality-nc-");
+            await setupCoverageRepo({
+                root: dir,
+                config,
+                reportPath: "coverage/lcov.info",
+                reportContent: ["LF:100", `LH:${lh}`].join("\n"),
+            });
+            const { result } = await runCoverageScenario({
+                step: runNodeCoverageStep,
+                repoRoot: dir,
+                scratchDir: dir,
+                trackedFiles: ["package.json"],
+            });
+            return { status: result.status, notice: result.notice ?? "" };
+        }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        outcomes.map(({ status }) => status),
+        SCENARIOS.map(({ status }) => status),
+    );
+    assert.deepEqual(
+        outcomes.map(({ notice }, index) => SCENARIOS[index]?.re.test(notice)),
+        SCENARIOS.map(() => true),
+    );
 });
 
 test("no-fix runs the coverage command in a scratch workspace, isolated from the repo", async () => {
