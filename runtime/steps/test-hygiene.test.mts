@@ -173,7 +173,10 @@ test("reads exactly the named files, untracked ones included", async () => {
     assert.equal(result.status, "fail");
     assert.deepEqual(
         result.errors?.map((error) => [error.rule, error.file]),
-        [["no-assertions", "fresh.test.ts"]],
+        [
+            ["missing-structure", "fresh.test.ts"],
+            ["no-assertions", "fresh.test.ts"],
+        ],
     );
 });
 
@@ -200,7 +203,7 @@ test("fails a named review lead and stays silent in tracked mode", async () => {
     assert.equal(reviewed.status, "fail");
     assert.deepEqual(
         reviewed.errors?.map((error) => error.rule),
-        ["sleep"],
+        ["missing-structure", "sleep"],
     );
 });
 
@@ -224,7 +227,7 @@ test("reads a named file from disk", async () => {
         assert.equal(result.status, "fail");
         assert.deepEqual(
             result.errors?.map((error) => error.rule),
-            ["focused-test"],
+            ["focused-test", "missing-structure"],
         );
     } finally {
         await rm(repoRoot, { recursive: true, force: true });

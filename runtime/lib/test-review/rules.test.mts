@@ -1047,10 +1047,13 @@ function nodeTestBody(statement: string): string {
     return `import { test } from "node:test";\ntest("case", () => {\n    ${statement}\n});`;
 }
 
-/** Determinism and structure ids, so a review list reads without labels. */
-const REVIEW_ONLY = new Set([
-    "missing-structure",
-    "multi-statement-act",
+/** One node:test declaration whose block body holds the given lines. */
+function declaredBody(body: string): string {
+    return `import { test } from "node:test";\ntest("case", () => {\n${body}\n});`;
+}
+
+/** Determinism rule ids, so a review list reads without structure noise. */
+const DETERMINISM_IDS = new Set([
     "ambient-clock",
     "sleep",
     "randomness",
@@ -1062,13 +1065,13 @@ const REVIEW_ONLY = new Set([
     "debug-output",
 ]);
 
-/** The review-tier rule ids a finding list holds, in report order. */
+/** The determinism rule ids a finding list holds, in report order. */
 function reviewRulesOf(
     findings: ReturnType<typeof reviewTestSources>,
 ): string[] {
     return findings
         .map((finding) => finding.rule)
-        .filter((rule) => REVIEW_ONLY.has(rule));
+        .filter((rule) => DETERMINISM_IDS.has(rule));
 }
 
 test("reports every determinism rule in review mode and none in tracked mode", () => {
@@ -1140,3 +1143,391 @@ test("does not report a determinism name quoted inside a string", () => {
     assert.deepEqual(reviewRulesOf(findings), []);
 });
 
+
+/** The structure rule ids a finding list holds. */
+function structureRulesOf(
+    findings: ReturnType<typeof reviewTestSources>,
+): string[] {
+    return findings
+        .map((finding) => finding.rule)
+        .filter(
+            (rule) =>
+                rule === "missing-structure" || rule === "multi-statement-act",
+        );
+}
+
+test("accepts a complete Arrange / Act / Assert set", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    // Arrange",
+                "    const x = 1;",
+                "    // Act",
+                "    const y = x;",
+                "    // Assert",
+                "    assert.equal(y, 1);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const findings = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(structureRulesOf(findings), []);
+});
+
+test("accepts Act and Assert combined under every joiner", () => {
+    // Arrange
+    const joiners = ["&", "/", ",", " and ", "+"];
+    const sources = joiners.map((joiner) => ({
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    // Arrange",
+                "    const x = 1;",
+                `    // Act${joiner}Assert`,
+                "    assert.equal(x, 1);",
+            ].join("\n"),
+        ),
+    }));
+
+    // Act
+    const found = sources.map((source) =>
+        structureRulesOf(reviewTestSources([source], { review: true })),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        joiners.map(() => []),
+    );
+});
+
+test("requires Arrange when a statement precedes the first label", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    const total = add(1, 2);",
+                "    // Act",
+                "    assert.equal(total, 3);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "missing-structure",
+    );
+
+    // Assert
+    assert.match(finding?.message ?? "", /found: act\b/u);
+    assert.match(finding?.message ?? "", /Act and Assert must be labelled/u);
+});
+
+test("does not accept Given / When / Then as a substitute", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    // Given",
+                "    setup();",
+                "    // When",
+                "    act();",
+                "    // Then",
+                "    assert.ok(done);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "missing-structure",
+    );
+
+    // Assert
+    assert.match(finding?.message ?? "", /found: none/u);
+});
+
+test("does not count phase labels quoted inside a fixture string", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    const fixture = `",
+                "    // Arrange",
+                "    // Act",
+                "    // Assert",
+                "    `;",
+                "    assert.ok(fixture);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "missing-structure",
+    );
+
+    // Assert
+    assert.match(finding?.message ?? "", /found: none/u);
+});
+
+test("reads phase labels past apostrophes in line and block comments", () => {
+    // Arrange
+    const prefixes = ["    // don't skip", "    /* don't skip */"];
+    const sources = prefixes.map((prefix) => ({
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                prefix,
+                "    // Arrange",
+                "    const x = 1;",
+                "    // Act",
+                "    const y = x + 1;",
+                "    // Assert",
+                "    assert.equal(y, 2);",
+            ].join("\n"),
+        ),
+    }));
+
+    // Act
+    const found = sources.map((source) =>
+        structureRulesOf(reviewTestSources([source], { review: true })),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        prefixes.map(() => []),
+    );
+});
+
+test("reports the phase labels it found when the set is incomplete", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: `import { test } from "node:test";\ntest("adds numbers", () => {\n    // Arrange\n    const x = 1;\n    assert.equal(x, 1);\n});`,
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "missing-structure",
+    );
+
+    // Assert
+    assert.equal(finding?.line, 2);
+    assert.match(finding?.message ?? "", /"adds numbers"/u);
+    assert.match(finding?.message ?? "", /found: arrange/u);
+});
+
+test("does not count an assertion call or a commented assertion as a label", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    // Assert.Equal(1, 1)",
+                "    Assert.Equal(1, 1);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "missing-structure",
+    );
+
+    // Assert
+    assert.match(finding?.message ?? "", /found: none/u);
+});
+
+test("stays silent for a declaration with no delimited body", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content:
+            'import { test } from "node:test";\ntest("no body", done);',
+    };
+
+    // Act
+    const findings = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(structureRulesOf(findings), []);
+});
+
+test("reports a discrete act region with two statements", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    // Act",
+                "    sut.Start();",
+                "    sut.Stop();",
+                "    // Assert",
+                "    assert.ok(started);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "multi-statement-act",
+    );
+
+    // Assert
+    assert.equal(finding?.line, 3);
+    assert.match(
+        finding?.message ?? "",
+        /region: Act; statements: 2/u,
+    );
+});
+
+test("reports a combined region with two statements", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    // Act & Assert",
+                "    capture();",
+                "    assert.equal(captured, 1);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "multi-statement-act",
+    );
+
+    // Assert
+    assert.match(
+        finding?.message ?? "",
+        /region: Act & Assert; statements: 2/u,
+    );
+});
+
+test("counts a multi-line act call as one statement", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: declaredBody(
+            [
+                "    // Act",
+                "    const result = sut.Do(",
+                "        arg,",
+                "    );",
+                "    // Assert",
+                "    assert.equal(result, 1);",
+            ].join("\n"),
+        ),
+    };
+
+    // Act
+    const findings = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(structureRulesOf(findings), []);
+});
+
+test("ignores statements nested in a lambda or loop body", () => {
+    // Arrange
+    const bodies = [
+        [
+            "    // Act & Assert",
+            "    expect(() => {",
+            "        a();",
+            "        b();",
+            "    }).not.toThrow();",
+        ],
+        [
+            "    // Act",
+            "    for (;;) {",
+            "        a();",
+            "        b();",
+            "    }",
+            "    // Assert",
+            "    assert.ok(done);",
+        ],
+    ].map((lines) => declaredBody(lines.join("\n")));
+    const sources = bodies.map((content) => ({
+        path: "a.test.ts",
+        content,
+    }));
+
+    // Act
+    const found = sources.map((source) =>
+        structureRulesOf(reviewTestSources([source], { review: true })),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        bodies.map(() => []),
+    );
+});
+
+test("stays silent for semicolonless bodies and assert-only regions", () => {
+    // Arrange
+    const bodies = [
+        declaredBody(
+            [
+                "    # Act & Assert",
+                "    result = sut.do()",
+                "    assert result == 1",
+            ].join("\n"),
+        ),
+        declaredBody(
+            [
+                "    // Act",
+                "    sut.Do();",
+                "    // Assert",
+                "    assert.equal(a, 1);",
+                "    assert.equal(b, 2);",
+            ].join("\n"),
+        ),
+    ];
+    const sources = bodies.map((content) => ({
+        path: "a.test.ts",
+        content,
+    }));
+
+    // Act
+    const found = sources.map((source) =>
+        reviewTestSources([source], { review: true }).map(
+            (finding) => finding.rule,
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((rules) =>
+            rules.filter((rule) => rule === "multi-statement-act"),
+        ),
+        bodies.map(() => []),
+    );
+});
+
+test("skips a single-expression arrow body entirely", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content:
+            'import { test } from "node:test";\ntest("case", () => expect(add(1, 2)).toBe(3));',
+    };
+
+    // Act
+    const findings = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(structureRulesOf(findings), []);
+});

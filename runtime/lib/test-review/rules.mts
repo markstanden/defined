@@ -29,6 +29,15 @@
 // `DynamicData` runs zero cases and reports green. A JS `it.each` empty table
 // is not read yet.
 //
+// Review tier (`scan --files` only): the determinism family reads ambient
+// state and real I/O in a declaration's masked body — clock, sleep, random,
+// environment, locale, network, filesystem, process spawn, debug output. The
+// structure pair reads phase labels out of the body's comments (`Arrange`,
+// `Act`, `Assert`, combined with a joiner): `missing-structure` when act and
+// assert are not both labelled, `multi-statement-act` when the act region
+// holds more than one depth-0 statement. Labels are read from the raw body
+// with strings blanked, never from the masked body, which has no comments.
+//
 // `literal-tautology` reads each declaration's masked body: a comparison of a
 // literal with itself, or an expression with itself, cannot fail for any input.
 // `commented-out-assertion` reads the raw body lines: an assertion left in a
@@ -115,6 +124,8 @@ export const ALWAYS_ON_RULES = [
 
 /** The review-tier lead ids `scan --files` reports and a note can suppress. */
 export const REVIEW_RULES = [
+    "missing-structure",
+    "multi-statement-act",
     "ambient-clock",
     "sleep",
     "randomness",
@@ -848,6 +859,217 @@ function environmentFindings(source: TestReviewSource): TestHygieneFinding[] {
     );
 }
 
+/** One phase a structure label can name. */
+type PhaseLabel = "arrange" | "act" | "assert";
+
+/** Phase labels in canonical order, for evidence text. */
+const PHASE_LABELS: readonly PhaseLabel[] = ["arrange", "act", "assert"];
+
+/**
+ * A comment line, capturing the label text after the comment marker. The
+ * capture takes the raw remainder; the phase-word scan works from word
+ * boundaries, so leading whitespace is inert.
+ */
+const COMMENT_LINE = /^[ \t]*(?:\/\/|#(?:region )?|\/\*|\*|--)(.*)$/;
+
+/** A phase word inside a comment's label text. Stateful: reset per line. */
+const PHASE_WORD = /\b(arrange|act|assert)\b/gi;
+
+/**
+ * What may follow a phase word for it to name a phase: a joiner (`&`, `/`,
+ * `,`, `+`, `and`), a dash, a colon, a trailing block-comment close, or the
+ * end of the comment. A dot (`Assert.Equal`) or prose (`Arrange the folder`)
+ * does not.
+ */
+const PHASE_FOLLOWER =
+    /^[ \t]*(?:\*\/[ \t]*)?(?:[&/,+]|and\b|[:—–-]|$)/i;
+
+/** One body line's phase labels. */
+interface PhaseEntry {
+    /** 0-based line index inside the declaration body. */
+    readonly lineIndex: number;
+    readonly labels: ReadonlySet<PhaseLabel>;
+}
+
+/**
+ * The phase labels each comment line of the body names, in body order.
+ * Strings are masked with comments kept, so a label quoted inside a fixture
+ * is data, not a phase, and an apostrophe in prose cannot open a literal.
+ */
+function labelLines(body: string): PhaseEntry[] {
+    const lines = maskTestSource(body, { comments: "keep" }).split("\n");
+    const entries: PhaseEntry[] = [];
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+        const text = COMMENT_LINE.exec(lines[lineIndex] ?? "")?.[1];
+        if (text === undefined) {
+            continue;
+        }
+        PHASE_WORD.lastIndex = 0;
+        const labels = new Set<PhaseLabel>();
+        for (const word of text.matchAll(PHASE_WORD)) {
+            const after = text.slice((word.index ?? 0) + word[0].length);
+            if (PHASE_FOLLOWER.test(after)) {
+                labels.add((word[1] ?? "").toLowerCase() as PhaseLabel);
+            }
+        }
+        if (labels.size > 0) {
+            entries.push({ lineIndex, labels });
+        }
+    }
+    return entries;
+}
+
+/**
+ * Whether a masked body line holds a real statement. The block's own opening
+ * brace is a delimiter, not a statement.
+ */
+function isStatementLine(line: string): boolean {
+    const trimmed = line.trim();
+    return trimmed !== "" && trimmed !== "{";
+}
+
+/*
+ * Count depth-0 statements in a masked region: a semicolon outside every
+ * bracket. Paren and bracket depth keeps `for (;;)` headers and nested
+ * lambdas above zero, so only statements of the region itself count.
+ *
+ * ponytail: counting `;` reads no language whose statements end in a
+ * newline — Python and Go bodies count 0 and never fire. The upgrade path is a
+ * per-language statement splitter.
+ */
+function topLevelStatements(slice: string): number {
+    let depth = 0;
+    let count = 0;
+    for (const character of slice) {
+        if (character === "{" || character === "(" || character === "[") {
+            depth++;
+        } else if (
+            character === "}" ||
+            character === ")" ||
+            character === "]"
+        ) {
+            depth = Math.max(0, depth - 1);
+        } else if (character === ";" && depth === 0) {
+            count++;
+        }
+    }
+    return count;
+}
+
+/** A label line's phases, capitalised and joined for evidence text. */
+function regionName(labels: ReadonlySet<PhaseLabel>): string {
+    return PHASE_LABELS.filter((label) => labels.has(label))
+        .map((label) => label.charAt(0).toUpperCase() + label.slice(1))
+        .join(" & ");
+}
+
+/** All phases the body's label comments name. */
+function phasesFound(entries: readonly PhaseEntry[]): Set<PhaseLabel> {
+    const found = new Set<PhaseLabel>();
+    for (const entry of entries) {
+        for (const label of entry.labels) {
+            found.add(label);
+        }
+    }
+    return found;
+}
+
+/**
+ * The missing-structure lead, or `null` when the body is structured: act and
+ * assert both labelled — separately or combined — and arrange labelled or
+ * unpreceded by any statement. A fabricated empty `// Arrange` names a phase
+ * that does not exist, so a no-arrangement test is never asked for one.
+ */
+function missingStructureFinding(
+    declaration: TestDeclaration,
+    entries: readonly PhaseEntry[],
+    found: ReadonlySet<PhaseLabel>,
+): TestHygieneFinding | null {
+    const firstLabelLine = entries[0]?.lineIndex;
+    const statementsBefore = (declaration.maskedBody ?? "")
+        .split("\n")
+        .slice(0, firstLabelLine)
+        .some(isStatementLine);
+
+    if (
+        found.has("act") &&
+        found.has("assert") &&
+        (found.has("arrange") || !statementsBefore)
+    ) {
+        return null;
+    }
+
+    const present = PHASE_LABELS.filter((label) => found.has(label));
+    const evidence =
+        present.length === 0 ? "found: none" : `found: ${present.join(", ")}`;
+    return {
+        rule: "missing-structure",
+        file: declaration.path,
+        line: declaration.line,
+        message: `test "${declaration.name}" has incomplete phase structure (${evidence}): Act and Assert must be labelled, and Arrange only when statements precede the first label`,
+    };
+}
+
+/**
+ * The multi-statement-act lead for the first act-bearing region — from its
+ * label to the next label or the body's end — or `null` when the region holds
+ * one statement or cannot be read. A second depth-0 statement means more than
+ * one outcome is pinned, or an act and an assert share a label.
+ */
+function multiStatementActFinding(
+    declaration: TestDeclaration,
+    entries: readonly PhaseEntry[],
+): TestHygieneFinding | null {
+    const actIndex = entries.findIndex((entry) => entry.labels.has("act"));
+    const actEntry = entries[actIndex];
+    if (actEntry === undefined || declaration.maskedBody === null) {
+        return null;
+    }
+    const regionEnd = entries[actIndex + 1]?.lineIndex;
+    const region = declaration.maskedBody
+        .split("\n")
+        .slice(actEntry.lineIndex + 1, regionEnd)
+        .join("\n");
+    const statements = topLevelStatements(region);
+    if (statements <= 1) {
+        return null;
+    }
+    return {
+        rule: "multi-statement-act",
+        file: declaration.path,
+        line: declaration.bodyLine + actEntry.lineIndex,
+        message: `test "${declaration.name}" act region (region: ${regionName(actEntry.labels)}; statements: ${statements}) holds more than one depth-0 statement: one statement is the expected shape`,
+    };
+}
+
+/** One source's structure leads: phase coverage and the act region's shape. */
+function structureFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        // A delimited block is the only body a label can mark.
+        if (
+            declaration.body === null ||
+            declaration.maskedBody === null ||
+            !declaration.body.startsWith("{")
+        ) {
+            return [];
+        }
+        const entries = labelLines(declaration.body);
+        const found = phasesFound(entries);
+        return [
+            missingStructureFinding(declaration, entries, found),
+            multiStatementActFinding(declaration, entries),
+        ].filter(
+            (finding): finding is TestHygieneFinding => finding !== null,
+        );
+    });
+}
+
 /** All findings from one source, in line order. */
 function sourceFindings(
     source: TestReviewSource,
@@ -884,6 +1106,7 @@ function sourceFindings(
         ...noAssertionFindings({ source, declarations }),
         ...unawaitedAssertionFindings({ source, declarations }),
         ...swallowedExceptionFindings({ source, declarations }),
+        ...(review ? structureFindings({ source, declarations }) : []),
         ...(review ? determinismFindings({ source, declarations }) : []),
     ];
 }
