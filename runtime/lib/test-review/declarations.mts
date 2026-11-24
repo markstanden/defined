@@ -1,0 +1,429 @@
+// lib/test-review/declarations.mts — JavaScript/TypeScript test declarations.
+//
+// The always-on rules that read a test body need the declaration around it: its
+// name, line, body and the skip/focus modifiers on its head. This module ports
+// the scanner's Jest/Vitest/node:test discovery over offset-preserving masked
+// source (lib/test-review/mask.mts); a declaration quoted inside a string or a
+// comment is data, not a test. A file with no vitest, Jest or node:test marker
+// is not a test file and yields no declarations.
+//
+// Public surface:
+//   scanTestDeclarations({ path, content }) — declarations in file order
+//   lineAt({ content, index }) — the 1-based line holding an offset
+//
+// Deliberate ceiling (ponytail): a lexical scanner, not a parser. Titles are
+// classified by their first token, bodies by bracket matching, and a method
+// named `it`/`test`/`specify` on an object is not a declaration. Upgrade to a
+// parser if exotic styles ever earn the dependency.
+
+import { maskTestSource } from "./mask.mts";
+
+/** The test frameworks the JavaScript scanner recognises. */
+export type TestFramework = "node-test" | "jest" | "vitest";
+
+/** One JavaScript/TypeScript test declaration and the body it opens. */
+export interface TestDeclaration {
+    /** Repo-relative path of the source. */
+    readonly path: string;
+    /** 1-based line of the declaration head. */
+    readonly line: number;
+    /** The title as written, without its delimiters. */
+    readonly name: string;
+    /** The framework the file is written for. */
+    readonly framework: TestFramework;
+    /** Whether the head marks the declaration skipped. */
+    readonly skipped: boolean;
+    /** The skip marker as written, when the declaration is skipped. */
+    readonly skipMarker?: string;
+    /** Whether the head marks the declaration focused (`.only`). */
+    readonly focused: boolean;
+    /** The focus marker as written, when the declaration is focused. */
+    readonly focusMarker?: string;
+    /** Raw body text, or `null` when the declaration has no delimited body. */
+    readonly body: string | null;
+    /** The body with strings and comments blanked, or `null`. */
+    readonly maskedBody: string | null;
+    /** 1-based line the body starts on (the brace or the first expression). */
+    readonly bodyLine: number;
+}
+
+/** How a declaration head marks skipping or focus, if at all. */
+interface ModifierFlags {
+    readonly skipped: boolean;
+    readonly focused: boolean;
+    readonly skipMarker?: string;
+    readonly focusMarker?: string;
+}
+
+/** A title the scanner read from one declaration. */
+interface TitleShape {
+    readonly name: string;
+}
+
+/** 1-based line number for a character offset. */
+export function lineAt({
+    content,
+    index,
+}: {
+    content: string;
+    index: number;
+}): number {
+    let line = 1;
+    for (let i = 0; i < index && i < content.length; i++) {
+        if (content[i] === "\n") {
+            line++;
+        }
+    }
+    return line;
+}
+
+/**
+ * Whether an offset is live code rather than a string or comment.
+ *
+ * `maskTestSource` blanks both while preserving offsets, so a character that
+ * changed between the source and its mask marks the offset as data.
+ */
+function inCode(content: string, masked: string, index: number): boolean {
+    let offset = index;
+    while (content[offset] === " " || content[offset] === "\t") {
+        offset++;
+    }
+    return masked[offset] === content[offset];
+}
+
+/** Offset of the next non-whitespace character, or the end of the text. */
+function skipWhitespace(text: string, from: number): number {
+    let i = from;
+    while (i < text.length && /\s/.test(text[i] ?? "")) {
+        i++;
+    }
+    return i;
+}
+
+/** Whether a character opens a bracket. */
+function isOpener(char: string): boolean {
+    return char === "(" || char === "[" || char === "{";
+}
+
+/** Whether a character closes a bracket. */
+function isCloser(char: string): boolean {
+    return char === ")" || char === "]" || char === "}";
+}
+
+/** A non-empty span from `start` to `end`, or `null` when empty. */
+function nonEmptySpan(start: number, end: number): [number, number] | null {
+    return end > start ? [start, end] : null;
+}
+
+/**
+ * Index just past the closing quote that starts at `start`, honouring
+ * backslash escapes. Returns `text.length` when the literal is unterminated.
+ */
+function quotedEnd(text: string, start: number, quote: string): number {
+    let end = start + 1;
+    while (end < text.length) {
+        if (text[end] === "\\") {
+            end += 2;
+            continue;
+        }
+        end++;
+        if (text[end - 1] === quote) {
+            break;
+        }
+    }
+    return end;
+}
+
+/** Brace-matched span for a block-bodied declaration, else `null`. */
+function bodySpan(masked: string, from: number): [number, number] | null {
+    const open = masked.indexOf("{", from);
+    if (open === -1) {
+        return null;
+    }
+    const semicolon = masked.indexOf(";", from);
+    if (semicolon !== -1 && semicolon < open) {
+        return null;
+    }
+    let depth = 0;
+    for (let i = open; i < masked.length; i++) {
+        if (masked[i] === "{") {
+            depth++;
+        } else if (masked[i] === "}") {
+            depth--;
+            if (depth === 0) {
+                return [open, i + 1];
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * Bracket-matched span for an expression-bodied arrow test.
+ *
+ * Starts after the `=>` and stops at the closing bracket of the `it(...)`
+ * call, or at a top-level comma when the arrow is not the final argument (for
+ * example a trailing timeout). Brackets inside masked strings are blank, so
+ * the count cannot be fooled by them.
+ *
+ * ponytail: lexical delimiting, not a parser. The arrow window is bounded by
+ * the caller; a nested arrow inside the expression is delimited by bracket
+ * depth, not by syntax. Upgrade if exotic styles turn up.
+ */
+function expressionSpan(masked: string, from: number): [number, number] | null {
+    const start = skipWhitespace(masked, from);
+    let depth = 0;
+
+    for (let i = start; i < masked.length; i++) {
+        const char = masked[i] ?? "";
+        const atTop = depth === 0;
+        if (isOpener(char)) {
+            depth++;
+            continue;
+        }
+        if (isCloser(char)) {
+            if (atTop) {
+                return nonEmptySpan(start, i);
+            }
+            depth--;
+            continue;
+        }
+        if (char === "," && atTop) {
+            return nonEmptySpan(start, i);
+        }
+    }
+    return null;
+}
+
+/** Body span for a JavaScript test: arrow expression first, brace otherwise. */
+function javaScriptBodySpan(
+    masked: string,
+    index: number,
+): [number, number] | null {
+    const arrow = masked.indexOf("=>", index);
+    if (arrow === -1 || arrow - index >= 500) {
+        return bodySpan(masked, index);
+    }
+    return expressionSpan(masked, arrow + 2) ?? bodySpan(masked, arrow + 2);
+}
+
+/** Body text, masked text and the line the body starts on. */
+function bodySlice(
+    content: string,
+    masked: string,
+    span: [number, number] | null,
+    declarationLine: number,
+): {
+    readonly body: string | null;
+    readonly maskedBody: string | null;
+    readonly bodyLine: number;
+} {
+    if (span === null) {
+        return { body: null, maskedBody: null, bodyLine: declarationLine };
+    }
+    return {
+        body: content.slice(span[0], span[1]),
+        maskedBody: masked.slice(span[0], span[1]),
+        bodyLine: lineAt({ content, index: span[0] }),
+    };
+}
+
+/**
+ * Offset where a title expression ends: the first top-level comma, or the
+ * bracket that closes the declaration's argument list. Brackets inside the
+ * expression are depth-counted on the masked text, so a call's own commas are
+ * not boundaries and a comma inside a string cannot end the title.
+ */
+function titleExpressionEnd(masked: string, start: number): number {
+    let depth = 0;
+    for (let i = start; i < masked.length; i++) {
+        const char = masked[i] ?? "";
+        if (isOpener(char)) {
+            depth++;
+        } else if (isCloser(char)) {
+            if (depth === 0) {
+                return i;
+            }
+            depth--;
+        } else if (char === "," && depth === 0) {
+            return i;
+        }
+    }
+    return masked.length;
+}
+
+/** An identifier chain that can start a title: `title`, `row.label`, `$x`. */
+const IDENTIFIER_CHAIN = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*/;
+
+/** A computed title: the whole expression, whitespace collapsed to one line. */
+function computedTitle(
+    content: string,
+    masked: string,
+    start: number,
+): TitleShape {
+    const end = titleExpressionEnd(masked, start);
+    return {
+        name: content.slice(start, end).replace(/\s+/g, " ").trim(),
+    };
+}
+
+/** Whether the title is continued by `+` or `?` and so computed. */
+function titleContinues(
+    content: string,
+    masked: string,
+    from: number,
+): boolean {
+    const next = content[skipWhitespace(masked, from)] ?? "";
+    return next === "+" || next === "?";
+}
+
+/** A quoted or backtick title: its inner text, or the whole expression. */
+function quotedTitle(
+    content: string,
+    masked: string,
+    start: number,
+    quote: string,
+): TitleShape {
+    const end = quotedEnd(content, start, quote);
+    if (titleContinues(content, masked, end)) {
+        return computedTitle(content, masked, start);
+    }
+    const closed = content[end - 1] === quote ? end - 1 : end;
+    return { name: content.slice(start + 1, closed) };
+}
+
+/** An identifier-led title, classified by what follows the chain. */
+function identifierTitle(
+    content: string,
+    masked: string,
+    start: number,
+): TitleShape | null {
+    const chain = IDENTIFIER_CHAIN.exec(content.slice(start));
+    if (chain === null) {
+        return null;
+    }
+    const identifier = chain[0];
+    // A body callback is not a title; a title-less declaration is left out.
+    if (identifier === "async" || identifier === "function") {
+        return null;
+    }
+    const tail = start + identifier.length;
+    // A tagged template is data, so the mask blanks it; read the raw text.
+    if (content[skipWhitespace(content, tail)] === "`") {
+        return computedTitle(content, masked, start);
+    }
+    const next = content[skipWhitespace(masked, tail)] ?? "";
+    if (next === ",") {
+        return { name: identifier };
+    }
+    if (next === "(" || titleContinues(content, masked, tail)) {
+        return computedTitle(content, masked, start);
+    }
+    if (identifier === "await") {
+        return computedTitle(content, masked, start);
+    }
+    return null;
+}
+
+/** Classify the first argument of a test declaration; `null` when title-less. */
+function javascriptTitle(
+    content: string,
+    masked: string,
+    start: number,
+): TitleShape | null {
+    const first = content[start] ?? "";
+    if (first === '"' || first === "'" || first === "`") {
+        return quotedTitle(content, masked, start, first);
+    }
+    return identifierTitle(content, masked, start);
+}
+
+/** How a declaration head marks skipping or focus, if at all. */
+function modifierFlags(prefix: string): ModifierFlags {
+    const modifier = /\b(it|test|specify)\.(skip|todo|only)\b/.exec(prefix);
+    if (modifier === null) {
+        return { skipped: false, focused: false };
+    }
+    const [, call = "", kind = ""] = modifier;
+    if (kind === "only") {
+        return { skipped: false, focused: true, focusMarker: `${call}.only` };
+    }
+    return { skipped: true, skipMarker: `${call}.${kind}`, focused: false };
+}
+
+/** The framework a JavaScript test file is written for, or `null` if none. */
+function frameworkOf(content: string): TestFramework | null {
+    if (/from\s+["']vitest["']|\bvitest\b/.test(content)) {
+        return "vitest";
+    }
+    if (/@jest\/globals|\bjest\b/.test(content)) {
+        return "jest";
+    }
+    if (/from\s+["']node:test["']|\bnode:test\b/.test(content)) {
+        return "node-test";
+    }
+    return null;
+}
+
+/**
+ * One declaration head: `it(`, `it.each(cases)(`, `test.only(` and the like.
+ * A head may not follow a `.`: `regex.test(...)` is a method call, not a test
+ * declaration, and its arguments are not titles.
+ */
+const DECLARATION_HEAD =
+    /(?<!\.)\b(it|test|specify)(?:\.\w+)?(?:\([^)]*\)|\[[^\]]*\]|`[^`]*`)?\s*\(\s*/g;
+
+/**
+ * Read every test declaration in one JavaScript/TypeScript source.
+ *
+ * @param root0 the parameter object
+ * @param root0.path Repo-relative path of the file.
+ * @param root0.content Full contents of the file.
+ * @returns Declarations in file order, title-less heads left out; empty when
+ *   the file carries no framework marker.
+ */
+export function scanTestDeclarations({
+    path,
+    content,
+}: {
+    readonly path: string;
+    readonly content: string;
+}): TestDeclaration[] {
+    const framework = frameworkOf(content);
+    if (framework === null) {
+        return [];
+    }
+    const masked = maskTestSource(content);
+    const tests: TestDeclaration[] = [];
+
+    for (const match of content.matchAll(DECLARATION_HEAD)) {
+        const index = match.index ?? 0;
+        if (!inCode(content, masked, index)) {
+            continue;
+        }
+        const head = match[0];
+        const title = javascriptTitle(content, masked, index + head.length);
+        if (title === null) {
+            continue;
+        }
+        const line = lineAt({ content, index });
+        const span = javaScriptBodySpan(masked, index);
+        const { body, maskedBody, bodyLine } = bodySlice(
+            content,
+            masked,
+            span,
+            line,
+        );
+        tests.push({
+            path,
+            line,
+            name: title.name,
+            framework,
+            ...modifierFlags(head),
+            body,
+            maskedBody,
+            bodyLine,
+        });
+    }
+    return tests;
+}

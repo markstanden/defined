@@ -20,6 +20,7 @@
 // declaration head has the same shape. The marker also matches wherever the
 // call text appears in masked code, not only at a declaration head.
 
+import { lineAt } from "./declarations.mts";
 import { maskTestSource } from "./mask.mts";
 
 /** The rule ids the always-on pass can report. */
@@ -54,17 +55,6 @@ const FOCUSED_TEST = /\b(it|test|specify)\.only\b/g;
 /** A focused suite declaration: every other suite in the file is skipped. */
 const FOCUSED_SUITE =
     /(?:describe|suite)\.only\s*\(|\bf(?:describe|suite)\s*\(/g;
-
-/** 1-based line holding the offset. */
-function lineAt({
-    content,
-    index,
-}: {
-    content: string;
-    index: number;
-}): number {
-    return content.slice(0, index).split("\n").length;
-}
 
 /** Every match of one rule in one masked source, in source order. */
 function matchFindings({
