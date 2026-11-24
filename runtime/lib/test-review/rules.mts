@@ -33,6 +33,27 @@
 // fixture string whose own line begins with a comment marker reads as a
 // comment — the scanner shares that shape.
 //
+// `no-assertions` counts the JavaScript assertion shapes in the masked body:
+// the assertion verb directly (`expect(`/`assert(`/`should(`), the verb with an
+// uppercase suffix (`assertOk(`, an assertion helper by name), and the dotted
+// statics (`assert.equal(`, `should.match(`). A helper that merely delegates
+// (`check(...)`) does not count, so a body of helpers reports. A skipped
+// declaration is left to `skipped-test`: a parked skip may legitimately carry
+// no assertion until its ticket lands, and reporting both would double the
+// defect.
+//
+// `unawaited-async-assertion` reads a block body's statements: a `.rejects`
+// assertion (or the C# `ThrowsAsync`/`ThrowAsync` shape, which the C# layer
+// will reach) that is neither awaited nor returned never executes. An
+// expression-arrow body returns implicitly, so it is exempt. The await is read
+// from the same statement, so an earlier awaited call does not excuse it.
+//
+// `swallowed-exception` reads `catch` blocks: one that neither asserts nor
+// rethrows cannot tell a wrong exception from the expected one. A flag set in
+// the catch and referenced by a later assertion in the same test is the
+// documented exception — a lexical read of flow, not a parser's. A promise
+// `.catch(...)` callback is not a catch block and is ignored.
+//
 // Deliberate ceiling (ponytail): the marker regex reads contiguous call text,
 // so `it` split from `.only` across lines reads as unfocused — the scanner's
 // declaration head has the same shape. The marker also matches wherever the
@@ -49,6 +70,9 @@ export const ALWAYS_ON_RULES = [
     "skipped-test",
     "literal-tautology",
     "commented-out-assertion",
+    "no-assertions",
+    "unawaited-async-assertion",
+    "swallowed-exception",
 ] as const;
 
 /** One always-on test-hygiene rule id. */
@@ -246,6 +270,16 @@ const COMMENT_LED = /^(?:\/\/|\/\*|#|\*|--)/;
 /** The leading comment marker and the space after it. */
 const COMMENT_MARKER = /^(?:\/\/|\/\*|#|\*|--)\s*/;
 
+/** An assertion verb inside a block, across the frameworks. */
+const ASSERTION_VERB = /\b(?:Assert|assert|expect|should|verify)\b/;
+
+/** Assertion call shapes the JavaScript frameworks share. */
+const JS_ASSERTION_CALLS: readonly RegExp[] = [
+    /\b(?:expect|assert|should)(?:[A-Z]\w*)?\s*\(/,
+    /\bassert\.\w+/,
+    /\bshould\.\w+/,
+];
+
 /** An assertion call shape inside comment text. */
 const ASSERTION_CALL =
     /\b(?:Assert|assert|expect|should|verify)(?:\.\w+\s*\(|\s*\()/;
@@ -288,6 +322,195 @@ function commentedAssertionFindings({
     });
 }
 
+/** Findings for declarations whose body makes no assertion at all. */
+function noAssertionFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (
+            body === null ||
+            declaration.skipped ||
+            JS_ASSERTION_CALLS.some((pattern) => pattern.test(body))
+        ) {
+            return [];
+        }
+        return [
+            {
+                rule: "no-assertions",
+                file: source.path,
+                line: declaration.line,
+                message: `test declaration "${declaration.name}" contains no assertion call: it cannot fail for any input`,
+            },
+        ];
+    });
+}
+
+/**
+ * Async assertion calls that execute only when awaited or returned. The call
+ * shape (`<` or `(`) keeps a regex literal or fixture string naming the
+ * assertion from triggering the rule.
+ */
+const ASYNC_ASSERTION = /\b(?:ThrowsAsync|ThrowAsync)\s*[<(]|\.rejects\b/g;
+
+/** Start of the statement containing `index`: after the last statement end. */
+function statementStart(body: string, index: number): number {
+    return (
+        Math.max(
+            body.lastIndexOf(";", index - 1),
+            body.lastIndexOf("{", index - 1),
+            body.lastIndexOf("}", index - 1),
+        ) + 1
+    );
+}
+
+/** End of the statement containing `index`, including its semicolon. */
+function statementEnd(body: string, index: number): number {
+    const end = body.indexOf(";", index);
+    return end === -1 ? body.length : end + 1;
+}
+
+/** Collapse whitespace and cap length, so evidence stays one readable line. */
+function collapse(text: string, cap = 100): string {
+    const collapsed = text.replace(/\s+/gu, " ").trim();
+    return collapsed.length > cap ? `${collapsed.slice(0, cap)}...` : collapsed;
+}
+
+/**
+ * Async assertion statements that are neither awaited nor returned, so the
+ * assertion never executes. Expression-arrow bodies return implicitly, which
+ * the runner awaits, so only block bodies are read.
+ */
+function unawaitedAssertionFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        // A delimited block body starts at its brace; an arrow expression
+        // starts at its first token and returns implicitly.
+        if (body === null || !body.startsWith("{")) {
+            return [];
+        }
+        return [...body.matchAll(ASYNC_ASSERTION)].flatMap(
+            (match): TestHygieneFinding[] => {
+                const index = match.index ?? 0;
+                const start = statementStart(body, index);
+                const prefix = body.slice(start, index);
+                if (
+                    /(?:^|[^A-Za-z0-9_$])await\b/u.test(prefix) ||
+                    /\breturn\b/u.test(prefix)
+                ) {
+                    return [];
+                }
+                return [
+                    {
+                        rule: "unawaited-async-assertion",
+                        file: source.path,
+                        line: lineInBody({
+                            body,
+                            bodyLine: declaration.bodyLine,
+                            index,
+                        }),
+                        message: `unawaited async assertion in test "${declaration.name}": "${collapse(body.slice(start, statementEnd(body, index)))}" — it never runs unless awaited or returned`,
+                    },
+                ];
+            },
+        );
+    });
+}
+
+/** A catch clause with its block. A promise `.catch(` does not match. */
+const CATCH_OPEN = /\bcatch\s*(?:(?:\([^)]*\))\s*)?\{/g;
+
+/** Index of the brace closing the one at `open`, or the last index. */
+function blockEnd(text: string, open: number): number {
+    let depth = 0;
+    for (let index = open; index < text.length; index++) {
+        if (text[index] === "{") {
+            depth++;
+        } else if (text[index] === "}") {
+            depth--;
+            if (depth === 0) {
+                return index;
+            }
+        }
+    }
+    return text.length - 1;
+}
+
+/**
+ * Whether a catch body only assigns flags and a later assertion reads one.
+ * The documented flag-then-assert exception: a lexical read, not a parser's.
+ */
+function flagThenAssert({
+    contents,
+    after,
+}: {
+    contents: string;
+    after: string;
+}): boolean {
+    if (!ASSERTION_VERB.test(after)) {
+        return false;
+    }
+    return [...contents.matchAll(/\b([A-Za-z_$][\w$]*)\s*=(?!=)/gu)].some(
+        (match) => new RegExp(`\\b${match[1] ?? ""}\\b`, "u").test(after),
+    );
+}
+
+/**
+ * Catch blocks that neither assert nor rethrow: the test passes when anything
+ * throws, including the wrong exception.
+ */
+function swallowedExceptionFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (body === null) {
+            return [];
+        }
+        return [...body.matchAll(CATCH_OPEN)].flatMap(
+            (match): TestHygieneFinding[] => {
+                const index = match.index ?? 0;
+                const open = index + match[0].length - 1;
+                const close = blockEnd(body, open);
+                const contents = body.slice(open + 1, close);
+                if (
+                    ASSERTION_VERB.test(contents) ||
+                    /\bthrow\b/u.test(contents) ||
+                    flagThenAssert({ contents, after: body.slice(close + 1) })
+                ) {
+                    return [];
+                }
+                return [
+                    {
+                        rule: "swallowed-exception",
+                        file: source.path,
+                        line: lineInBody({
+                            body,
+                            bodyLine: declaration.bodyLine,
+                            index,
+                        }),
+                        message: `swallowed exception in test "${declaration.name}": "${collapse(match[0].replace(/\{$/u, ""))}" neither asserts nor rethrows, so the test passes when anything throws`,
+                    },
+                ];
+            },
+        );
+    });
+}
+
 /** All findings from one source, in line order. */
 function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
     const masked = maskTestSource(source.content);
@@ -315,6 +538,9 @@ function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
         ...skippedFindings({ source, declarations }),
         ...tautologyFindings({ source, declarations }),
         ...commentedAssertionFindings({ source, declarations }),
+        ...noAssertionFindings({ source, declarations }),
+        ...unawaitedAssertionFindings({ source, declarations }),
+        ...swallowedExceptionFindings({ source, declarations }),
     ];
 }
 

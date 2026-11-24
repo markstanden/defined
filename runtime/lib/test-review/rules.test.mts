@@ -357,17 +357,6 @@ test("leaves different operands alone", () => {
     );
 });
 
-test("does not report a tautology quoted inside a string", () => {
-    // Arrange
-    const content = `${NODE_IMPORT}it("works", () => {\n    const text = "expect(1).toBe(1);";\n});`;
-
-    // Act
-    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
-
-    // Assert
-    assert.deepEqual(findings, []);
-});
-
 test("reports a tautology on the assertion's own line", () => {
     // Arrange
     const content =
@@ -459,11 +448,124 @@ test("does not report a comment-led line with no assertion call", () => {
     );
 });
 
-test("does not read comment-like text inside a same-line fixture string", () => {
+test("does not read rule-like text inside a same-line fixture string", () => {
+    // Arrange
+    const contents = [
+        '    const text = "expect(1).toBe(1);";',
+        '    const fixture = "// expect(x).toBe(1);";',
+    ].map(
+        (line) =>
+            `${NODE_IMPORT}it("works", () => {\n${line}\n    expect(value).toBe(1);\n});`,
+    );
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
+
+test("reports a test whose body holds no assertion call", () => {
+    // Arrange
+    const content = `${NODE_IMPORT}it("works", () => {\n    setup();\n});`;
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => ({
+            rule: finding.rule,
+            line: finding.line,
+        })),
+        [{ rule: "no-assertions", line: 2 }],
+    );
+    assert.match(findings[0]?.message ?? "", /works/u);
+});
+
+test("counts each assertion shape as an assertion", () => {
+    // Arrange
+    const calls = [
+        "expect(value).toBe(1);",
+        "assert.equal(value, 1);",
+        "assertOk(value);",
+        "shouldMatch(value);",
+    ].map((call) => `${NODE_IMPORT}it("works", () => {\n    ${call}\n});`);
+
+    // Act
+    const found = calls.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        calls.map(() => []),
+    );
+});
+
+test("does not count a lookalike call as an assertion", () => {
+    // Arrange
+    const calls = [
+        "expected(value);",
+        "assertion(value);",
+        "shoulder(value);",
+    ].map((call) => `${NODE_IMPORT}it("works", () => {\n    ${call}\n});`);
+
+    // Act
+    const found = calls.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        calls.map(() => ["no-assertions"]),
+    );
+});
+
+test("leaves a skipped declaration to the skip defect", () => {
+    // Arrange
+    const contents = [
+        `${NODE_IMPORT}it.skip("works", () => {});`,
+        `${NODE_IMPORT}// parked: #123\nit.skip("works", () => {});`,
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        [["skipped-test"], []],
+    );
+});
+
+test("does not report a declaration with no delimited body", () => {
+    // Arrange
+    const content = `${NODE_IMPORT}it("works", setup);`;
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("counts an assertion nested inside a block", () => {
     // Arrange
     const content =
         `${NODE_IMPORT}it("works", () => {\n` +
-        '    const fixture = "// expect(x).toBe(1);";\n' +
+        "    if (ready) {\n" +
+        "        expect(value).toBe(1);\n" +
+        "    }\n" +
         "});";
 
     // Act
@@ -471,4 +573,242 @@ test("does not read comment-like text inside a same-line fixture string", () => 
 
     // Assert
     assert.deepEqual(findings, []);
+});
+
+test("reports an unawaited rejects assertion at its statement line", () => {
+    // Arrange
+    const content =
+        `${NODE_IMPORT}it("works", async () => {\n` +
+        "    const sut = build();\n" +
+        "    expect(sut.run()).rejects.toThrow();\n" +
+        "});";
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => ({
+            rule: finding.rule,
+            line: finding.line,
+        })),
+        [{ rule: "unawaited-async-assertion", line: 4 }],
+    );
+    assert.match(
+        findings[0]?.message ?? "",
+        /rejects\.toThrow|neither awaited nor returned/u,
+    );
+});
+
+test("stays silent when the assertions await or return the call", () => {
+    // Arrange
+    const statements = [
+        "await expect(sut.run()).rejects.toThrow();",
+        "return expect(sut.run()).rejects.toThrow();",
+    ].map(
+        (statement) =>
+            `${NODE_IMPORT}it("works", async () => {\n    ${statement}\n});`,
+    );
+
+    // Act
+    const found = statements.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        statements.map(() => []),
+    );
+});
+
+test("stays silent for an expression-arrow body", () => {
+    // Arrange
+    const content = `${NODE_IMPORT}it("works", () => expect(sut.run()).rejects.toThrow());`;
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("does not read a rejects assertion in a comment or string", () => {
+    // Arrange
+    const cases = [
+        {
+            line: "// expect(sut.run()).rejects.toThrow();",
+            rules: ["commented-out-assertion"],
+        },
+        {
+            line: 'const text = "expect(sut.run()).rejects.toThrow();";',
+            rules: [],
+        },
+    ];
+
+    // Act
+    const found = cases.map((row) =>
+        reviewTestSources([
+            {
+                path: "a.test.ts",
+                content: `${NODE_IMPORT}it("works", () => {\n    ${row.line}\n    expect(value).toBe(1);\n});`,
+            },
+        ]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        cases.map((row) => row.rules),
+    );
+});
+
+test("does not inherit an await from an earlier statement", () => {
+    // Arrange
+    const content =
+        `${NODE_IMPORT}it("works", async () => {\n` +
+        "    await sut.ready();\n" +
+        "    expect(sut.run()).rejects.toThrow();\n" +
+        "});";
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["unawaited-async-assertion"],
+    );
+});
+
+test("reports an empty catch in a test body", () => {
+    // Arrange
+    const content =
+        `${NODE_IMPORT}it("works", () => {\n` +
+        "    expect(sut.ready).toBe(true);\n" +
+        "    try {\n" +
+        "        sut.run();\n" +
+        "    } catch (error) {\n" +
+        "    }\n" +
+        "});";
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => ({
+            rule: finding.rule,
+            line: finding.line,
+        })),
+        [{ rule: "swallowed-exception", line: 6 }],
+    );
+    assert.match(findings[0]?.message ?? "", /catch \(error\)/u);
+});
+
+test("stays silent when the catch asserts or rethrows", () => {
+    // Arrange
+    const bodies = [
+        "    } catch (error) {\n        expect(error).toBeDefined();\n    }",
+        "    } catch (error) {\n        throw error;\n    }",
+        "    } catch {\n        throw;\n    }",
+    ].map(
+        (body) =>
+            `${NODE_IMPORT}it("works", () => {\n` +
+            "    expect(sut.ready).toBe(true);\n" +
+            "    try {\n" +
+            "        sut.run();\n" +
+            `${body}\n` +
+            "});",
+    );
+
+    // Act
+    const found = bodies.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        bodies.map(() => []),
+    );
+});
+
+test("stays silent for a flag set in the catch and asserted afterwards", () => {
+    // Arrange
+    const content =
+        `${NODE_IMPORT}it("works", () => {\n` +
+        "    let threw = false;\n" +
+        "    try {\n" +
+        "        sut.run();\n" +
+        "    } catch (error) {\n" +
+        "        threw = true;\n" +
+        "    }\n" +
+        "    expect(threw).toBe(true);\n" +
+        "});";
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports a catch that only logs", () => {
+    // Arrange
+    const content =
+        `${NODE_IMPORT}it("works", () => {\n` +
+        "    expect(sut.ready).toBe(true);\n" +
+        "    try {\n" +
+        "        sut.run();\n" +
+        "    } catch (error) {\n" +
+        "        console.error(error);\n" +
+        "    }\n" +
+        "});";
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["swallowed-exception"],
+    );
+});
+
+test("does not treat a promise catch callback as a catch block", () => {
+    // Arrange
+    const content =
+        `${NODE_IMPORT}it("works", () => {\n` +
+        "    expect(sut.ready).toBe(true);\n" +
+        "    return sut.run().catch(() => {});\n" +
+        "});";
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("does not read a catch block in a comment or string", () => {
+    // Arrange
+    const lines = [
+        "// } catch (error) { }",
+        'const text = "} catch (error) { }";',
+    ].map(
+        (line) =>
+            `${NODE_IMPORT}it("works", () => {\n    ${line}\n    expect(value).toBe(1);\n});`,
+    );
+
+    // Act
+    const found = lines.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        lines.map(() => []),
+    );
 });
