@@ -1093,20 +1093,18 @@ test("reports every determinism rule in review mode and none in tracked mode", (
     }));
 
     // Act
-    const tracked = sources.map((source) =>
-        reviewRulesOf(reviewTestSources([source])),
-    );
-    const reviewed = sources.map((source) =>
-        reviewRulesOf(reviewTestSources([source], { review: true })),
-    );
+    const found = sources.map((source) => ({
+        tracked: reviewRulesOf(reviewTestSources([source])),
+        reviewed: reviewRulesOf(reviewTestSources([source], { review: true })),
+    }));
 
     // Assert
     assert.deepEqual(
-        tracked,
+        found.map((item) => item.tracked),
         cases.map(() => []),
     );
     assert.deepEqual(
-        reviewed,
+        found.map((item) => item.reviewed),
         cases.map(([rule]) => [rule]),
     );
 });

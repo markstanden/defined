@@ -195,8 +195,10 @@ test("fails a named review lead and stays silent in tracked mode", async () => {
         });
 
     // Act
-    const tracked = await run();
-    const reviewed = await run(["lead.test.ts"]);
+    const [tracked, reviewed] = await Promise.all([
+        run(),
+        run(["lead.test.ts"]),
+    ]);
 
     // Assert
     assert.equal(tracked.status, "pass");

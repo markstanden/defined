@@ -236,17 +236,20 @@ test("explainTopic_unknownTopic_throwsAConciseError", async () => {
 
 test("explainTopic_everyStepIdResolves", async () => {
     // Arrange — one case per known step id.
-    for (const topic of STEP_IDS) {
-        // Act
-        const e = await explainTopic({
-            topic,
-            repoRoot: "/repo",
-            deps: fakeDeps(),
-        });
+    const topics = STEP_IDS;
 
-        // Assert
-        assert.equal(e.kind, "step", topic);
-    }
+    // Act
+    const explanations = await Promise.all(
+        topics.map((topic) =>
+            explainTopic({ topic, repoRoot: "/repo", deps: fakeDeps() }),
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(
+        explanations.map((explanation) => explanation.kind),
+        topics.map(() => "step"),
+    );
 });
 
 test("renderExplanation_isOneCompactJsonLine", async () => {
