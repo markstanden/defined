@@ -1842,3 +1842,188 @@ test("stays silent for a property runner and a receiver-qualified assert", () =>
         bodies.map(() => []),
     );
 });
+
+/** One node:test declaration with a note on the line above it. */
+function notedTest(note: string, body: string): string {
+    return `import { test } from "node:test";\n${note}\ntest("waits", () => {\n${body}\n});`;
+}
+
+/** A labelled body whose act is the given statement. */
+function labelledBody(act: string): string {
+    return [
+        "    // Arrange",
+        "    const started = 1;",
+        "    // Act",
+        `    ${act}`,
+        "    // Assert",
+        "    assert.ok(started);",
+    ].join("\n");
+}
+
+test("a why-note suppresses its review lead and is not itself a finding", () => {
+    // Arrange
+    const content = notedTest(
+        "// Why use sleep here: the delay proves the polling loop gives up",
+        labelledBody("await sleep(5);"),
+    );
+
+    // Act
+    const findings = reviewTestSources(
+        [{ path: "a.test.ts", content }],
+        { review: true },
+    );
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        [],
+    );
+});
+
+test("verify reports the lead and no note, whatever the note says", () => {
+    // Arrange
+    const content = notedTest(
+        "// Why use focused-test here: the focused run is intentional",
+        "    // Act & Assert\n    assert.ok(true);",
+    ).replace('test("waits"', "test.only(\"waits\"");
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["focused-test"],
+    );
+});
+
+test("an always-on attempt is a suppression-note fault in review mode", () => {
+    // Arrange
+    const content = notedTest(
+        "// Why use focused-test here: the focused run is intentional",
+        "    // Act & Assert\n    assert.ok(true);",
+    ).replace('test("waits"', "test.only(\"waits\"");
+
+    // Act
+    const faults = findingsOf(content, "suppression-note").filter((finding) =>
+        finding.message.includes("always-on"),
+    );
+
+    // Assert
+    assert.deepEqual(
+        faults.map((finding) => finding.line),
+        [2],
+    );
+});
+
+test("a misspelt or wrong-case id suppresses nothing and reports", () => {
+    // Arrange
+    const notes = [
+        "// Why use sleep-here: the delay proves the polling loop gives up",
+        "// Why use Sleep here: the delay proves the polling loop gives up",
+    ];
+    const contents = notes.map((note) =>
+        notedTest(note, labelledBody("await sleep(5);")),
+    );
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }], {
+            review: true,
+        }).map((finding) => finding.rule),
+    );
+
+    // Assert
+    assert.deepEqual(found, notes.map(() => ["suppression-note", "sleep"]));
+});
+
+test("a vacuous reason reports and suppresses nothing", () => {
+    // Arrange
+    const content = notedTest(
+        "// Why use sleep here: intentional",
+        labelledBody("await sleep(5);"),
+    );
+
+    // Act
+    const findings = reviewTestSources(
+        [{ path: "a.test.ts", content }],
+        { review: true },
+    );
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["suppression-note", "sleep"],
+    );
+});
+
+test("notes naming an intent lead and the alias are accepted and inert", () => {
+    // Arrange
+    const notes = [
+        "// Why use computed-title here: the title names the generated case",
+        "// Why not use property here: rows are fixed boundary cases, not a law",
+    ];
+    const contents = notes.map((note) =>
+        notedTest(note, labelledBody("assert.ok(started);")),
+    );
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }], {
+            review: true,
+        }).map((finding) => finding.rule),
+    );
+
+    // Assert
+    assert.deepEqual(found, notes.map(() => []));
+});
+
+test("a note separated by a blank line suppresses nothing", () => {
+    // Arrange
+    const content = [
+        'import { test } from "node:test";',
+        "// Why use sleep here: the delay proves the polling loop gives up",
+        "",
+        'test("waits", () => {',
+        labelledBody("await sleep(5);"),
+        "});",
+    ].join("\n");
+
+    // Act
+    const findings = reviewTestSources(
+        [{ path: "a.test.ts", content }],
+        { review: true },
+    );
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["sleep"],
+    );
+});
+
+test("a note above one declaration does not suppress another", () => {
+    // Arrange
+    const content = [
+        'import { test } from "node:test";',
+        "// Why use sleep here: the delay proves the polling loop gives up",
+        'test("clean", () => {',
+        labelledBody("assert.ok(started);"),
+        "});",
+        'test("waits", () => {',
+        labelledBody("await sleep(5);"),
+        "});",
+    ].join("\n");
+
+    // Act
+    const findings = reviewTestSources(
+        [{ path: "a.test.ts", content }],
+        { review: true },
+    );
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["sleep"],
+    );
+});

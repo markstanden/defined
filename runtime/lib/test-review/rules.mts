@@ -45,6 +45,14 @@
 // (`compound-assertion`). An else-if chain fires both conditional and
 // else-branch rules, as the scanner does.
 //
+// A review lead is suppressed by a why-note in the contiguous comment block
+// above its declaration (`lib/test-review/suppression.mts` owns the grammar):
+// `Why use <rule-id> here: <reason>`. A note naming an unknown or wrong-case
+// id, an always-on defect, or giving a vacuous reason is itself a finding
+// (`suppression-note`) and suppresses nothing; a note naming an intent lead is
+// accepted and inert. Notes are read in review mode only, so `verify` and
+// `comply` never see one and an always-on defect has no escape.
+//
 // `literal-tautology` reads each declaration's masked body: a comparison of a
 // literal with itself, or an expression with itself, cannot fail for any input.
 // `commented-out-assertion` reads the raw body lines: an assertion left in a
@@ -107,6 +115,12 @@ import { lineAt, scanTestDeclarations } from "./declarations.mts";
 import type { TestDeclaration, TestFramework } from "./declarations.mts";
 import { maskTestSource } from "./mask.mts";
 import {
+    commentBlockAbove,
+    isVacuous,
+    readNote,
+    resolveRule,
+} from "./suppression.mts";
+import {
     isEnvironmentPath,
     readCollectionRequest,
     readEnvironmentVariables,
@@ -137,6 +151,7 @@ export const REVIEW_RULES = [
     "conditional-assertion",
     "assertion-in-loop",
     "else-branch-assertion",
+    "suppression-note",
     "ambient-clock",
     "sleep",
     "randomness",
@@ -193,6 +208,92 @@ export interface TestHygieneFinding {
     readonly message: string;
 }
 
+/** One declaration with the review rules its why-notes suppress. */
+interface ReviewedDeclaration {
+    readonly declaration: TestDeclaration;
+    readonly suppressed: ReadonlySet<string>;
+}
+
+/** Tier membership as exact-case sets, so a wrong-case id is not a rule. */
+const ALWAYS_ON_IDS: ReadonlySet<string> = new Set(ALWAYS_ON_RULES);
+const REVIEW_IDS: ReadonlySet<string> = new Set(REVIEW_RULES);
+const LEAD_IDS: ReadonlySet<string> = new Set(LEAD_RULES);
+
+/** One suppression-note fault at the note's line. */
+function noteFault({
+    file,
+    line,
+    message,
+}: {
+    file: string;
+    line: number;
+    message: string;
+}): TestHygieneFinding {
+    return { rule: "suppression-note", file, line, message };
+}
+
+/**
+ * The notes above one declaration, split into the rules they suppress and the
+ * faults they carry. A note naming an always-on defect, an unknown id or a
+ * vacuous reason suppresses nothing and reports at its own line; a note naming
+ * a review id suppresses that rule for this declaration; a note naming an
+ * intent lead is accepted and inert.
+ */
+function readSuppressions({
+    file,
+    content,
+    line,
+}: {
+    file: string;
+    content: string;
+    line: number;
+}): { suppressed: ReadonlySet<string>; faults: TestHygieneFinding[] } {
+    const suppressed = new Set<string>();
+    const faults: TestHygieneFinding[] = [];
+    for (const entry of commentBlockAbove({ content, line })) {
+        const note = readNote(entry.text);
+        if (note === null) {
+            continue;
+        }
+        const rule = resolveRule(note.rule);
+        if (ALWAYS_ON_IDS.has(rule)) {
+            faults.push(
+                noteFault({
+                    file,
+                    line: entry.line,
+                    message: `suppression note for "${note.rule}" tries to suppress an always-on defect: always-on defects have no escape`,
+                }),
+            );
+            continue;
+        }
+        if (!REVIEW_IDS.has(rule) && !LEAD_IDS.has(rule)) {
+            faults.push(
+                noteFault({
+                    file,
+                    line: entry.line,
+                    message: `suppression note names unknown rule id "${note.rule}": the note suppresses nothing`,
+                }),
+            );
+            continue;
+        }
+        if (isVacuous(note.reason)) {
+            faults.push(
+                noteFault({
+                    file,
+                    line: entry.line,
+                    message: `suppression note for "${note.rule}" gives no reason: state how the construct is controlled or why the rule does not apply`,
+                }),
+            );
+            continue;
+        }
+        if (REVIEW_IDS.has(rule)) {
+            suppressed.add(rule);
+        }
+    }
+    return { suppressed, faults };
+}
+
+
 /** A focused test call: every other test in the suite is skipped. */
 const FOCUSED_TEST = /\b(it|test|specify)\.only\b/g;
 
@@ -241,17 +342,11 @@ function parkedSkip({
     content: string;
     line: number;
 }): boolean {
-    const lines = content.split("\n");
-    const context = [lines[line - 1] ?? ""];
-    for (let index = line - 2; index >= 0; index--) {
-        const raw = lines[index] ?? "";
-        const trimmed = raw.trim();
-        if (trimmed === "" || !/^(?:\/\/|\/\*|\*|\*\/|\[)/u.test(trimmed)) {
-            break;
-        }
-        context.unshift(raw);
-    }
-    return TICKET.test(context.join("\n"));
+    const own = content.split("\n")[line - 1] ?? "";
+    const block = commentBlockAbove({ content, line }).map(
+        (entry) => entry.text,
+    );
+    return TICKET.test([own, ...block].join("\n"));
 }
 
 /** Findings for skipped declarations that carry no reason or ticket. */
@@ -381,29 +476,33 @@ const DETERMINISM_RULES: ReadonlyArray<{
 /** Determinism leads in one source's declarations, in body order. */
 function determinismFindings({
     source,
-    declarations,
+    entries,
 }: {
     source: TestReviewSource;
-    declarations: readonly TestDeclaration[];
+    entries: readonly ReviewedDeclaration[];
 }): TestHygieneFinding[] {
-    return declarations.flatMap((declaration): TestHygieneFinding[] => {
-        const body = declaration.maskedBody;
-        if (body === null) {
-            return [];
-        }
-        return DETERMINISM_RULES.flatMap((rule): TestHygieneFinding[] =>
-            [...body.matchAll(rule.pattern)].map((match) => ({
-                rule: rule.rule,
-                file: source.path,
-                line: lineInBody({
-                    body,
-                    bodyLine: declaration.bodyLine,
-                    index: match.index ?? 0,
-                }),
-                message: `${rule.subject} in test "${declaration.name}": "${collapse(match[0])}" — ${rule.consequence}`,
-            })),
-        );
-    });
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            const body = declaration.maskedBody;
+            if (body === null) {
+                return [];
+            }
+            return DETERMINISM_RULES.flatMap((rule): TestHygieneFinding[] =>
+                suppressed.has(rule.rule)
+                    ? []
+                    : [...body.matchAll(rule.pattern)].map((match) => ({
+                          rule: rule.rule,
+                          file: source.path,
+                          line: lineInBody({
+                              body,
+                              bodyLine: declaration.bodyLine,
+                              index: match.index ?? 0,
+                          }),
+                          message: `${rule.subject} in test "${declaration.name}": "${collapse(match[0])}" — ${rule.consequence}`,
+                      })),
+            );
+        },
+    );
 }
 
 
@@ -1193,15 +1292,16 @@ function assertionFinding({
 
 /** Assertions inside a conditional block or a braceless guard. */
 function conditionalAssertionFindings({
-    declarations,
+    entries,
 }: {
-    declarations: readonly TestDeclaration[];
+    entries: readonly ReviewedDeclaration[];
 }): TestHygieneFinding[] {
-    return declarations.flatMap((declaration): TestHygieneFinding[] => {
-        const body = declaration.maskedBody;
-        if (body === null) {
-            return [];
-        }
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            const body = declaration.maskedBody;
+            if (body === null || suppressed.has("conditional-assertion")) {
+                return [];
+            }
         const blocks = assertionBlocks({
             body,
             pattern: CONDITIONAL_OPEN,
@@ -1229,15 +1329,16 @@ function conditionalAssertionFindings({
 
 /** Assertions inside a loop body or a forEach callback. */
 function loopAssertionFindings({
-    declarations,
+    entries,
 }: {
-    declarations: readonly TestDeclaration[];
+    entries: readonly ReviewedDeclaration[];
 }): TestHygieneFinding[] {
-    return declarations.flatMap((declaration): TestHygieneFinding[] => {
-        const body = declaration.maskedBody;
-        if (body === null) {
-            return [];
-        }
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            const body = declaration.maskedBody;
+            if (body === null || suppressed.has("assertion-in-loop")) {
+                return [];
+            }
         const loops = assertionBlocks({
             body,
             pattern: LOOP_OPEN,
@@ -1263,15 +1364,16 @@ function loopAssertionFindings({
 
 /** Assertions in an else branch: the outcome depends on the branch taken. */
 function elseBranchFindings({
-    declarations,
+    entries,
 }: {
-    declarations: readonly TestDeclaration[];
+    entries: readonly ReviewedDeclaration[];
 }): TestHygieneFinding[] {
-    return declarations.flatMap((declaration): TestHygieneFinding[] => {
-        const body = declaration.maskedBody;
-        if (body === null) {
-            return [];
-        }
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            const body = declaration.maskedBody;
+            if (body === null || suppressed.has("else-branch-assertion")) {
+                return [];
+            }
         const blocks = assertionBlocks({
             body,
             pattern: ELSE_BLOCK,
@@ -1303,15 +1405,16 @@ function elseBranchFindings({
 
 /** Two conditions joined in one boolean assertion: one ambiguous failure. */
 function compoundAssertionFindings({
-    declarations,
+    entries,
 }: {
-    declarations: readonly TestDeclaration[];
+    entries: readonly ReviewedDeclaration[];
 }): TestHygieneFinding[] {
-    return declarations.flatMap((declaration): TestHygieneFinding[] => {
-        const body = declaration.maskedBody;
-        if (body === null) {
-            return [];
-        }
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            const body = declaration.maskedBody;
+            if (body === null || suppressed.has("compound-assertion")) {
+                return [];
+            }
         return [...body.matchAll(BOOLEAN_ASSERTION)].flatMap(
             (match): TestHygieneFinding[] => {
                 const index = match.index ?? 0;
@@ -1340,29 +1443,35 @@ function compoundAssertionFindings({
 /** One source's structure leads: phase coverage and the act region's shape. */
 function structureFindings({
     source,
-    declarations,
+    entries,
 }: {
     source: TestReviewSource;
-    declarations: readonly TestDeclaration[];
+    entries: readonly ReviewedDeclaration[];
 }): TestHygieneFinding[] {
-    return declarations.flatMap((declaration): TestHygieneFinding[] => {
-        // A delimited block is the only body a label can mark.
-        if (
-            declaration.body === null ||
-            declaration.maskedBody === null ||
-            !declaration.body.startsWith("{")
-        ) {
-            return [];
-        }
-        const entries = labelLines(declaration.body);
-        const found = phasesFound(entries);
-        return [
-            missingStructureFinding(declaration, entries, found),
-            multiStatementActFinding(declaration, entries),
-        ].filter(
-            (finding): finding is TestHygieneFinding => finding !== null,
-        );
-    });
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            // A delimited block is the only body a label can mark.
+            if (
+                declaration.body === null ||
+                declaration.maskedBody === null ||
+                !declaration.body.startsWith("{")
+            ) {
+                return [];
+            }
+            const labels = labelLines(declaration.body);
+            const found = phasesFound(labels);
+            return [
+                suppressed.has("missing-structure")
+                    ? null
+                    : missingStructureFinding(declaration, labels, found),
+                suppressed.has("multi-statement-act")
+                    ? null
+                    : multiStatementActFinding(declaration, labels),
+            ].filter(
+                (finding): finding is TestHygieneFinding => finding !== null,
+            );
+        },
+    );
 }
 
 /** All findings from one source, in line order. */
@@ -1375,6 +1484,19 @@ function sourceFindings(
         path: source.path,
         content: source.content,
     });
+    const suppressions = declarations.map((declaration) =>
+        readSuppressions({
+            file: source.path,
+            content: source.content,
+            line: declaration.line,
+        }),
+    );
+    const entries: ReviewedDeclaration[] = declarations.map(
+        (declaration, index) => ({
+            declaration,
+            suppressed: suppressions[index]?.suppressed ?? new Set(),
+        }),
+    );
     return [
         ...collectionFindings(source),
         ...environmentFindings(source),
@@ -1401,12 +1523,17 @@ function sourceFindings(
         ...noAssertionFindings({ source, declarations }),
         ...unawaitedAssertionFindings({ source, declarations }),
         ...swallowedExceptionFindings({ source, declarations }),
-        ...(review ? structureFindings({ source, declarations }) : []),
-        ...(review ? conditionalAssertionFindings({ declarations }) : []),
-        ...(review ? loopAssertionFindings({ declarations }) : []),
-        ...(review ? elseBranchFindings({ declarations }) : []),
-        ...(review ? compoundAssertionFindings({ declarations }) : []),
-        ...(review ? determinismFindings({ source, declarations }) : []),
+        ...(review
+            ? [
+                  ...suppressions.flatMap((entry) => entry.faults),
+                  ...structureFindings({ source, entries }),
+                  ...conditionalAssertionFindings({ entries }),
+                  ...loopAssertionFindings({ entries }),
+                  ...elseBranchFindings({ entries }),
+                  ...compoundAssertionFindings({ entries }),
+                  ...determinismFindings({ source, entries }),
+              ]
+            : []),
     ];
 }
 
