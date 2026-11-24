@@ -111,3 +111,6 @@ non-goal)](issues/92-tailwind-position.md). Deep dives below.
 - [`runtime/coverage-boundary-property-tests.md`](runtime/coverage-boundary-property-tests.md)
   — the exact-boundary coverage defect, the property test that found it, and
   the dev-dependency restore inside the container.
+- [`runtime/warm-copy-stability.md`](runtime/warm-copy-stability.md) — the
+  read-only copy race: the stat bracket, the raced-pass error and the
+  coverage-scoped diagnostics hint (#67).
