@@ -21,12 +21,25 @@
 // block above it parks the skip; a C# `Skip = "…"` or PHPUnit
 // `markTestSkipped("…")` reason will too once those stacks land.
 //
+// `literal-tautology` reads each declaration's masked body: a comparison of a
+// literal with itself, or an expression with itself, cannot fail for any input.
+// `commented-out-assertion` reads the raw body lines: an assertion left in a
+// comment never runs, so nothing is checked at that point. The oracle's rules
+// for other stacks (C#, PHPUnit, Python) land with those declaration layers.
+//
+// The tautology patterns cover the Jest/Vitest `expect` shapes; the first
+// pattern to claim a position wins, so a literal compared with itself reports
+// once, as a literal. A comment-led line is read from the raw body, so a
+// fixture string whose own line begins with a comment marker reads as a
+// comment — the scanner shares that shape.
+//
 // Deliberate ceiling (ponytail): the marker regex reads contiguous call text,
 // so `it` split from `.only` across lines reads as unfocused — the scanner's
 // declaration head has the same shape. The marker also matches wherever the
 // call text appears in masked code, not only at a declaration head.
 
 import { lineAt, scanTestDeclarations } from "./declarations.mts";
+import type { TestDeclaration } from "./declarations.mts";
 import { maskTestSource } from "./mask.mts";
 
 /** The rule ids the always-on pass can report. */
@@ -34,6 +47,8 @@ export const ALWAYS_ON_RULES = [
     "focused-test",
     "focused-suite",
     "skipped-test",
+    "literal-tautology",
+    "commented-out-assertion",
 ] as const;
 
 /** One always-on test-hygiene rule id. */
@@ -116,11 +131,14 @@ function parkedSkip({
 }
 
 /** Findings for skipped declarations that carry no reason or ticket. */
-function skippedFindings(source: TestReviewSource): TestHygieneFinding[] {
-    return scanTestDeclarations({
-        path: source.path,
-        content: source.content,
-    }).flatMap((declaration): TestHygieneFinding[] => {
+function skippedFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
         if (
             !declaration.skipped ||
             parkedSkip({ content: source.content, line: declaration.line })
@@ -138,9 +156,145 @@ function skippedFindings(source: TestReviewSource): TestHygieneFinding[] {
     });
 }
 
+/**
+ * Literal-only tautologies matched in a declaration's masked body. A
+ * comparison that cannot fail for any input proves nothing.
+ */
+const TAUTOLOGY_RULES: ReadonlyArray<{
+    readonly pattern: RegExp;
+    readonly derivation: string;
+}> = [
+    {
+        pattern:
+            /\bexpect\s*\(\s*(true|false|-?\d+(?:\.\d+)?)\s*\)\s*\.to(?:Be|Equal)\s*\(\s*\1\s*\)/g,
+        derivation: "both operands of the assertion are the same literal",
+    },
+    {
+        pattern:
+            /\bexpect\s*\(\s*([\w.]+)\s*\)\s*\.to(?:Be|Equal)\s*\(\s*\1\s*\)/g,
+        derivation: "both operands are the same expression",
+    },
+];
+
+/** 1-based line of an offset inside a declaration's body. */
+function lineInBody({
+    body,
+    bodyLine,
+    index,
+}: {
+    body: string;
+    bodyLine: number;
+    index: number;
+}): number {
+    let line = bodyLine;
+    for (let i = 0; i < index; i++) {
+        if (body[i] === "\n") {
+            line++;
+        }
+    }
+    return line;
+}
+
+/**
+ * Tautological assertions in one source's declarations.
+ *
+ * The first pattern to claim a position wins, so a literal compared with
+ * itself reports once, as a literal.
+ */
+function tautologyFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (body === null) {
+            return [];
+        }
+        const claimed = new Set<number>();
+        return TAUTOLOGY_RULES.flatMap((rule): TestHygieneFinding[] =>
+            [...body.matchAll(rule.pattern)].flatMap(
+                (match): TestHygieneFinding[] => {
+                    const index = match.index ?? 0;
+                    if (claimed.has(index)) {
+                        return [];
+                    }
+                    claimed.add(index);
+                    return [
+                        {
+                            rule: "literal-tautology",
+                            file: source.path,
+                            line: lineInBody({
+                                body,
+                                bodyLine: declaration.bodyLine,
+                                index,
+                            }),
+                            message: `literal tautology in test "${declaration.name}": ${rule.derivation}, so it cannot fail`,
+                        },
+                    ];
+                },
+            ),
+        );
+    });
+}
+
+/** A comment-led body line that still carries an assertion call. */
+const COMMENT_LED = /^(?:\/\/|\/\*|#|\*|--)/;
+
+/** The leading comment marker and the space after it. */
+const COMMENT_MARKER = /^(?:\/\/|\/\*|#|\*|--)\s*/;
+
+/** An assertion call shape inside comment text. */
+const ASSERTION_CALL =
+    /\b(?:Assert|assert|expect|should|verify)(?:\.\w+\s*\(|\s*\()/;
+
+/**
+ * Assertion calls left behind in comments inside one source's declarations.
+ * Only comment-led lines are read, so text that merely resembles a comment
+ * inside a fixture string cannot trigger the rule.
+ */
+function commentedAssertionFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.body;
+        if (body === null) {
+            return [];
+        }
+        return body.split("\n").flatMap((raw, offset) => {
+            const trimmed = raw.trim();
+            if (!COMMENT_LED.test(trimmed)) {
+                return [];
+            }
+            const text = trimmed.replace(COMMENT_MARKER, "");
+            if (!ASSERTION_CALL.test(text)) {
+                return [];
+            }
+            return [
+                {
+                    rule: "commented-out-assertion",
+                    file: source.path,
+                    line: declaration.bodyLine + offset,
+                    message: `commented-out assertion in test "${declaration.name}": "${text}" — the assertion never runs`,
+                },
+            ];
+        });
+    });
+}
+
 /** All findings from one source, in line order. */
 function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
     const masked = maskTestSource(source.content);
+    const declarations = scanTestDeclarations({
+        path: source.path,
+        content: source.content,
+    });
     return [
         ...matchFindings({
             source,
@@ -158,7 +312,9 @@ function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
             message: (marker) =>
                 `focused suite declaration "${marker}": every other suite in the file is skipped`,
         }),
-        ...skippedFindings(source),
+        ...skippedFindings({ source, declarations }),
+        ...tautologyFindings({ source, declarations }),
+        ...commentedAssertionFindings({ source, declarations }),
     ];
 }
 
