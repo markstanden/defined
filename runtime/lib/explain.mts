@@ -57,6 +57,7 @@ export const STEP_IDS: readonly string[] = [
     "node",
     "eslint",
     "purity",
+    "test-hygiene",
     "node-checks",
     "node-coverage",
     "dotnet",
@@ -158,6 +159,12 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
         docRel: "node-purity.md",
         notice: "opt-in pure modules and command/query contracts from .defined.json purity",
         owner: purityOwner,
+    },
+    "test-hygiene": {
+        kind: "step",
+        docRel: "testing/test-review.md",
+        notice: "always-on test-hygiene defects: does the test run, and can it fail",
+        owner: house("runtime/lib/test-review/"),
     },
     "node-checks": {
         kind: "step",
@@ -282,6 +289,47 @@ const YAMLLINT_RULES = new Set([
     "quoted-strings",
 ]);
 
+/** The test-hygiene rule ids documented in standards/testing/test-review.md. */
+const TEST_REVIEW_RULES: ReadonlySet<string> = new Set([
+    "focused-test",
+    "focused-suite",
+    "theory-without-data",
+    "unawaited-async-assertion",
+    "no-assertions",
+    "literal-tautology",
+    "commented-out-assertion",
+    "swallowed-exception",
+    "skipped-test",
+    "no-tests",
+    "hardcoded-host",
+    "plaintext-credential",
+    "unlabelled-secret-var",
+    "missing-structure",
+    "multi-statement-act",
+    "compound-assertion",
+    "conditional-assertion",
+    "assertion-in-loop",
+    "else-branch-assertion",
+    "ambient-clock",
+    "sleep",
+    "randomness",
+    "ambient-environment",
+    "ambient-locale",
+    "real-network",
+    "real-filesystem",
+    "process-spawn",
+    "debug-output",
+    "identical-body-shape",
+    "single-row-parameterised",
+    "literal-expectation",
+    "computed-expectation",
+    "computed-title",
+    "property-trigger-unmet",
+    "single-line-summary",
+    "status-only-tests",
+    "legacy-bru-present",
+]);
+
 const SHELLCHECK_RE = /^SC\d{3,4}$/u;
 const REGEXP_RE = /^regexp\/.+$/u;
 const JSDOC_RE = /^jsdoc\/.+$/u;
@@ -312,6 +360,11 @@ const RULE_ENTRIES: Record<string, TopicEntry> = {
         docRel: "node-purity.md",
         owner: purityOwner,
     },
+    "test-review": {
+        kind: "rule",
+        docRel: "testing/test-review.md",
+        owner: house("runtime/lib/test-review/"),
+    },
 };
 
 /** Resolve a raw topic to its entry, or null when nothing recognises it. */
@@ -340,6 +393,9 @@ function resolveTopic(
     if (PURITY_RULE_RE.test(topic)) {
         return { topic, entry: RULE_ENTRIES.purity! };
     }
+    if (TEST_REVIEW_RULES.has(topic)) {
+        return { topic, entry: RULE_ENTRIES["test-review"]! };
+    }
     if (topic === "@typescript-eslint/naming-convention") {
         return { topic, entry: RULE_ENTRIES["naming-convention"]! };
     }
@@ -354,7 +410,8 @@ function unknownTopic(raw: string): Error {
             "(line-length, document-start, truthy, comments, …), eslint " +
             "complexity, regexp/<rule>, jsdoc/<rule>, " +
             "@typescript-eslint/naming-convention, defined/pure-module, " +
-            "defined/cqs-command, defined/cqs-query, defined/cqs-targets",
+            "defined/cqs-command, defined/cqs-query, defined/cqs-targets, " +
+            "and the test-review rule ids (standards/testing/test-review.md)",
     );
 }
 

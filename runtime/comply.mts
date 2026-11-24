@@ -32,6 +32,8 @@
 import {
     createRunContext,
     parseCommand,
+    type ParsedCommand,
+    type RunContext,
     type StepMode,
     type Verb,
 } from "./lib/ctx.mts";
@@ -60,6 +62,7 @@ import { runNodeStep } from "./steps/node.mts";
 import { runNodeCoverageStep } from "./steps/node-coverage.mts";
 import { runPurityStep } from "./steps/purity.mts";
 import { runShellStep } from "./steps/shell.mts";
+import { runTestHygieneStep } from "./steps/test-hygiene.mts";
 import { runTofuStep } from "./steps/tofu.mts";
 import { runWorkflowStep } from "./steps/workflow.mts";
 import { runYamlStep } from "./steps/yaml.mts";
@@ -110,6 +113,14 @@ interface StepInput {
      * (the scratch copy, config and ignore discovery) uses `files` instead.
      */
     checkFiles: string[];
+    /**
+     * `scan --files` only: exactly the named files, handed to the steps that
+     * can honour a named-file list (the test-hygiene rules). Explicit beats
+     * `scope.include` for those rules, and an untracked path is read from the
+     * working tree. `checkFiles` keeps the configured content scope, so a
+     * selector-driven step is never narrowed out from under its declaration.
+     */
+    reviewFiles?: readonly string[];
     /** Shared scratch box: the write-capable steps (node/dotnet families, tofu) work in /tmp for no-fix (findings #10, #20; issue #43). */
     scratch?: Scratch;
     /**
@@ -259,6 +270,20 @@ const STEPS: Step[] = [
                 trackedFiles: checkFiles,
                 scratchFiles: files,
                 runner,
+            }),
+    },
+    {
+        // Read-only and image-owned: the rules travel with the image, so no
+        // dependency on node-deps, no consumer config and no cache. Fix mode
+        // skips it (there is nothing to repair), so comply's verification pass
+        // is the only judge.
+        id: "test-hygiene",
+        scoped: true,
+        run: ({ mode, repoRoot, checkFiles, reviewFiles }) =>
+            runTestHygieneStep({
+                ctx: { mode, repoRoot },
+                trackedFiles: checkFiles,
+                ...(reviewFiles === undefined ? {} : { reviewFiles }),
             }),
     },
     {
@@ -745,6 +770,7 @@ export async function runPass({
     repoRoot,
     files,
     scope,
+    reviewFiles,
     steps = STEPS,
     timings,
     repoWritable = false,
@@ -761,6 +787,12 @@ export async function runPass({
      * scope, which is the default and the doctrine: the repository is gated.
      */
     scope?: string[];
+    /**
+     * `scan --files` only: the exact files the rule step judges. Named files
+     * are handed to the steps that can honour them; the rest of the pass keeps
+     * its configured content scope.
+     */
+    reviewFiles?: readonly string[];
     steps?: readonly Step[];
     /** Opt-in per-step durations, reported under `<mode>/<step>` (#71). */
     timings?: Timings;
@@ -802,6 +834,7 @@ export async function runPass({
         repoRoot,
         files,
         checkFiles: failure === null ? scoped : files,
+        ...(reviewFiles === undefined ? {} : { reviewFiles }),
         scratch,
         repoWritable,
         runner: cancellableRunner({ signal }),
@@ -838,7 +871,7 @@ export async function runPass({
 /** Report the verbs: the three result verbs with flags, and the guidance verb. */
 export function printUsage(): void {
     console.log(
-        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined scan [--min|--full] [--timings] | defined explain <step-or-rule>",
+        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined scan [--files <paths…>] [--min|--full] [--timings] | defined explain <step-or-rule>",
     );
 }
 
@@ -939,6 +972,7 @@ async function runComply({
 async function runVerify({
     repoRoot,
     files,
+    reviewFiles,
     checkSetupFn,
     bootstrapCheck = true,
     runPassFn,
@@ -949,6 +983,8 @@ async function runVerify({
 }: {
     repoRoot: string;
     files: string[];
+    /** `scan --files` only: the exact files the pass is narrowed to. */
+    reviewFiles?: readonly string[];
     checkSetupFn: typeof checkSetup;
     /** False for `scan`: the bootstrap check is reported skipped, never run. */
     bootstrapCheck?: boolean;
@@ -972,6 +1008,7 @@ async function runVerify({
             repoRoot,
             files,
             scope: context.scope,
+            ...(reviewFiles === undefined ? {} : { reviewFiles }),
             timings,
             signal,
             cacheDir,
@@ -1035,6 +1072,7 @@ export async function runGate({
     verb,
     repoRoot,
     files,
+    reviewFiles,
     presentation = "min",
     timings = false,
     signal,
@@ -1043,6 +1081,8 @@ export async function runGate({
     verb: Verb;
     repoRoot: string;
     files: string[];
+    /** `scan --files` only: the exact files the pass is narrowed to. */
+    reviewFiles?: readonly string[];
     presentation?: Presentation;
     /** Opt-in monotonic phase/step durations on stderr (#71). */
     timings?: boolean;
@@ -1071,6 +1111,7 @@ export async function runGate({
             : runVerify({
                   repoRoot,
                   files,
+                  ...(reviewFiles === undefined ? {} : { reviewFiles }),
                   checkSetupFn: resolved.checkSetupFn,
                   bootstrapCheck: verb === "verify",
                   runPassFn: resolved.runPassFn,
@@ -1186,6 +1227,25 @@ export async function runExplain({
     }
 }
 
+/**
+ * Assemble the run context, or report the usage error (a bad `--files` path
+ * reached the context) and exit 2.
+ */
+async function createContextOrExit(parsed: ParsedCommand): Promise<RunContext> {
+    try {
+        return await createRunContext({
+            verb: parsed.verb,
+            startDir: process.cwd(),
+            presentation: parsed.presentation,
+            timings: parsed.timings,
+            ...(parsed.files === undefined ? {} : { files: parsed.files }),
+        });
+    } catch (err) {
+        console.error(String(err));
+        process.exit(2);
+    }
+}
+
 async function main(): Promise<void> {
     const positional = process.argv.slice(2);
 
@@ -1202,12 +1262,7 @@ async function main(): Promise<void> {
         return;
     }
 
-    const ctx = await createRunContext({
-        verb: parsed!.verb,
-        startDir: process.cwd(),
-        presentation: parsed!.presentation,
-        timings: parsed!.timings,
-    });
+    const ctx = await createContextOrExit(parsed!);
     if (ctx.verb === "explain") {
         await runExplain({ topic: parsed!.topic!, repoRoot: ctx.repoRoot });
         return;
@@ -1238,6 +1293,7 @@ async function main(): Promise<void> {
             verb: ctx.verb,
             repoRoot: ctx.repoRoot,
             files,
+            ...(ctx.files === undefined ? {} : { reviewFiles: ctx.files }),
             presentation: ctx.presentation,
             timings: ctx.timings,
             signal: controller.signal,

@@ -8,11 +8,16 @@
 // and every diagnostic; `--full` adds the per-check results map, worth one
 // contextual run and noise thereafter. `--timings` is an independent opt-in
 // (issue #71): it adds monotonic phase/step durations on stderr and never
-// changes the stdout contract. `explain` takes exactly one topic and no
-// flags. Everything else — no verb,
+// changes the stdout contract. `scan` also accepts `--files <paths…>`: exactly
+// the named files replace `scope.include` for the content checks, and a path
+// that does not exist on disk is a usage error. `explain` takes exactly one
+// topic and no flags. Everything else — no verb,
 // unknown verbs, the old public `setup`, and the retired `--fix` / `--no-fix` /
 // `--silent` flags — is a concise usage error with a non-zero exit. Never
 // imports steps.
+
+import { existsSync } from "node:fs";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { deriveRepoRoot } from "../../lib/paths.mts";
 import type { Presentation } from "./report.mts";
@@ -34,6 +39,8 @@ export interface ParsedCommand {
     timings: boolean;
     /** `explain` only: the step id or rule id to look up. */
     topic?: string;
+    /** `scan` only: exactly the files the pass is narrowed to. */
+    files?: readonly string[];
 }
 
 export interface RunContext {
@@ -45,6 +52,8 @@ export interface RunContext {
     presentation: Presentation;
     /** True when `--timings` was requested (stderr phase/step durations). */
     timings: boolean;
+    /** `scan --files` only: repo-relative paths the pass is narrowed to. */
+    files?: readonly string[];
 }
 
 /** Retired public surface: the one-line reason it went away. */
@@ -115,9 +124,69 @@ function parseOutputFlags({ argv }: { argv: string[] }): {
 }
 
 /**
- * Parse the positional verb and its presentation flag. Returns help for
- * `-h`/`--help`; throws a concise usage error for anything else so typos never
- * silently change behaviour.
+ * Split the scan-only `--files <paths…>` values from the remaining flags. The
+ * values run until the next flag, so `--files a.test.ts b.cs --full` is one
+ * list plus a presentation flag.
+ */
+function parseFileFlags({ argv }: { argv: string[] }): {
+    files?: string[];
+    flags: string[];
+} {
+    const files: string[] = [];
+    const flags: string[] = [];
+    let sawFiles = false;
+    let collecting = false;
+    for (const arg of argv) {
+        if (arg === "--files") {
+            sawFiles = true;
+            collecting = true;
+            continue;
+        }
+        if (collecting && !arg.startsWith("-")) {
+            files.push(arg);
+            continue;
+        }
+        collecting = false;
+        flags.push(arg);
+    }
+    if (files.length > 0) {
+        return { files, flags };
+    }
+    if (sawFiles) {
+        throw new Error("--files needs at least one path");
+    }
+    return { flags };
+}
+
+/** A result verb: everything except `explain` and the help pseudo-verb. */
+type ResultVerb = Exclude<Verb, "explain">;
+
+/** Parse a result verb's files and output flags. */
+function parseResultVerb({
+    verb,
+    argv,
+}: {
+    verb: ResultVerb;
+    argv: string[];
+}): ParsedCommand {
+    const { files, flags } = parseFileFlags({ argv });
+    if (files !== undefined && verb !== "scan") {
+        throw new Error("--files is a scan flag — verify has no file list");
+    }
+    const { presentation, timings } = parseOutputFlags({ argv: flags });
+    return {
+        verb,
+        help: false,
+        presentation,
+        timings,
+        ...(files === undefined ? {} : { files }),
+    };
+}
+
+/**
+ * Parse the positional verb and its flags. Returns help for `-h`/`--help`;
+ * throws a concise usage error for anything else so typos never silently
+ * change behaviour.
  */
 export function parseCommand({ argv }: { argv: string[] }): ParsedCommand {
     if (argv.length === 0) {
@@ -140,22 +209,63 @@ export function parseCommand({ argv }: { argv: string[] }): ParsedCommand {
             `unknown command '${verb}' — expected 'comply', 'verify', 'scan' or 'explain'`,
         );
     }
-    const { presentation, timings } = parseOutputFlags({ argv: argv.slice(1) });
-    return { verb, help: false, presentation, timings };
+    return parseResultVerb({ verb, argv: argv.slice(1) });
 }
 
-/** Assemble a full run context, deriving the repo root from startDir. */
+/**
+ * Resolve one `--files` path to a repo-relative path. A path that does not
+ * exist on disk, or resolves outside the repository, is a typo guard, not a
+ * scan.
+ */
+function repoFile({
+    repoRoot,
+    startDir,
+    file,
+}: {
+    repoRoot: string;
+    startDir: string;
+    file: string;
+}): string {
+    const absolute = resolve(startDir, file);
+    if (!existsSync(absolute)) {
+        throw new Error(`--files: no such file: ${file}`);
+    }
+    const relativePath = relative(repoRoot, absolute).split(sep).join("/");
+    if (relativePath.startsWith("..") || isAbsolute(relativePath)) {
+        throw new Error(`--files: no such file in the repository: ${file}`);
+    }
+    return relativePath;
+}
+
+/**
+ * Assemble a full run context, deriving the repo root from startDir and
+ * resolving any `--files` paths against it.
+ */
 export async function createRunContext({
     verb,
     startDir,
     presentation,
     timings,
+    files,
 }: {
     verb: Verb;
     startDir: string;
     presentation: Presentation;
     timings: boolean;
+    files?: readonly string[];
 }): Promise<RunContext> {
     const repoRoot = await deriveRepoRoot({ startDir });
-    return { verb, repoRoot, presentation, timings };
+    return {
+        verb,
+        repoRoot,
+        presentation,
+        timings,
+        ...(files === undefined
+            ? {}
+            : {
+                  files: files.map((file) =>
+                      repoFile({ repoRoot, startDir, file }),
+                  ),
+              }),
+    };
 }

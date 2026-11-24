@@ -726,6 +726,7 @@ image tag and `defined update latest` always resolves to a pullable SHA.
 - [`standards/shell.md`](standards/shell.md) — shell script rules (bash shebang, `[[ ]]`, explicit `return`)
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)
+- [`standards/testing/test-review.md`](standards/testing/test-review.md) — test-hygiene rule ids, the always-on and review tiers, and the suppression grammar
 - [`standards/node-eslint.md`](standards/node-eslint.md) — the house ESLint step: what it owns, how to override, the v1→v2 growth plan
 - [`standards/node-purity.md`](standards/node-purity.md) — the opt-in purity/CQS step: rule and exception table, supported grammar and limits
 - [`standards/documentation.md`](standards/documentation.md) — the API-documentation doctrine and the durable knowledge-doc convention
