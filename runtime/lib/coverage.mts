@@ -12,7 +12,7 @@
 // floored percentage.
 
 import { resolveWorkingRoot, type Scratch } from "./scratch.mts";
-import { run, failureDetail } from "../../lib/proc.mts";
+import { run, failureDetail, type CommandResult } from "../../lib/proc.mts";
 
 type Runner = typeof run;
 
@@ -63,10 +63,24 @@ export async function runScopedCommand({
         cwd: workingRoot,
     });
     if (result.status !== 0) {
-        return { workingRoot, failure: failureDetail({ result }) };
+        return { workingRoot, failure: coverageFailure({ result }) };
     }
 
     return { workingRoot, failure: null };
+}
+
+/**
+ * A coverage command's failure detail. The shared render names an empty
+ * result honestly as `no output`; here the reader is told the likelier cause,
+ * because a coverage reporter is the one that consumes its own diagnostics
+ * (the lcov-only reporter swallows test-import failures).
+ */
+function coverageFailure({ result }: { result: CommandResult }): string {
+    const empty = result.stdout.trim() === "" && result.stderr.trim() === "";
+    const detail = failureDetail({ result });
+    return empty
+        ? `${detail} — no diagnostics captured; a coverage reporter may have consumed them`
+        : detail;
 }
 
 /**

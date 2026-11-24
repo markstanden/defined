@@ -100,15 +100,16 @@ re-deriving, and the traps hit along the way. Claim sections follow
   (`lib/proc.mts:302`; `outcomeLabel`, `:313`). Verified outputs
   (`lib/proc.test.mts:178`):
 
-    | Outcome      | Rendered                                 |
-    | ------------ | ---------------------------------------- |
-    | clean exit   | the output alone (no prefix)             |
-    | nonzero exit | `exit 3: boom`                           |
-    | signal       | `killed by SIGKILL: no output`           |
-    | timeout      | `timed out: no output`                   |
-    | cancellation | `cancelled: no output`                   |
-    | never exited | `did not exit: no output`                |
-    | truncated    | any of the above + ` (output truncated)` |
+    | Outcome                 | Rendered                                 |
+    | ----------------------- | ---------------------------------------- |
+    | clean exit              | the output alone (no prefix)             |
+    | nonzero exit            | `exit 3: boom`                           |
+    | nonzero exit, no output | `exit 1: no output`                      |
+    | signal                  | `killed by SIGKILL: no output`           |
+    | timeout                 | `timed out: no output`                   |
+    | cancellation            | `cancelled: no output`                   |
+    | never exited            | `did not exit: no output`                |
+    | truncated               | any of the above + ` (output truncated)` |
 
 - Missing binaries still **throw** (reject), naming the binary and the
   Containerfile remedy (`startError`, `lib/proc.mts:137`; asserted

@@ -19,12 +19,13 @@
 // without an explicit `dir` fail loudly rather than guessing.
 // The runner and existsSync are injected so tests need no host binaries.
 
-import { cpSync, existsSync, readFileSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
 import { run, failureDetail, type CommandResult } from "../../lib/proc.mts";
 import { hasConsumerPrettierConfig } from "./prettier-config.mts";
 import { hasConsumerEslintConfig } from "./eslint-config.mts";
+import { snapshotTree, treeChanged } from "./scratch.mts";
 
 type Runner = typeof run;
 type Exists = typeof existsSync;
@@ -246,8 +247,13 @@ function manifestsMatch({
  * command and the no-lockfile npm fallback are nondeterministic), and the
  * manifest + lockfile bytes must match between the two roots. Reuse is a copy
  * into the working root — or nothing at all when the working root *is* the
- * warm root. A failed copy (the source can vanish mid-copy under a concurrent
- * rebuild) reports false and the caller reinstalls (#67).
+ * warm root. The copy is bracketed by the source tree's stat identity: a copy
+ * that raced a concurrent rebuild (a comply fix pass reinstalls in place) is
+ * discarded (#67). A discarded copy is removed before the caller reinstalls —
+ * yarn/pnpm frozen installs trust state files inside node_modules, so a torn
+ * tree left in place could make the "fresh" install a no-op. A symlinked warm
+ * tree is never reused: lstat records the link, not the content behind it, so
+ * the bracket cannot see it.
  */
 function reuseWarmTree({
     warmRoot,
@@ -284,16 +290,22 @@ function reuseWarmTree({
     if (workingRoot === warmRoot) {
         return true;
     }
+    const source = join(warmRoot, dir, "node_modules");
+    const destination = join(workingRoot, dir, "node_modules");
     try {
-        copyFn(
-            join(warmRoot, dir, "node_modules"),
-            join(workingRoot, dir, "node_modules"),
-            { recursive: true },
-        );
-        return true;
+        if (!lstatSync(source).isSymbolicLink()) {
+            const before = snapshotTree(source);
+            copyFn(source, destination, { recursive: true });
+            if (!treeChanged(before, snapshotTree(source))) {
+                return true;
+            }
+        }
     } catch {
-        return false;
+        // A copy that threw (the source vanished mid-copy) is as unusable as
+        // drift: fall through to the cleanup and a fresh install.
     }
+    rmSync(destination, { recursive: true, force: true });
+    return false;
 }
 
 /** What became of one restore target. */

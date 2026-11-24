@@ -3,7 +3,7 @@
 // Run: node --test runtime/steps/node-deps.test.mts
 
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { afterEach, test } from "node:test";
@@ -342,6 +342,50 @@ test("runNodeDepsStep reuses the repo's warm tree in no-fix instead of reinstall
             existsSync(join(scratch.dir!, "node_modules/.warm")),
             true,
         );
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("runNodeDepsStep reinstalls when the warm copy changes mid-copy", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-node-deps-");
+    const manifest = '{"name":"bench","private":true}\n';
+    const lockfile = '{"lockfileVersion":3,"packages":{}}\n';
+    await writeTree(root, {
+        "package.json": manifest,
+        "package-lock.json": lockfile,
+        "node_modules/.warm": "warm tree\n",
+    });
+    await writeConfig(root, {
+        node: {
+            packages: [
+                { dir: "", checks: [{ name: "lint", command: "eslint ." }] },
+            ],
+        },
+    });
+    const { runner, calls } = recordingRunner();
+    const scratch = { dir: null };
+    const source = join(root, "node_modules/.warm");
+    let first = true;
+    try {
+        // Act
+        const result = await runNodeDepsStep({
+            ctx: { mode: "no-fix", repoRoot: root, scratch },
+            trackedFiles: ["package.json", "package-lock.json"],
+            runner,
+            copyFn: (from: string, to: string) => {
+                cpSync(from, to, { recursive: true });
+                if (first) {
+                    first = false;
+                    appendFileSync(source, "rebuilt under the copy\n");
+                }
+            },
+        });
+
+        // Assert
+        assert.equal(calls.length, 1);
+        assert.equal(result.notice, "node-deps: restored 1 package(s)");
     } finally {
         cleanupScratch(scratch);
     }
