@@ -141,3 +141,66 @@ test("masks a multi-line template literal", () => {
     assert.equal(findings.length, 1);
     assert.equal(findings[0]?.line, 3);
 });
+
+test("masks a trailing escape to the end of the source", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: 'const text = "abc\\',
+    };
+
+    // Act
+    const findings = reviewTestSources([source]);
+
+    // Assert
+    assert.equal(findings.length, 0);
+});
+
+test("orders findings by file, then line, then rule", () => {
+    // Arrange
+    const sources = [
+        {
+            path: "b.test.ts",
+            content: 'fdescribe("suite", () => {});\ntest.only("works", () => {});',
+        },
+        {
+            path: "a.test.ts",
+            content:
+                'test.only("works", () => {}); fdescribe("suite", () => {});',
+        },
+    ];
+
+    // Act
+    const found = reviewTestSources(sources);
+
+    // Assert
+    assert.deepEqual(
+        found.map((finding) => `${finding.file}:${finding.line}:${finding.rule}`),
+        [
+            "a.test.ts:1:focused-suite",
+            "a.test.ts:1:focused-test",
+            "b.test.ts:1:focused-suite",
+            "b.test.ts:2:focused-test",
+        ],
+    );
+});
+
+test("reports a focused specify declaration at its line", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: '\nspecify.only("works", () => {});',
+    };
+
+    // Act
+    const findings = reviewTestSources([source]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => ({
+            rule: finding.rule,
+            line: finding.line,
+        })),
+        [{ rule: "focused-test", line: 2 }],
+    );
+});
