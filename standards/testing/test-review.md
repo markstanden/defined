@@ -126,8 +126,6 @@ complexity (`eslint`), module purity and CQS (`purity`), identifier naming
 A review-tier lead is suppressed by a note beside the test, in one grammar.
 An always-on defect has no escape even though the note parses.
 
-A review-tier lead is suppressed by a note beside the test, in one grammar:
-
 ```text
 // Why use <rule-id> here: <reason>
 // Why not use <rule-id> here: <reason>
