@@ -1041,3 +1041,102 @@ test("reports an unawaited C# async assertion", () => {
         [["unawaited-async-assertion"], []],
     );
 });
+
+/** One node:test declaration whose body holds the given statement. */
+function nodeTestBody(statement: string): string {
+    return `import { test } from "node:test";\ntest("case", () => {\n    ${statement}\n});`;
+}
+
+/** Determinism and structure ids, so a review list reads without labels. */
+const REVIEW_ONLY = new Set([
+    "missing-structure",
+    "multi-statement-act",
+    "ambient-clock",
+    "sleep",
+    "randomness",
+    "ambient-environment",
+    "ambient-locale",
+    "real-network",
+    "real-filesystem",
+    "process-spawn",
+    "debug-output",
+]);
+
+/** The review-tier rule ids a finding list holds, in report order. */
+function reviewRulesOf(
+    findings: ReturnType<typeof reviewTestSources>,
+): string[] {
+    return findings
+        .map((finding) => finding.rule)
+        .filter((rule) => REVIEW_ONLY.has(rule));
+}
+
+test("reports every determinism rule in review mode and none in tracked mode", () => {
+    // Arrange
+    const cases = [
+        ["ambient-clock", "const now = Date.now();"],
+        ["sleep", "await sleep(5);"],
+        ["randomness", "const value = Math.random();"],
+        ["ambient-environment", "const shell = process.env.SHELL;"],
+        ["ambient-locale", "const culture = CultureInfo.CurrentCulture;"],
+        ["real-network", "await fetch(url);"],
+        ["real-filesystem", "const text = fs.readFileSync(file);"],
+        ["process-spawn", "spawn(command);"],
+        ["debug-output", "console.log(value);"],
+    ] as const;
+    const sources = cases.map(([, statement]) => ({
+        path: "a.test.ts",
+        content: nodeTestBody(statement),
+    }));
+
+    // Act
+    const tracked = sources.map((source) =>
+        reviewRulesOf(reviewTestSources([source])),
+    );
+    const reviewed = sources.map((source) =>
+        reviewRulesOf(reviewTestSources([source], { review: true })),
+    );
+
+    // Assert
+    assert.deepEqual(
+        tracked,
+        cases.map(() => []),
+    );
+    assert.deepEqual(
+        reviewed,
+        cases.map(([rule]) => [rule]),
+    );
+});
+
+test("reports the line and evidence of a determinism lead", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: nodeTestBody("const now = Date.now();"),
+    };
+
+    // Act
+    const [finding] = reviewTestSources([source], { review: true }).filter(
+        (candidate) => candidate.rule === "ambient-clock",
+    );
+
+    // Assert
+    assert.equal(finding?.line, 3);
+    assert.match(finding?.message ?? "", /Date\.now\(/u);
+    assert.match(finding?.message ?? "", /when the test ran/u);
+});
+
+test("does not report a determinism name quoted inside a string", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: nodeTestBody('const label = "Date.now()";'),
+    };
+
+    // Act
+    const findings = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(reviewRulesOf(findings), []);
+});
+

@@ -177,6 +177,33 @@ test("reads exactly the named files, untracked ones included", async () => {
     );
 });
 
+test("fails a named review lead and stays silent in tracked mode", async () => {
+    // Arrange
+    const sources = {
+        "lead.test.ts":
+            'import { it } from "node:test";\nimport assert from "node:assert/strict";\n\nit("waits", async () => {\n    await sleep(5);\n    assert.equal(value(), 1);\n});\n',
+    };
+    const run = (reviewFiles?: string[]) =>
+        runTestHygieneStep({
+            ctx: { mode: "no-fix", repoRoot: "/repo" },
+            trackedFiles: ["lead.test.ts"],
+            ...(reviewFiles === undefined ? {} : { reviewFiles }),
+            reader: readerFor(sources),
+        });
+
+    // Act
+    const tracked = await run();
+    const reviewed = await run(["lead.test.ts"]);
+
+    // Assert
+    assert.equal(tracked.status, "pass");
+    assert.equal(reviewed.status, "fail");
+    assert.deepEqual(
+        reviewed.errors?.map((error) => error.rule),
+        ["sleep"],
+    );
+});
+
 test("reads a named file from disk", async () => {
     // Arrange
     const repoRoot = await mkdtemp(join(tmpdir(), "quality-hygiene-"));

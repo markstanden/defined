@@ -6,8 +6,11 @@
 // the reviewer's judgement.
 //
 // Public surface:
-//   reviewTestSources(sources) — always-on findings for the named sources
-//   ALWAYS_ON_RULES — the rule ids this pass can report
+//   reviewTestSources(sources, { review }) — findings for the named sources;
+//     `review: true` adds the review-tier leads (`scan --files` only)
+//   ALWAYS_ON_RULES — the always-on defect ids every surface reports
+//   REVIEW_RULES — the review-tier lead ids a named-file pass also reports
+//   LEAD_RULES — the Bucket C intent leads the gate never owns
 //
 // The focused-declaration pair is the first rule family. `focused-test` reads a
 // focused modifier on a test call (`it.only`, `test.only`, `specify.only`);
@@ -110,8 +113,43 @@ export const ALWAYS_ON_RULES = [
     "unlabelled-secret-var",
 ] as const;
 
+/** The review-tier lead ids `scan --files` reports and a note can suppress. */
+export const REVIEW_RULES = [
+    "ambient-clock",
+    "sleep",
+    "randomness",
+    "ambient-environment",
+    "ambient-locale",
+    "real-network",
+    "real-filesystem",
+    "process-spawn",
+    "debug-output",
+] as const;
+
+/** The Bucket C intent leads the gate reports and never owns. */
+export const LEAD_RULES = [
+    "identical-body-shape",
+    "single-row-parameterised",
+    "literal-expectation",
+    "computed-expectation",
+    "computed-title",
+    "property-trigger-unmet",
+    "single-line-summary",
+    "status-only-tests",
+    "legacy-bru-present",
+] as const;
+
 /** One always-on test-hygiene rule id. */
-export type TestHygieneRule = (typeof ALWAYS_ON_RULES)[number];
+export type AlwaysOnRule = (typeof ALWAYS_ON_RULES)[number];
+
+/** One review-tier lead id. */
+export type ReviewRule = (typeof REVIEW_RULES)[number];
+
+/** One Bucket C intent lead id. */
+export type LeadRule = (typeof LEAD_RULES)[number];
+
+/** Any rule id the engine knows. */
+export type TestHygieneRule = AlwaysOnRule | ReviewRule | LeadRule;
 
 /** One source file the rule engine reads. */
 export interface TestReviewSource {
@@ -222,9 +260,131 @@ function skippedFindings({
 }
 
 /**
- * Literal-only tautologies matched in a declaration's masked body. A
- * comparison that cannot fail for any input proves nothing.
+ * Ambient state and real I/O visible in a declaration's masked body. Each
+ * pattern is the scanner's, ported verbatim so parity is measurable; the
+ * consequence is the doctrine's wording, not a verdict.
  */
+const DETERMINISM_RULES: ReadonlyArray<{
+    readonly rule: ReviewRule;
+    readonly pattern: RegExp;
+    readonly subject: string;
+    readonly consequence: string;
+}> = [
+    {
+        rule: "ambient-clock",
+        pattern: /\bDateTime(?:Offset)?\.(?:Now|UtcNow|Today)\b/g,
+        subject: "ambient clock read",
+        consequence: "the result depends on when the test ran",
+    },
+    {
+        rule: "ambient-clock",
+        pattern: /\bInstant\.now\s*\(|\bLocalDate(?:Time)?\.now\s*\(/g,
+        subject: "ambient clock read",
+        consequence: "the result depends on when the test ran",
+    },
+    {
+        rule: "ambient-clock",
+        pattern: /\bDate\.now\s*\(|\bnew Date\s*\(\s*\)/g,
+        subject: "ambient clock read",
+        consequence: "the result depends on when the test ran",
+    },
+    {
+        rule: "ambient-clock",
+        pattern: /\b(?:time\.Now|time\.time|datetime\.(?:now|utcnow))\s*\(/g,
+        subject: "ambient clock read",
+        consequence: "the result depends on when the test ran",
+    },
+    {
+        rule: "sleep",
+        pattern: /\b(?:Thread\.Sleep|Task\.Delay|time\.Sleep|sleep)\s*\(/g,
+        subject: "sleep or delay",
+        consequence: "the test races the clock instead of controlling it",
+    },
+    {
+        rule: "randomness",
+        pattern: /\b(?:Math\.random|Random\(|rand\.|mt_rand\(|rand\()/g,
+        subject: "random value",
+        consequence: "the input is not reproducible",
+    },
+    {
+        rule: "randomness",
+        pattern: /\bGuid\.NewGuid\b|\bUUID\.randomUUID\s*\(/g,
+        subject: "random identifier",
+        consequence: "the input is not reproducible",
+    },
+    {
+        rule: "ambient-environment",
+        pattern:
+            /\b(?:Environment\.(?:GetEnvironmentVariable|CurrentDirectory|MachineName)|process\.env|os\.environ|os\.Getenv|getenv\()/g,
+        subject: "ambient environment read",
+        consequence: "the result depends on the host",
+    },
+    {
+        rule: "ambient-locale",
+        pattern:
+            /\b(?:CultureInfo\.(?:CurrentCulture|CurrentUICulture)|Locale\.getDefault)\b/g,
+        subject: "ambient locale read",
+        consequence: "the result depends on the machine's locale",
+    },
+    {
+        rule: "real-network",
+        pattern:
+            /\b(?:HttpClient|axios|requests\.|http\.Get|net\.Dial)\b|\bfetch\s*\(/g,
+        subject: "real network client",
+        consequence: "the test needs a reachable peer",
+    },
+    {
+        rule: "real-filesystem",
+        pattern:
+            /\b(?:File|Directory)\.\w+\s*\(|\bPath\.GetTemp(?:Path|FileName)\b|\bfs\.\w+\s*\(|\btempfile\.\w+\s*\(/g,
+        subject: "real filesystem access",
+        consequence: "the test needs a writable host",
+    },
+    {
+        rule: "process-spawn",
+        pattern:
+            /\bProcess\.Start\b|\b(?:execFile|execSync|spawn|spawnSync|fork)\s*\(|\bsubprocess\.\w+/g,
+        subject: "child process spawn",
+        consequence: "the test needs the host's binaries",
+    },
+    {
+        rule: "debug-output",
+        pattern:
+            /\bConsole\.(?:Write|WriteLine|Error)\b|\bDebug\.Write(?:Line)?\b|\bconsole\.(?:log|debug|warn)\b/g,
+        subject: "debug output",
+        consequence: "console output left in a test",
+    },
+];
+
+/** Determinism leads in one source's declarations, in body order. */
+function determinismFindings({
+    source,
+    declarations,
+}: {
+    source: TestReviewSource;
+    declarations: readonly TestDeclaration[];
+}): TestHygieneFinding[] {
+    return declarations.flatMap((declaration): TestHygieneFinding[] => {
+        const body = declaration.maskedBody;
+        if (body === null) {
+            return [];
+        }
+        return DETERMINISM_RULES.flatMap((rule): TestHygieneFinding[] =>
+            [...body.matchAll(rule.pattern)].map((match) => ({
+                rule: rule.rule,
+                file: source.path,
+                line: lineInBody({
+                    body,
+                    bodyLine: declaration.bodyLine,
+                    index: match.index ?? 0,
+                }),
+                message: `${rule.subject} in test "${declaration.name}": "${collapse(match[0])}" — ${rule.consequence}`,
+            })),
+        );
+    });
+}
+
+
 const TAUTOLOGY_RULES: ReadonlyArray<{
     readonly pattern: RegExp;
     readonly derivation: string;
@@ -689,7 +849,10 @@ function environmentFindings(source: TestReviewSource): TestHygieneFinding[] {
 }
 
 /** All findings from one source, in line order. */
-function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
+function sourceFindings(
+    source: TestReviewSource,
+    { review }: { review: boolean },
+): TestHygieneFinding[] {
     const masked = maskTestSource(source.content);
     const declarations = scanTestDeclarations({
         path: source.path,
@@ -721,6 +884,7 @@ function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
         ...noAssertionFindings({ source, declarations }),
         ...unawaitedAssertionFindings({ source, declarations }),
         ...swallowedExceptionFindings({ source, declarations }),
+        ...(review ? determinismFindings({ source, declarations }) : []),
     ];
 }
 
@@ -742,13 +906,18 @@ function compareFindings(
 }
 
 /**
- * Run the always-on rule set over the named sources.
+ * Run the rule set over the named sources.
  *
  * @param sources Files to read, already read from disk by the caller.
+ * @param options `review: true` adds the review-tier leads; every other
+ *   surface reports the always-on defects only.
  * @returns Findings ordered by file, line and rule.
  */
 export function reviewTestSources(
     sources: readonly TestReviewSource[],
+    { review = false }: { readonly review?: boolean } = {},
 ): TestHygieneFinding[] {
-    return sources.flatMap(sourceFindings).sort(compareFindings);
+    return sources
+        .flatMap((source) => sourceFindings(source, { review }))
+        .sort(compareFindings);
 }

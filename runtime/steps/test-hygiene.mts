@@ -137,7 +137,9 @@ export async function runTestHygieneStep({
     if (typeof sources === "string") {
         return errored({ message: sources });
     }
-    const findings = reviewTestSources(sources);
+    const findings = reviewTestSources(sources, {
+        review: reviewFiles !== undefined,
+    });
     if (findings.length === 0) {
         return passed({
             notice: `test-hygiene: ${files.length} file(s) clean`,
