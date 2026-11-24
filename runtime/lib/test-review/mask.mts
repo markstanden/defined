@@ -12,6 +12,12 @@
 // A quote inside a comment never opens a literal: line and block comments are
 // consumed before quotes are considered. An unterminated literal masks to the
 // end of the source, matching the scanner's reading.
+//
+// Deliberate ceiling (ponytail): a text scanner, not a parser. A quote inside a
+// regex literal opens a literal, and the code inside a template interpolation is
+// masked as data, so either can blank real code. mask.test.mts pins both as
+// documented ceilings; upgrade to token-aware parsing only if the blind spots
+// ever earn the dependency.
 
 type Quote = '"' | "'" | "`";
 

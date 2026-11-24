@@ -14,6 +14,11 @@
 // `focused-suite` reads a focused suite declaration (`describe.only`,
 // `suite.only`, `fdescribe`, `fsuite`). Both are defects: the rest of the suite
 // or file silently does not run.
+//
+// Deliberate ceiling (ponytail): the marker regex reads contiguous call text,
+// so `it` split from `.only` across lines reads as unfocused — the scanner's
+// declaration head has the same shape. The marker also matches wherever the
+// call text appears in masked code, not only at a declaration head.
 
 import { maskTestSource } from "./mask.mts";
 

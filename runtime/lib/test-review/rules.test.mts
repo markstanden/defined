@@ -188,6 +188,24 @@ test("orders findings by file, then line, then rule", () => {
     );
 });
 
+test("does not read a focus marker split across lines (documented ceiling)", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content:
+            'it\n  .only("works", () => {});\n\ntest.only("next", () => {});',
+    };
+
+    // Act
+    const findings = reviewTestSources([source]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.line),
+        [4],
+    );
+});
+
 test("reports a focused specify declaration at its line", () => {
     // Arrange
     const source = {
