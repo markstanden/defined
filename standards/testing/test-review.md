@@ -10,15 +10,16 @@ skills read this output instead of carrying their own copy of the rules.
 The read-only `test-hygiene` step serves all three surfaces, and the caller
 selects scope, never rules:
 
-| surface                         | scope                   | rules                                 | purpose                             |
-| ------------------------------- | ----------------------- | ------------------------------------- | ----------------------------------- |
-| `defined verify` / `comply`     | whole git inventory     | always-on defects                     | merge gate, CI                      |
-| `defined scan`                  | whole git inventory     | always-on defects                     | install-less try-out, ungated repos |
-| `defined scan --files <paths…>` | exactly the named files | always-on defects **and** review tier | the review pass                     |
+| surface                         | scope                   | rules                                                  | purpose                             |
+| ------------------------------- | ----------------------- | ------------------------------------------------------ | ----------------------------------- |
+| `defined verify` / `comply`     | whole git inventory     | always-on defects                                      | merge gate, CI                      |
+| `defined scan`                  | whole git inventory     | always-on defects                                      | install-less try-out, ungated repos |
+| `defined scan --files <paths…>` | exactly the named files | always-on defects today; the review tier when it lands | the review pass                     |
 
-- The rule set is chosen by the step, not the caller. `--files` widens it to the
-  review tier for exactly those files; no flag selects an individual rule or a
-  tier on its own.
+- The rule set is chosen by the step, not the caller. `--files` scopes the
+  always-on rules to exactly those files; the review tier is the next
+  increment and is not in the engine yet. No flag selects an individual rule or
+  a tier on its own.
 - The named files scope the test-hygiene rules. Every other step still judges
   the repository as configured, so a selector-driven step (purity, tofu) is
   never narrowed out from under its own declaration.
@@ -64,7 +65,11 @@ selects scope, never rules:
 The three secrets rules are bounded to test-collection hygiene — test files and
 OpenCollection requests/environments — and are never a repo-wide secrets sweep.
 
-## Review tier
+## Review tier (planned — not yet in the engine)
+
+The engine ships the always-on rules only. These leads, and the suppression
+grammar below, land with the review-tier increment; until then they describe
+the review pass, not a gate verdict.
 
 | rule id                 | lead to read                                                                                                                                                                                                                                                                |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -117,6 +122,9 @@ complexity (`eslint`), module purity and CQS (`purity`), identifier naming
 (`naming`), shell and YAML. `defined explain <topic>` serves each offline.
 
 ## Suppression
+
+Reserved for the review tier: the engine does not read notes yet, and an
+always-on defect has no escape even when the grammar lands.
 
 A review-tier lead is suppressed by a note beside the test, in one grammar:
 

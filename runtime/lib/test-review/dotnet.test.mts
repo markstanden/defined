@@ -208,3 +208,17 @@ test("does not treat a trait value as a skip", () => {
     // Assert
     assert.equal(declaration?.skipped, false);
 });
+
+test("reads an inline ignore reason", () => {
+    // Arrange
+    const content =
+        '[Test]\n[Ignore("flaky until CI grid fixed")]\n' +
+        "public void Adds()\n{\n    Assert.Equal(1, value);\n}";
+
+    // Act
+    const [declaration] = scan(content);
+
+    // Assert
+    assert.equal(declaration?.skipped, true);
+    assert.equal(declaration?.skipReason, "flaky until CI grid fixed");
+});

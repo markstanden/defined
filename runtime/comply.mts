@@ -114,9 +114,11 @@ interface StepInput {
      */
     checkFiles: string[];
     /**
-     * `scan --files` only: exactly the named files, which replace `checkFiles`
-     * for every content check. Explicit beats `scope.include`, and an untracked
-     * path is read from the working tree.
+     * `scan --files` only: exactly the named files, handed to the steps that
+     * can honour a named-file list (the test-hygiene rules). Explicit beats
+     * `scope.include` for those rules, and an untracked path is read from the
+     * working tree. `checkFiles` keeps the configured content scope, so a
+     * selector-driven step is never narrowed out from under its declaration.
      */
     reviewFiles?: readonly string[];
     /** Shared scratch box: the write-capable steps (node/dotnet families, tofu) work in /tmp for no-fix (findings #10, #20; issue #43). */
@@ -786,8 +788,9 @@ export async function runPass({
      */
     scope?: string[];
     /**
-     * `scan --files` only: the exact files to judge. Named files replace the
-     * content scope, so `scope.include` neither narrows nor fails them.
+     * `scan --files` only: the exact files the rule step judges. Named files
+     * are handed to the steps that can honour them; the rest of the pass keeps
+     * its configured content scope.
      */
     reviewFiles?: readonly string[];
     steps?: readonly Step[];

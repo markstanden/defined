@@ -311,3 +311,27 @@ test("does not treat an author name as a credential", () => {
         [[], ["unlabelled-secret-var"], ["unlabelled-secret-var"]],
     );
 });
+
+test("stays silent when only the scheme is literal", () => {
+    // Arrange
+    const content = [
+        "info:",
+        "  name: Get users",
+        "  type: http",
+        "http:",
+        "  method: GET",
+        "  url: https://{{host}}/users",
+        "runtime:",
+        "  assertions:",
+        "    - expression: res.status",
+        '      value: "200"',
+    ].join("\n");
+
+    // Act
+    const findings = reviewTestSources([
+        { path: "requests/users.yml", content },
+    ]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});

@@ -162,7 +162,12 @@ function matchFindings({
     }));
 }
 
-/** A ticket reference that parks a skip beside a declaration. */
+/**
+ * A ticket reference that parks a skip beside a declaration.
+ *
+ * ponytail: a word-token match, so an encoding name like `UTF-8` in a comment
+ * also parks a skip — a false negative in a heuristic, accepted.
+ */
 const TICKET = /(?:#\d+\b|\b[A-Z][A-Z0-9]+-\d+\b|https?:\/\/\S+)/;
 
 /**
@@ -531,7 +536,7 @@ function unawaitedAssertionFindings({
 }
 
 /** A catch clause with its block. A promise `.catch(` does not match. */
-const CATCH_OPEN = /\bcatch\s*(?:(?:\([^)]*\))\s*)?\{/g;
+const CATCH_OPEN = /\b(?<!\.)catch\s*(?:(?:\([^)]*\))\s*)?\{/g;
 
 /** Index of the brace closing the one at `open`, or the last index. */
 function blockEnd(text: string, open: number): number {

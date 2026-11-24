@@ -527,7 +527,11 @@ function dotNetSkipReason(annotations: string): string | null {
     if (skip !== null) {
         return skip[1] ?? "";
     }
-    return /\[Ignore\b/u.test(annotations) ? "" : null;
+    const ignore = /\[Ignore\b(?:\s*\(\s*"([^"]*)")?/u.exec(annotations);
+    if (ignore !== null) {
+        return ignore[1] ?? "";
+    }
+    return null;
 }
 
 /** Whether a parameterised C# declaration names no data source. */

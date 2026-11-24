@@ -783,17 +783,27 @@ test("reports a catch that only logs", () => {
 
 test("does not treat a promise catch callback as a catch block", () => {
     // Arrange
-    const content =
-        `${NODE_IMPORT}it("works", () => {\n` +
-        "    expect(sut.ready).toBe(true);\n" +
-        "    return sut.run().catch(() => {});\n" +
-        "});";
+    const contents = [
+        "    return sut.run().catch(() => {});",
+        "    return sut.run().catch(function (error) { console.error(error); });",
+    ].map(
+        (line) =>
+            `${NODE_IMPORT}it("works", () => {\n` +
+            "    expect(sut.ready).toBe(true);\n" +
+            `${line}\n` +
+            "});",
+    );
 
     // Act
-    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
 
     // Assert
-    assert.deepEqual(findings, []);
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
 });
 
 test("does not read a catch block in a comment or string", () => {
@@ -956,6 +966,9 @@ test("reports a C# skip with no annotation reason", () => {
         xunitMethod(
             '    // parked: #123\n    [Fact(Skip = "")]\n    public void Adds()\n    {\n        Assert.Equal(1, value);\n    }',
         ),
+        xunitMethod(
+            '    [Test]\n    [Ignore("flaky until CI grid fixed")]\n    public void Adds()\n    {\n        Assert.Equal(1, value);\n    }',
+        ),
     ];
 
     // Act
@@ -966,7 +979,7 @@ test("reports a C# skip with no annotation reason", () => {
     // Assert
     assert.deepEqual(
         found.map((findings) => findings.map((finding) => finding.rule)),
-        [["skipped-test"], ["skipped-test"], []],
+        [["skipped-test"], ["skipped-test"], [], []],
     );
 });
 

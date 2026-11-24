@@ -148,7 +148,8 @@ function trackAuthBlock(line: string, draft: RequestDraft): void {
 function readUrlLine(line: string, index: number, draft: RequestDraft): void {
     const urlField = /^[ \t]+url:[ \t]*(\S.*)$/u.exec(line);
     const value = yamlValue(urlField?.[1] ?? "");
-    if (urlField !== null && /^https?:\/\//u.test(value)) {
+    // A templated authority (`https://{{host}}/...`) is not a literal host.
+    if (urlField !== null && /^https?:\/\/(?!\{\{)/u.test(value)) {
         draft.url = { line: index + 1, text: line.trim() };
     }
 }
