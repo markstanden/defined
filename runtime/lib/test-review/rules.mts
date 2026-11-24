@@ -15,16 +15,26 @@
 // `suite.only`, `fdescribe`, `fsuite`). Both are defects: the rest of the suite
 // or file silently does not run.
 //
+// `skipped-test` reads the declaration layer: a declaration marked to skip is
+// a defect unless a reason or ticket parks it. A ticket reference (`#123`,
+// `PROJ-123`, a URL) in the declaration's own line or the contiguous comment
+// block above it parks the skip; a C# `Skip = "…"` or PHPUnit
+// `markTestSkipped("…")` reason will too once those stacks land.
+//
 // Deliberate ceiling (ponytail): the marker regex reads contiguous call text,
 // so `it` split from `.only` across lines reads as unfocused — the scanner's
 // declaration head has the same shape. The marker also matches wherever the
 // call text appears in masked code, not only at a declaration head.
 
-import { lineAt } from "./declarations.mts";
+import { lineAt, scanTestDeclarations } from "./declarations.mts";
 import { maskTestSource } from "./mask.mts";
 
 /** The rule ids the always-on pass can report. */
-export const ALWAYS_ON_RULES = ["focused-test", "focused-suite"] as const;
+export const ALWAYS_ON_RULES = [
+    "focused-test",
+    "focused-suite",
+    "skipped-test",
+] as const;
 
 /** One always-on test-hygiene rule id. */
 export type TestHygieneRule = (typeof ALWAYS_ON_RULES)[number];
@@ -78,6 +88,56 @@ function matchFindings({
     }));
 }
 
+/** A ticket reference that parks a skip beside a declaration. */
+const TICKET = /(?:#\d+\b|\b[A-Z][A-Z0-9]{1,}-\d+\b|https?:\/\/\S+)/;
+
+/**
+ * Whether a skip is parked: its own line or the contiguous comment block
+ * immediately above it carries a ticket reference.
+ */
+function parkedSkip({
+    content,
+    line,
+}: {
+    content: string;
+    line: number;
+}): boolean {
+    const lines = content.split("\n");
+    const context = [lines[line - 1] ?? ""];
+    for (let index = line - 2; index >= 0; index--) {
+        const raw = lines[index] ?? "";
+        const trimmed = raw.trim();
+        if (trimmed === "" || !/^(?:\/\/|\/\*|\*|\*\/)/.test(trimmed)) {
+            break;
+        }
+        context.unshift(raw);
+    }
+    return TICKET.test(context.join("\n"));
+}
+
+/** Findings for skipped declarations that carry no reason or ticket. */
+function skippedFindings(source: TestReviewSource): TestHygieneFinding[] {
+    return scanTestDeclarations({
+        path: source.path,
+        content: source.content,
+    }).flatMap((declaration): TestHygieneFinding[] => {
+        if (
+            !declaration.skipped ||
+            parkedSkip({ content: source.content, line: declaration.line })
+        ) {
+            return [];
+        }
+        return [
+            {
+                rule: "skipped-test",
+                file: source.path,
+                line: declaration.line,
+                message: `skipped test declaration "${declaration.skipMarker ?? "skipped"}": its assertions never run and no reason or ticket is recorded`,
+            },
+        ];
+    });
+}
+
 /** All findings from one source, in line order. */
 function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
     const masked = maskTestSource(source.content);
@@ -98,6 +158,7 @@ function sourceFindings(source: TestReviewSource): TestHygieneFinding[] {
             message: (marker) =>
                 `focused suite declaration "${marker}": every other suite in the file is skipped`,
         }),
+        ...skippedFindings(source),
     ];
 }
 

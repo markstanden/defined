@@ -6,6 +6,8 @@ import { test } from "node:test";
 
 import { reviewTestSources } from "./rules.mts";
 
+const NODE_IMPORT = 'import { it } from "node:test";\n';
+
 test("reports a focused test declaration with its marker", () => {
     // Arrange
     const source = {
@@ -223,5 +225,65 @@ test("reports a focused specify declaration at its line", () => {
             line: finding.line,
         })),
         [{ rule: "focused-test", line: 2 }],
+    );
+});
+
+test("reports every unparked skip marker", () => {
+    // Arrange
+    const markers = ["it.skip", "test.todo", "specify.skip"];
+
+    // Act
+    const found = markers.map((marker) =>
+        reviewTestSources([
+            {
+                path: "a.test.ts",
+                content: `${NODE_IMPORT}${marker}("works", () => {});`,
+            },
+        ]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map(([finding]) => ({
+            rule: finding?.rule,
+            line: finding?.line,
+        })),
+        markers.map(() => ({ rule: "skipped-test", line: 2 })),
+    );
+    assert.match(found[0]?.[0]?.message ?? "", /it\.skip/u);
+});
+
+test("stays silent for each ticket shape beside a skip", () => {
+    // Arrange
+    const contents = [
+        `// parked: #123\nit.skip("works", () => {});`,
+        '// blocked on PROJ-42\nit.skip("works", () => {});',
+        'it.skip("works #42", () => {});',
+        `// see https://example.test/issues/7\nit.skip("works", () => {});`,
+    ].map((body) => NODE_IMPORT + body);
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
+
+test("reports a skip whose ticket sits beyond a blank line", () => {
+    // Arrange
+    const content = `${NODE_IMPORT}// parked: #123\n\nit.skip("works", () => {});`;
+
+    // Act
+    const findings = reviewTestSources([{ path: "a.test.ts", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["skipped-test"],
     );
 });
