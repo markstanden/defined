@@ -55,6 +55,14 @@ modules, not enforced against consumer code:
   would execute them.
 - **Injected runner**: modules that invoke binaries accept an optional
   `runner` param so tests need no host binaries.
+- **Fixture repos pin their own git config**: a test that creates a temporary
+  repository and commits must disable signing — repo-local
+  `git config commit.gpgsign false`, or `git -c commit.gpgsign=false commit`.
+  A host with `commit.gpgsign = true` otherwise turns the fixture's commit into
+  a pinentry prompt that dies at the runner's timeout (60 s), and CI, where
+  nothing is configured, never sees it. Diagnose such a hang with
+  `GIT_CONFIG_GLOBAL=/dev/null node --test <file>` — that is a probe, not the
+  fix: the fixture pins its own config.
 
 ## Test naming
 
