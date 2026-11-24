@@ -48,6 +48,11 @@
 // expression-arrow body returns implicitly, so it is exempt. The await is read
 // from the same statement, so an earlier awaited call does not excuse it.
 //
+// Deliberate ceiling (ponytail): that read is lexical and statement-scoped. A
+// `.rejects` promise stored and awaited on a later line reports, as does one
+// inside a nested arrow body; the scanner shares both shapes. Upgrade to a
+// parser if either ever turns up for real.
+//
 // `swallowed-exception` reads `catch` blocks: one that neither asserts nor
 // rethrows cannot tell a wrong exception from the expected one. A flag set in
 // the catch and referenced by a later assertion in the same test is the

@@ -812,3 +812,22 @@ test("does not read a catch block in a comment or string", () => {
         lines.map(() => []),
     );
 });
+
+test("keeps the lexical await read (documented ceilings)", () => {
+    // Arrange
+    const bodies = [
+        "    const promise = expect(sut.run()).rejects.toThrow();\n    await promise;",
+        "    const check = () => expect(sut.run()).rejects.toThrow();\n    await check();",
+    ].map((body) => `${NODE_IMPORT}it("works", async () => {\n${body}\n});`);
+
+    // Act
+    const found = bodies.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        bodies.map(() => ["unawaited-async-assertion"]),
+    );
+});
