@@ -782,7 +782,7 @@ test("printUsage prints the result-verb usage line with flags", () => {
 
     // Assert
     assert.deepEqual(lines, [
-        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined scan [--min|--full] [--timings] | defined explain <step-or-rule>",
+        "usage: defined comply [--min|--full] [--timings] | defined verify [--min|--full] [--timings] | defined scan [--files <paths…>] [--min|--full] [--timings] | defined explain <step-or-rule>",
     ]);
 });
 
@@ -1488,4 +1488,65 @@ test("runGate_scan_surfacesTheConsumerConfigDriftWithoutBootstrap", async () => 
         result.notices?.[0]?.message ?? "",
         /scope\.include: narrows the content checks to 1 selector\(s\)/u,
     );
+});
+
+test("runPass gives the review files to steps beside the content scope", async () => {
+    // Arrange
+    const seen: Array<{
+        checkFiles: string[];
+        reviewFiles?: readonly string[];
+    }> = [];
+
+    // Act
+    await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: ["src/a.ts", "src/b.ts"],
+        scope: ["src/**"],
+        reviewFiles: ["src/b.ts"],
+        steps: [
+            {
+                id: "probe",
+                scoped: true,
+                run: async ({ checkFiles, reviewFiles }) => {
+                    seen.push({ checkFiles, reviewFiles });
+                    return passed({});
+                },
+            },
+        ],
+    });
+
+    // Assert
+    assert.deepEqual(seen, [
+        {
+            checkFiles: ["src/a.ts", "src/b.ts"],
+            reviewFiles: ["src/b.ts"],
+        },
+    ]);
+});
+
+test("runGate_scan passes the review files to the pass", async () => {
+    // Arrange
+    const seen: (readonly string[] | undefined)[] = [];
+
+    // Act
+    await withScopedConfig(async (repoRoot) => {
+        await runGate({
+            verb: "scan",
+            repoRoot,
+            files: [],
+            reviewFiles: ["src/a.test.ts"],
+            deps: {
+                runPassFn: async (input) => {
+                    seen.push(input.reviewFiles);
+                    return allGreen();
+                },
+                printFn: () => undefined,
+                exitFn: () => undefined,
+            },
+        });
+    });
+
+    // Assert
+    assert.deepEqual(seen, [["src/a.test.ts"]]);
 });

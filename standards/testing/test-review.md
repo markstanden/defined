@@ -19,6 +19,9 @@ selects scope, never rules:
 - The rule set is chosen by the step, not the caller. `--files` widens it to the
   review tier for exactly those files; no flag selects an individual rule or a
   tier on its own.
+- The named files scope the test-hygiene rules. Every other step still judges
+  the repository as configured, so a selector-driven step (purity, tofu) is
+  never narrowed out from under its own declaration.
 - Output is the same diagnostics shape as `verify`: rule id, file, line,
   message. The reviewer reads it; nothing parses prose.
 - `--files` is a `scan` flag only. `verify` has no file list, so a reviewer

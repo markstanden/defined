@@ -2,6 +2,9 @@
 // Run: node --test runtime/steps/test-hygiene.test.mts
 
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import { runTestHygieneStep } from "./test-hygiene.mts";
@@ -149,4 +152,54 @@ test("errors when a source cannot be read", async () => {
     assert.equal(result.status, "error");
     assert.match(result.notice ?? "", /could not read "a\.test\.ts"/u);
     assert.match(result.notice ?? "", /permission denied/u);
+});
+
+test("reads exactly the named files, untracked ones included", async () => {
+    // Arrange
+    const sources = {
+        "fresh.test.ts":
+            'import { it } from "node:test";\n\nit("works", () => {\n    setup();\n});\n',
+    };
+
+    // Act
+    const result = await runTestHygieneStep({
+        ctx: { mode: "no-fix", repoRoot: "/repo" },
+        trackedFiles: [],
+        reviewFiles: ["fresh.test.ts"],
+        reader: readerFor(sources),
+    });
+
+    // Assert
+    assert.equal(result.status, "fail");
+    assert.deepEqual(
+        result.errors?.map((error) => [error.rule, error.file]),
+        [["no-assertions", "fresh.test.ts"]],
+    );
+});
+
+test("reads a named file from disk", async () => {
+    // Arrange
+    const repoRoot = await mkdtemp(join(tmpdir(), "quality-hygiene-"));
+    await mkdir(join(repoRoot, "tests"));
+    await writeFile(
+        join(repoRoot, "tests", "bad.test.ts"),
+        'import { it } from "node:test";\nimport assert from "node:assert/strict";\n\nit.only("works", () => {\n    assert.equal(value(), 1);\n});\n',
+    );
+    try {
+        // Act
+        const result = await runTestHygieneStep({
+            ctx: { mode: "no-fix", repoRoot },
+            trackedFiles: [],
+            reviewFiles: ["tests/bad.test.ts"],
+        });
+
+        // Assert
+        assert.equal(result.status, "fail");
+        assert.deepEqual(
+            result.errors?.map((error) => error.rule),
+            ["focused-test"],
+        );
+    } finally {
+        await rm(repoRoot, { recursive: true, force: true });
+    }
 });

@@ -99,6 +99,8 @@ async function readSources({
  * @param root0 the parameter object
  * @param root0.ctx the run mode and repo root
  * @param root0.trackedFiles the scoped files to judge
+ * @param root0.reviewFiles the `scan --files` list, which replaces the scoped
+ *   files when present
  * @param root0.reader source reader, injected so tests need no checkout
  * @returns skip when there is nothing to read, pass when clean, fail with one
  *   diagnostic per finding, or error when a source cannot be read
@@ -106,10 +108,13 @@ async function readSources({
 export async function runTestHygieneStep({
     ctx,
     trackedFiles,
+    reviewFiles,
     reader = (path) => readFile(path, "utf8"),
 }: {
     ctx: TestHygieneRunContext;
     trackedFiles: string[];
+    /** `scan --files` only: exactly the named files, untracked included. */
+    reviewFiles?: readonly string[];
     reader?: Reader;
 }): Promise<StepResult> {
     if (ctx.mode === "fix") {
@@ -117,7 +122,10 @@ export async function runTestHygieneStep({
             notice: "test-hygiene: read-only; checked in the verification pass",
         });
     }
-    const files = filterTestHygieneFiles({ files: trackedFiles });
+    const files =
+        reviewFiles === undefined
+            ? filterTestHygieneFiles({ files: trackedFiles })
+            : [...reviewFiles];
     if (files.length === 0) {
         return skipped({ notice: "test-hygiene: no sources to read" });
     }
