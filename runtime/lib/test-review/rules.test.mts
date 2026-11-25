@@ -1042,6 +1042,27 @@ test("reports an unawaited C# async assertion", () => {
     );
 });
 
+test("leaves a Moq ThrowsAsync setup alone", () => {
+    // Arrange — Moq configuration, not an assertion: ThrowsAsync on a Setup
+    // chain arranges mock behaviour and needs no await.
+    const content = xunitMethod(
+        [
+            "    [Fact]",
+            "    public async Task Sends()",
+            "    {",
+            '        _mock.Setup(s => s.SendAsync(It.IsAny<string>())).ThrowsAsync(new Exception("boom"));',
+            "        await Assert.ThrowsAsync<Exception>(() => Sut.Run());",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "SenderTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
 /** One node:test declaration whose body holds the given statement. */
 function nodeTestBody(statement: string): string {
     return `import { test } from "node:test";\ntest("case", () => {\n    ${statement}\n});`;
