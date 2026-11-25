@@ -150,18 +150,33 @@ test("maskTestSource blanks a multi-line template literal without moving its new
     assert.equal(masked, "const a = " + "  \n  ;\nconst b = 2;");
 });
 
-test("maskTestSource masks the rest of the source after a quote in a regex literal (documented ceiling)", () => {
-    // Arrange
-    const content = "const re = /[\"']/;\nconst kept = 1;";
-    const visible = "const re = /[";
+test("maskTestSource blanks a regex literal and keeps the code after it", () => {
+    // Arrange — quotes and a bracket inside the pattern are data, not code.
+    const content = "const re = /[\"']\\]/;\nconst kept = 1;";
+
+    // Act
+    const masked = maskTestSource(content);
+
+    // Assert — the whole pattern is blank and the code after it survives.
+    const pattern = content.slice("const re = ".length, content.indexOf(";"));
+    assert.equal(
+        masked,
+        "const re = " + " ".repeat(pattern.length) + ";\nconst kept = 1;",
+    );
+});
+
+test("maskTestSource keeps a regex bracket out of the masked body span", () => {
+    // Arrange — an escaped close bracket must not end a bracket-matched span.
+    const content = "const re = /a\\]b/;\nconst kept = 1;";
 
     // Act
     const masked = maskTestSource(content);
 
     // Assert
+    const pattern = content.slice("const re = ".length, content.indexOf(";"));
     assert.equal(
-        masked.slice(visible.length),
-        content.slice(visible.length).replace(/[^\n]/gu, " "),
+        masked,
+        "const re = " + " ".repeat(pattern.length) + ";\nconst kept = 1;",
     );
 });
 

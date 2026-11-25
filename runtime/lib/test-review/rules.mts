@@ -486,6 +486,7 @@ function determinismFindings({
             if (body === null) {
                 return [];
             }
+            const raw = declaration.body ?? body;
             return DETERMINISM_RULES.flatMap((rule): TestHygieneFinding[] =>
                 suppressed.has(rule.rule)
                     ? []
@@ -497,7 +498,7 @@ function determinismFindings({
                               bodyLine: declaration.bodyLine,
                               index: match.index ?? 0,
                           }),
-                          message: `${rule.subject} in test "${declaration.name}": "${collapse(match[0])}" — ${rule.consequence}`,
+                          message: `${rule.subject} in test "${declaration.name}": "${collapse(raw.slice(match.index ?? 0, (match.index ?? 0) + match[0].length))}" — ${rule.consequence}`,
                       })),
             );
         },
@@ -796,6 +797,9 @@ function unawaitedAssertionFindings({
         if (!body?.startsWith("{")) {
             return [];
         }
+        // The mask blanks literals in place, so the raw body shares its
+        // offsets: quote the original when the message needs to be readable.
+        const raw = declaration.body ?? body;
         return [...body.matchAll(ASYNC_ASSERTION)].flatMap(
             (match): TestHygieneFinding[] => {
                 const index = match.index ?? 0;
@@ -824,7 +828,7 @@ function unawaitedAssertionFindings({
                             bodyLine: declaration.bodyLine,
                             index,
                         }),
-                        message: `unawaited async assertion in test "${declaration.name}": "${collapse(body.slice(start, statementEnd(body, index)))}" — it never runs unless awaited or returned`,
+                        message: `unawaited async assertion in test "${declaration.name}": "${collapse(raw.slice(start, statementEnd(body, index)))}" — it never runs unless awaited or returned`,
                     },
                 ];
             },
@@ -933,7 +937,7 @@ function swallowedExceptionFindings({
                             bodyLine: declaration.bodyLine,
                             index,
                         }),
-                        message: `swallowed exception in test "${declaration.name}": "${collapse(match[0].replace(/\{$/u, ""))}" neither asserts nor rethrows, so the test passes when anything throws`,
+                        message: `swallowed exception in test "${declaration.name}": "${collapse((declaration.body ?? body).slice(index, index + match[0].length).replace(/\{$/u, ""))}" neither asserts nor rethrows, so the test passes when anything throws`,
                     },
                 ];
             },
