@@ -19,17 +19,21 @@ selects scope, never rules:
 - The rule set is chosen by the step, not the caller. `--files` scopes the
   always-on rules and adds the review tier to exactly those files. No flag
   selects an individual rule or a tier on its own.
-- The named files scope the test-hygiene rules. Every other step still judges
-  the repository as configured, so a selector-driven step (purity, tofu) is
-  never narrowed out from under its own declaration.
+- `--files` is a run-wide content selection: the seven scoped steps (`node`,
+  `eslint`, `purity`, `test-hygiene`, `shell`, `yaml`, `tofu`) receive exactly
+  the named files, replacing `.defined.json` `scope.include` for that run. Every
+  other step still judges the repository, so the report carries a `selection`
+  notice naming the steps that were not narrowed, and the exit code keeps
+  describing the whole repository, not the selection.
 - Output is the same diagnostics shape as `verify`: rule id, file, line,
   message. The reviewer reads it; nothing parses prose.
 - `--files` is a `scan` flag only. `verify` has no file list, so a reviewer
   cannot narrow the merge gate.
 - A named file is authoritative: an untracked file is read from the working
   tree, a non-test file is checked (usually nothing applies), and a file outside
-  `.defined.json` `scope.include` is scanned anyway. Two hard errors guard
-  typos: `--files` with no values, and a path that does not exist on disk.
+  `.defined.json` `scope.include` is scanned anyway. Three hard errors guard
+  typos: `--files` with no values, a path that does not exist on disk and a path
+  outside the git inventory (ignored, or not yet listed).
 - There is no baseline, allowlist, history mode or "new findings only" filter.
   Scope is the only variable, and it is explicit.
 

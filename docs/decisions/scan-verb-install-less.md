@@ -21,6 +21,11 @@ Summary: A third result verb, `scan`, runs the gate's lint/scan steps read-only 
   `--min`/`--full`/`--timings` and the exit contract are unchanged. (Amended by
   [scope-and-workspaces](scope-and-workspaces.md): `scan` now reports `config`
   notices, so a narrowed content scope is visible where a work repo runs it.)
+- `scan` also accepts `--files <paths…>`: the named files replace
+  `scope.include` for the seven content steps, a path outside the git inventory
+  is a usage error, and the report names the steps that still judge the whole
+  repository. The exit code keeps its whole-repository meaning (see the
+  [scope-and-workspaces](scope-and-workspaces.md) addendum).
 - Consumer commands stay declarations-only: `node.checks`,
   `coverage.*.command` and `naming.command` run only when `.defined.json`
   declares them. With no config those steps report `skip`. There is no

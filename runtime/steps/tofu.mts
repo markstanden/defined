@@ -329,8 +329,9 @@ async function runTofuVerify({
 
 /**
  * Run the tofu step over the tracked .tf files: repair mutations only in fix
- * mode, the full checks in no-fix mode (#65). Returns skip when no .tf files
- * tracked; fail naming the failing phase/dir.
+ * mode, the full checks in no-fix mode (#65). `fmt` is file-scoped; `tflint`
+ * and `validate` run per module directory derived from those files. Returns
+ * skip when no .tf files tracked; fail naming the failing phase/dir.
  */
 export async function runTofuStep({
     ctx,
@@ -340,7 +341,7 @@ export async function runTofuStep({
     readFileFn = readFile,
 }: {
     ctx: TofuRunContext;
-    /** The content-check scope: the *.tf files tofu reports on. */
+    /** The content-check scope: the *.tf files `fmt` reports on. */
     trackedFiles: string[];
     /** The whole git inventory: the working copy is materialised from it. */
     scratchFiles?: string[];

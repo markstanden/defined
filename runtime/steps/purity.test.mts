@@ -136,6 +136,114 @@ test("purity names a selector pointing outside the content scope", async () => {
     assert.equal(calls.length, 0);
 });
 
+test("purity lints the named files on a scan --files run", async () => {
+    // Arrange
+    const dir = await makeRepo({ purity: { pureModules: ["lib/**"] } });
+    const { runner, calls } = recordingRunner({
+        eslint: {
+            status: 0,
+            stdout: eslintResult({ root: dir, files: ["src/a.mts"] }).stdout,
+        },
+    });
+
+    // Act
+    const result = await runPurityStep({
+        ctx: { mode: "no-fix", repoRoot: dir },
+        trackedFiles: ["src/a.mts"],
+        scratchFiles: ["lib/a.mts", "src/a.mts"],
+        reviewFiles: ["src/a.mts"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+    assert.deepEqual(calls[0]!.args.slice(6), ["src/a.mts"]);
+});
+
+test("purity validates the policy against the whole inventory, not the selection", async () => {
+    // Arrange
+    const dir = await makeRepo({ purity: { pureModules: ["legacy/**"] } });
+    const { runner } = recordingRunner({
+        eslint: {
+            status: 0,
+            stdout: eslintResult({ root: dir, files: ["src/a.mts"] }).stdout,
+        },
+    });
+
+    // Act
+    const result = await runPurityStep({
+        ctx: { mode: "no-fix", repoRoot: dir },
+        trackedFiles: ["src/a.mts"],
+        scratchFiles: ["legacy/a.mts", "src/a.mts"],
+        reviewFiles: ["src/a.mts"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "pass");
+});
+
+test("purity flags an impure named module on a scan --files run", async () => {
+    // Arrange
+    const dir = await makeRepo({ purity: { pureModules: ["lib/a.mts"] } });
+    const { runner } = recordingRunner({
+        eslint: {
+            status: 1,
+            stdout: eslintResult({
+                root: dir,
+                status: 1,
+                files: ["lib/a.mts"],
+                messages: {
+                    "lib/a.mts": [
+                        {
+                            ruleId: "defined/pure-module",
+                            severity: 2,
+                            line: 3,
+                            column: 1,
+                            message:
+                                'imports "node:fs/promises". Move the Node built-in use to the caller.',
+                        },
+                    ],
+                },
+            }).stdout,
+        },
+    });
+
+    // Act
+    const result = await runPurityStep({
+        ctx: { mode: "no-fix", repoRoot: dir },
+        trackedFiles: ["lib/a.mts"],
+        scratchFiles: ["lib/a.mts"],
+        reviewFiles: ["lib/a.mts"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "fail");
+    assert.equal(result.errors?.[0]?.file, "lib/a.mts");
+    assert.equal(result.errors?.[0]?.rule, "defined/pure-module");
+});
+
+test("purity skips a selection with no JS/TS file", async () => {
+    // Arrange
+    const dir = await makeRepo({ purity: { pureModules: ["lib/a.ts"] } });
+    const { runner, calls } = recordingRunner();
+
+    // Act
+    const result = await runPurityStep({
+        ctx: { mode: "no-fix", repoRoot: dir },
+        trackedFiles: ["docs/readme.md"],
+        scratchFiles: ["docs/readme.md", "lib/a.ts"],
+        reviewFiles: ["docs/readme.md"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "skip");
+    assert.match(result.notice ?? "", /no JS\/TS file in the selection/u);
+    assert.equal(calls.length, 0);
+});
+
 test("purity reports a target outside the gated files before invoking ESLint", async () => {
     // Arrange
     const dir = await makeRepo({

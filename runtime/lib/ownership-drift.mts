@@ -19,8 +19,11 @@ export const HOUSE_COVERAGE_LINE_MINIMUM = 80;
 
 /** One advisory ownership-drift notice. */
 export interface DriftNotice {
-    /** Consumer config weakening (`config`) or edited seeded default (`seeded`). */
-    kind: "config" | "seeded";
+    /**
+     * Consumer config weakening (`config`), an edited seeded default
+     * (`seeded`) or the steps a `scan --files` run left whole (`selection`).
+     */
+    kind: "config" | "seeded" | "selection";
     /** Single-line, single-phrase description of the drift. */
     message: string;
     /** Repo-relative file that owns the drift, when one does. */

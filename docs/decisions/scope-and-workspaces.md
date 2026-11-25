@@ -63,6 +63,23 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
   `selectPurityPolicy` can see the whole inventory for the diagnostic only.
   Skipping the selector instead was rejected: a silent no-op is the
   stale-selector failure the guard exists to prevent.
+- `scan --files` is a run-wide content selection (2026-11-25): the seven
+  `scoped: true` steps (`node`, `eslint`, `purity`, `test-hygiene`, `shell`,
+  `yaml`, `tofu`) receive exactly the named files through
+  `StepInput.checkFiles`, and the selection replaces `scope.include` for that
+  run. It is intersected with the git inventory (tracked and
+  untracked-but-not-ignored files); a path outside it is a usage error
+  (`--files: not in the git scope`, exit 2), as is a path missing from
+  disk.
+- A selection matching nothing after the intersection fails every scoped step
+  with `files: --files selection matches no file in the git scope (N path(s))`,
+  and the report carries one `selection` notice naming the six steps that still
+  judge the whole repository (`dotnet`, `dotnet-coverage`, `naming`,
+  `node-checks`, `node-coverage`, `workflow`). A `tofu` selection narrows `fmt`
+  to the named `.tf` files, but `tflint` and `validate` still run per module
+  directory, so those phases can name an unnamed sibling `.tf` file. `files` and
+  `scratchFiles` stay whole, so the scratch copy, dependency restore, manifest
+  probes and purity's policy view keep the full inventory.
 
 ## Inferred
 
@@ -100,6 +117,21 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
 - `dotnet.workspaces` belongs beside the scope rather than inside it: the scope
   says which findings are reported, the workspaces say what is built, and a
   repo may legitimately build a reference it does not report on.
+- Replacement, not intersection, is the semantics `ctx.mts` and test-hygiene
+  already documented: an explicit file list is the operator's selection for
+  that run, and intersecting it with a committed scope would silently drop
+  files the operator named.
+- The `selection` notice is disclosure, not mitigation: a narrowed run cannot
+  report a compliant repository, so the report says which part of the verdict
+  came from outside the selection. Making the narrowed run exit 0 would break
+  CI and agent parsers that read the status.
+- On a `--files` run purity judges the named JS/TS files under the declared
+  policy instead of the policy's own file list: a named pure module is still
+  checked, an undeclared file has no rule to break, a selection with no JS/TS
+  file skips, and config selectors are validated against the whole inventory.
+  Failing the run because a policy module fell outside the selection was
+  rejected: the selection is a review lens, not a content scope, and the
+  `selection` notice already discloses what was not judged.
 
 ## Tested
 
@@ -117,6 +149,16 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
   invalidation, the stale-vs-out-of-scope purity discrimination, and the
   matcher hoist (40k files × 5 selectors: 214 ms → 21 ms).
 - The repo's own gate: `./runtime/comply.sh`.
+- The `--files` selection (2026-11-25): every scoped step receives the
+  selection in inventory order while unscoped steps keep the whole inventory;
+  the selection replaces `scope.include`; an empty intersection fails the
+  scoped steps and leaves machinery running; the usage guard rejects an
+  out-of-inventory path; the notice names exactly the six whole-repo steps and
+  is absent without the flag; a partition test keeps `SCOPED_STEP_IDS`,
+  `WHOLE_REPO_STEP_IDS`, machinery and `STEP_IDS` in agreement. Purity lints
+  the named files, skips a selection with no JS/TS file, still fails a declared
+  impure named module, and validates its selectors against the whole inventory
+  rather than the selection.
 
 ## Open questions
 
