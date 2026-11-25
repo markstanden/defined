@@ -1109,6 +1109,55 @@ test("reports an unawaited C# async assertion", () => {
     );
 });
 
+test("keeps the body after a regex bracket in view of the rules", () => {
+    // Arrange — `\]` inside a pattern is a bracket in data, so it must not
+    // close the delimited body before the live assertion.
+    const content = [
+        'import { test } from "node:test";',
+        'import assert from "node:assert/strict";',
+        "",
+        'test("pages beyond one page", async () => {',
+        "    const { calls, client } = routeFetch([",
+        "        [",
+        "            /currentPage\\]=1/,",
+        "            { items: [] },",
+        "        ],",
+        '        [/currentPage\\]=2/, { items: [{ sku: "tail-sku" }] }],',
+        "    ]);",
+        "    assert.deepEqual(calls, []);",
+        "});",
+        "",
+    ].join("\n");
+
+    // Act
+    const findings = reviewTestSources([
+        { path: "seed-runs.test.mts", content },
+    ]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("quotes the raw source in an unawaited assertion message", () => {
+    // Arrange — the message must read the original body, not its mask.
+    const content = xunitMethod(
+        [
+            "    [Fact]",
+            "    public async Task Throws()",
+            "    {",
+            '        Assert.ThrowsAsync<Exception>(async () => await Sut.Run("boom"));',
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "SendTests.cs", content }]);
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.match(findings[0]?.message ?? "", /Sut\.Run\("boom"\)/u);
+});
+
 test("leaves a Moq ThrowsAsync setup alone", () => {
     // Arrange — Moq configuration, not an assertion: ThrowsAsync on a Setup
     // chain arranges mock behaviour and needs no await.

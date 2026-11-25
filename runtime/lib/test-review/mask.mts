@@ -15,9 +15,12 @@
 // consumed before quotes are considered, in both modes. An unterminated literal
 // masks to the end of the source, matching the scanner's reading.
 //
-// Deliberate ceiling (ponytail): a text scanner, not a parser. A quote inside a
-// regex literal opens a literal, and the code inside a template interpolation is
-// masked as data, so either can blank real code. mask.test.mts pins both as
+// Regex literals are masked too, since a bracket inside a pattern would
+// otherwise close a bracket-matched span. A `/` starts a regex only after an
+// operator, a bracket or an arrow; after a name or a close bracket it is
+// division. The code inside a template interpolation is still masked as data,
+// and a regex after a keyword (`return /x/`) is read as division, so either can
+// blank real code or leave a pattern's brackets live. mask.test.mts pins both as
 // documented ceilings; upgrade to token-aware parsing only if the blind spots
 // ever earn the dependency.
 
@@ -26,11 +29,13 @@ type Quote = '"' | "'" | "`";
 /** Whether comment text is blanked (`blank`) or kept (`keep`). */
 export type MaskComments = "blank" | "keep";
 
-type MaskMode = "code" | "line-comment" | "block-comment" | "literal";
+type MaskMode = "code" | "line-comment" | "block-comment" | "literal" | "regex";
 
 interface MaskState {
     mode: MaskMode;
     quote: Quote | null;
+    /** Inside a regex character class, where `/` does not close the pattern. */
+    regexClass?: boolean;
 }
 
 interface Step {
@@ -87,6 +92,81 @@ function startLiteral({
     return { next: index + 1, state: { mode: "literal", quote } };
 }
 
+/**
+ * Characters after which a `/` opens a regex literal rather than division.
+ * A close bracket after an arrow (`) => /x/`) or a keyword slips through and
+ * reads as division; that is a documented ceiling.
+ */
+const REGEX_PREFIX = new Set([..."(,=:[!&|?{};+-*%~^<>"]);
+
+/** Whether the `/` at `index` opens a regex literal. */
+function startsRegex(content: string, index: number): boolean {
+    let before = index - 1;
+    while (before >= 0 && /\s/u.test(content[before] ?? "")) {
+        before--;
+    }
+    return before < 0 || REGEX_PREFIX.has(content[before] ?? "");
+}
+
+/** Enter a regex literal, blanking its opening slash. */
+function startRegex({ out, index }: { out: string[]; index: number }): Step {
+    out[index] = " ";
+    return { next: index + 1, state: { mode: "regex", quote: null } };
+}
+
+/** Consume one character of a regex literal, closing on unescaped `/`. */
+function stepRegex({
+    content,
+    out,
+    index,
+    inClass,
+}: {
+    content: string;
+    out: string[];
+    index: number;
+    inClass: boolean;
+}): Step {
+    const char = content[index];
+    if (char === "\\") {
+        blank({ out, index });
+        if (index + 1 < content.length) {
+            blank({ out, index: index + 1 });
+            return {
+                next: index + 2,
+                state: { mode: "regex", quote: null, regexClass: inClass },
+            };
+        }
+        return { next: index + 1, state: { mode: "regex", quote: null } };
+    }
+    if (char === "\n") {
+        // An unterminated pattern: the literal cannot span a line.
+        return { next: index + 1, state: CODE };
+    }
+    if (char === "[" && !inClass) {
+        blank({ out, index });
+        return {
+            next: index + 1,
+            state: { mode: "regex", quote: null, regexClass: true },
+        };
+    }
+    if (char === "]" && inClass) {
+        blank({ out, index });
+        return {
+            next: index + 1,
+            state: { mode: "regex", quote: null, regexClass: false },
+        };
+    }
+    if (char === "/" && !inClass) {
+        out[index] = " ";
+        return { next: index + 1, state: CODE };
+    }
+    blank({ out, index });
+    return {
+        next: index + 1,
+        state: { mode: "regex", quote: null, regexClass: inClass },
+    };
+}
+
 /** Consume one source character in code state. */
 function stepCode({ content, out, index, keep }: Walk): Step {
     const char = content[index];
@@ -96,6 +176,9 @@ function stepCode({ content, out, index, keep }: Walk): Step {
     }
     if (char === "/" && next === "*") {
         return startBlockComment({ content, out, index, keep });
+    }
+    if (char === "/" && startsRegex(content, index)) {
+        return startRegex({ out, index });
     }
     if (char === '"' || char === "'" || char === "`") {
         return startLiteral({ out, index, quote: char });
@@ -178,6 +261,14 @@ function consume({
             out,
             index,
             quote: state.quote ?? '"',
+        });
+    }
+    if (state.mode === "regex") {
+        return stepRegex({
+            content,
+            out,
+            index,
+            inClass: state.regexClass === true,
         });
     }
     return stepCode({ content, out, index, keep });
