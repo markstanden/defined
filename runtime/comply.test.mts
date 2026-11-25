@@ -1611,7 +1611,7 @@ test("selectReviewFiles rejects a path outside the git inventory", () => {
                 files: ["src/a.ts"],
                 selection: ["src/a.ts", "src/b.ts"],
             }),
-        /--files: no such file in the git scope: src\/b\.ts/u,
+        /--files: not in the git scope: src\/b\.ts/u,
     );
 });
 

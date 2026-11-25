@@ -69,15 +69,17 @@ Summary: A repository can narrow the content checks to a declared allowlist (`sc
   `StepInput.checkFiles`, and the selection replaces `scope.include` for that
   run. It is intersected with the git inventory (tracked and
   untracked-but-not-ignored files); a path outside it is a usage error
-  (`--files: no such file in the git scope`, exit 2), as is a path missing from
+  (`--files: not in the git scope`, exit 2), as is a path missing from
   disk.
 - A selection matching nothing after the intersection fails every scoped step
   with `files: --files selection matches no file in the git scope (N path(s))`,
   and the report carries one `selection` notice naming the six steps that still
   judge the whole repository (`dotnet`, `dotnet-coverage`, `naming`,
-  `node-checks`, `node-coverage`, `workflow`). `files` and `scratchFiles` stay
-  whole, so the scratch copy, dependency restore, manifest probes and purity's
-  policy view keep the full inventory.
+  `node-checks`, `node-coverage`, `workflow`). A `tofu` selection narrows `fmt`
+  to the named `.tf` files, but `tflint` and `validate` still run per module
+  directory, so those phases can name an unnamed sibling `.tf` file. `files` and
+  `scratchFiles` stay whole, so the scratch copy, dependency restore, manifest
+  probes and purity's policy view keep the full inventory.
 
 ## Inferred
 

@@ -439,7 +439,7 @@ export function selectReviewFiles({
     const inventory = new Set(files);
     const outside = selection.find((file) => !inventory.has(file));
     if (outside !== undefined) {
-        throw new Error(`--files: no such file in the git scope: ${outside}`);
+        throw new Error(`--files: not in the git scope: ${outside}`);
     }
     return intersectInventory({ files, selection });
 }

@@ -97,7 +97,9 @@ defined scan --files src/order.ts tests/order.test.ts
 The named files replace `scope.include` for that run and are handed to the
 seven content steps (`node`, `eslint`, `purity`, `test-hygiene`, `shell`,
 `yaml`, `tofu`); `test-hygiene` also runs its review tier over exactly those
-files. Every other step still judges the whole repository: `dotnet`,
+files. `tofu` format-checks the named `.tf` files but runs `tflint` and
+`validate` per module directory, so those phases can name an unnamed sibling
+`.tf` file. Every other step still judges the whole repository: `dotnet`,
 `dotnet-coverage`, `naming`, `node-checks`, `node-coverage` and `workflow`
 (actionlint, zizmor, gitleaks). The report carries a `selection` notice naming
 those steps, because the exit code keeps its whole-repository meaning: a
