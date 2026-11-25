@@ -43,6 +43,10 @@ STANDARDS_DIR="${GATE_ROOT}/standards"
 # Repo root comes from the invocation CWD's git root — never from where this
 # script lives — so the gate can run against any checkout.
 REPO_ROOT="$(git -C "${PWD}" rev-parse --show-toplevel)" || {
+    # The report contract is one JSON line on stdout, and a caller reading the
+    # pipe must be able to tell "could not run" from an empty run. The human
+    # message stays on stderr.
+    echo '{"status":"error","errors":[{"check":"git","kind":"execution","message":"not inside a git repository (run from within the target project)"}]}'
     echo "ERROR: not inside a git repository (run from within the target project)" >&2
     exit 1
 }

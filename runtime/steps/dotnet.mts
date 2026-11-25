@@ -68,12 +68,23 @@ export interface DiscoverWorkspaceInput {
 }
 
 /**
+ * A bounded name list for an error message: the first five paths, then the
+ * number left out, so a repository with dozens of projects still reads.
+ */
+function boundedList(paths: readonly string[]): string {
+    const head = paths.slice(0, 5).join(", ");
+    const rest = paths.length - 5;
+    return rest > 0 ? `${head} and ${rest} more` : head;
+}
+
+/**
  * Discover the .NET workspace to operate on.
  * Priority: explicit env → single .slnx → single .sln → single .csproj →
  * repo root. The csproj resolution matters: the CLI cannot operate on a bare
  * directory that merely *contains* a project, so a lone nested project must be
- * passed by path. Throws on multiple solutions, or multiple projects with no
- * solution, without explicit selection.
+ * passed by path. Solutions are collected at any depth, not only at the root.
+ * Throws on multiple solutions, or multiple projects with no solution, without
+ * explicit selection; the message lists the first few paths and a count.
  */
 export function discoverWorkspace({
     repoRoot,
@@ -93,10 +104,9 @@ export function discoverWorkspace({
     }
     if (slnxFiles.length + slnFiles.length > 1) {
         throw new Error(
-            `Multiple solution files found at repo root; use --workspace or TOOL_WORKSPACE: ${[
-                ...slnxFiles,
-                ...slnFiles,
-            ].join(", ")}`,
+            `Multiple solution files found in the repository; use --workspace or TOOL_WORKSPACE: ${boundedList(
+                [...slnxFiles, ...slnFiles],
+            )}`,
         );
     }
     if (csprojFiles.length === 1) {
@@ -104,8 +114,8 @@ export function discoverWorkspace({
     }
     if (csprojFiles.length > 1) {
         throw new Error(
-            `Multiple .csproj files with no solution; use --workspace or TOOL_WORKSPACE: ${csprojFiles.join(
-                ", ",
+            `Multiple .csproj files with no solution; use --workspace or TOOL_WORKSPACE: ${boundedList(
+                csprojFiles,
             )}`,
         );
     }

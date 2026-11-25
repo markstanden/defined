@@ -116,6 +116,56 @@ test("discoverWorkspace throws on multiple solutions", () => {
     );
 });
 
+test("discoverWorkspace names the depth rule and bounds the solution list", () => {
+    // Arrange
+    const slnFiles = Array.from(
+        { length: 7 },
+        (_, index) => `src/s${index}/App.sln`,
+    );
+
+    // Act & Assert
+    assert.throws(
+        () =>
+            discoverWorkspace({
+                repoRoot: "/repo",
+                slnxFiles: [],
+                slnFiles,
+                csprojFiles: [],
+            }),
+        (err: unknown) => {
+            assert.ok(err instanceof Error);
+            assert.match(err.message, /in the repository/u);
+            assert.match(err.message, /src\/s4\/App\.sln and 2 more/u);
+            assert.ok(!err.message.includes("src/s5/App.sln"));
+            return true;
+        },
+    );
+});
+
+test("discoverWorkspace bounds the multiple-project list", () => {
+    // Arrange
+    const csprojFiles = Array.from(
+        { length: 6 },
+        (_, index) => `src/p${index}/P.csproj`,
+    );
+
+    // Act & Assert
+    assert.throws(
+        () =>
+            discoverWorkspace({
+                repoRoot: "/repo",
+                slnxFiles: [],
+                slnFiles: [],
+                csprojFiles,
+            }),
+        (err: unknown) => {
+            assert.ok(err instanceof Error);
+            assert.match(err.message, /src\/p4\/P\.csproj and 1 more/u);
+            return true;
+        },
+    );
+});
+
 test("discoverWorkspace throws on multiple projects with no solution", () => {
     // Act & Assert
     assert.throws(
