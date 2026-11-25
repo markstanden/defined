@@ -90,10 +90,11 @@ export function lineAt({
 }
 
 /**
- * Whether an offset is live code rather than a string or comment.
+ * Whether an offset is live code rather than a string, comment or regex
+ * literal.
  *
- * `maskTestSource` blanks both while preserving offsets, so a character that
- * changed between the source and its mask marks the offset as data.
+ * `maskTestSource` blanks all three while preserving offsets, so a character
+ * that changed between the source and its mask marks the offset as data.
  */
 function inCode(content: string, masked: string, index: number): boolean {
     let offset = index;
@@ -175,8 +176,8 @@ function bodySpan(masked: string, from: number): [number, number] | null {
  *
  * Starts after the `=>` and stops at the closing bracket of the `it(...)`
  * call, or at a top-level comma when the arrow is not the final argument (for
- * example a trailing timeout). Brackets inside masked strings are blank, so
- * the count cannot be fooled by them.
+ * example a trailing timeout). Brackets inside masked strings, comments and
+ * regex literals are blank, so the count cannot be fooled by them.
  *
  * ponytail: lexical delimiting, not a parser. The arrow window is bounded by
  * the caller; a nested arrow inside the expression is delimited by bracket
