@@ -34,12 +34,12 @@
 // git content every other step sees.
 
 import { existsSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { failed, passed, type StepResult } from "../lib/step-result.mts";
-import { run, failureDetail } from "../../lib/proc.mts";
+import { run, failureDetail, type CommandResult } from "../../lib/proc.mts";
 import {
     filterFixableFiles,
     filterWorkflowAuditFiles,
@@ -229,6 +229,110 @@ async function runWorkflowTools({
     return null;
 }
 
+/** Findings named in a gitleaks failure notice before the count takes over. */
+const GITLEAKS_NOTICE_FINDINGS = 5;
+
+/** Byte bound for a gitleaks failure notice. */
+const NOTICE_BYTES = 480;
+
+/** ANSI SGR escape sequence, built from a char code to keep the lint quiet. */
+const ANSI_ESCAPE = new RegExp(`${String.fromCharCode(0x1b)}\\[[0-9;]*m`, "gu");
+
+/** Strip ANSI colour escapes a tool writes into its log stream. */
+export function stripAnsi({ text }: { text: string }): string {
+    return text.replace(ANSI_ESCAPE, "");
+}
+
+/** Bound a notice to its byte cap, keeping the start (findings lead). */
+function capNotice({ text }: { text: string }): string {
+    if (Buffer.byteLength(text) <= NOTICE_BYTES) {
+        return text;
+    }
+    const kept: string[] = [];
+    let bytes = 0;
+    for (const char of text) {
+        const width = Buffer.byteLength(char);
+        if (bytes + width > NOTICE_BYTES - 3) {
+            break;
+        }
+        kept.push(char);
+        bytes += width;
+    }
+    return `${kept.join("")}...`;
+}
+
+/**
+ * Render gitleaks JSON report findings as `file:line rule`, dropping entries
+ * without a rule id or file (nothing locatable to name).
+ */
+export function parseGitleaksFindings({ text }: { text: string }): string[] {
+    const parsed: unknown = JSON.parse(text);
+    if (!Array.isArray(parsed)) {
+        return [];
+    }
+    return parsed.flatMap((entry) => {
+        if (typeof entry !== "object" || entry === null) {
+            return [];
+        }
+        const finding = entry as Record<string, unknown>;
+        const ruleId = finding["RuleID"];
+        const file = finding["File"];
+        const startLine = finding["StartLine"];
+        if (typeof ruleId !== "string" || typeof file !== "string") {
+            return [];
+        }
+        const line = typeof startLine === "number" ? startLine : 0;
+        return [`${file}:${line} ${ruleId}`];
+    });
+}
+
+/**
+ * The findings in a gitleaks JSON report, or none when the file is absent or
+ * unparseable — a config or scan failure never writes one.
+ */
+async function readGitleaksReport({
+    reportPath,
+}: {
+    reportPath: string;
+}): Promise<string[]> {
+    try {
+        const text = await readFile(reportPath, "utf8");
+        return parseGitleaksFindings({ text });
+    } catch {
+        return [];
+    }
+}
+
+/**
+ * A gitleaks failure as one notice: the locatable findings (bounded, with a
+ * count), else the tool's own output with its ANSI colouring stripped. The
+ * banner never reaches the notice because the scan runs with --no-banner.
+ */
+async function gitleaksNotice({
+    result,
+    reportPath,
+}: {
+    result: CommandResult;
+    reportPath: string;
+}): Promise<string> {
+    const findings = await readGitleaksReport({ reportPath });
+    if (findings.length === 0) {
+        return capNotice({
+            text: `workflow: gitleaks failed: ${stripAnsi({
+                text: failureDetail({ result }),
+            })}`,
+        });
+    }
+    const shown = findings.slice(0, GITLEAKS_NOTICE_FINDINGS);
+    const more = findings.length - shown.length;
+    const suffix = more > 0 ? ` (+${more} more)` : "";
+    return capNotice({
+        text: `workflow: gitleaks found ${findings.length} secret(s): ${shown.join(
+            "; ",
+        )}${suffix}`,
+    });
+}
+
 /**
  * gitleaks over the repo's git scope. gitleaks `dir` walks the filesystem and
  * ignores .gitignore (no flag as of 8.30.x), so the gate generates a config
@@ -236,7 +340,9 @@ async function runWorkflowTools({
  * paths — a local gitignored .env with a real secret must not fail the gate
  * while CI (no .env) stays green. The consumer's `.gitleaksignore`
  * fingerprint baseline is honoured via an explicit --gitleaks-ignore-path
- * pinned to the repo root (issue #24). Returns the failed result, or null.
+ * pinned to the repo root (issue #24). The scan is quiet (`--no-banner`) and
+ * writes a JSON report, so a failure names file:line rule instead of embedding
+ * the banner. Returns the failed result, or null.
  */
 async function runGitleaks({
     ctx,
@@ -262,28 +368,37 @@ async function runGitleaks({
     const configPath = await writeGitleaksConfig({
         ignoredPaths: parseIgnoredPaths({ status: ignoredStatus.stdout }),
     });
-    const gitleaks = await runner({
-        cmd: "gitleaks",
-        args: [
-            "dir",
-            "--config",
-            configPath,
-            ...gitleaksIgnoreArgs({
-                repoRoot: ctx.repoRoot,
-                exists: existsSyncFn,
-            }),
-            ".",
-        ],
-        cwd: ctx.repoRoot,
-    });
-    if (gitleaks.status !== 0) {
-        return failed({
-            notice: `workflow: gitleaks found secrets: ${failureDetail({
-                result: gitleaks,
-            })}`,
+    const reportDir = await mkdtemp(join(tmpdir(), "defined-gitleaks-"));
+    const reportPath = join(reportDir, "report.json");
+    try {
+        const gitleaks = await runner({
+            cmd: "gitleaks",
+            args: [
+                "dir",
+                "--config",
+                configPath,
+                ...gitleaksIgnoreArgs({
+                    repoRoot: ctx.repoRoot,
+                    exists: existsSyncFn,
+                }),
+                "--no-banner",
+                "--report-format",
+                "json",
+                "--report-path",
+                reportPath,
+                ".",
+            ],
+            cwd: ctx.repoRoot,
         });
+        if (gitleaks.status !== 0) {
+            return failed({
+                notice: await gitleaksNotice({ result: gitleaks, reportPath }),
+            });
+        }
+        return null;
+    } finally {
+        await rm(reportDir, { recursive: true, force: true });
     }
-    return null;
 }
 
 /** The clean-pass notice, worded by what actually ran. */
