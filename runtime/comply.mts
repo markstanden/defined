@@ -1246,6 +1246,20 @@ async function createContextOrExit(parsed: ParsedCommand): Promise<RunContext> {
     }
 }
 
+/**
+ * Record the run's exit status and return, instead of calling
+ * `process.exit(code)`. A report larger than the 64 KiB pipe buffer is still in
+ * flight when the run finishes, so an immediate exit truncates the single JSON
+ * line mid-string; setting `process.exitCode` lets the event loop drain stdout
+ * first. The call must stay after the lock release, so a failing run cannot
+ * strand the checkout lock (#75).
+ *
+ * @param exitCode - status for the shell; zero for a compliant run.
+ */
+export function settleExit(exitCode: number): void {
+    process.exitCode = exitCode;
+}
+
 async function main(): Promise<void> {
     const positional = process.argv.slice(2);
 
@@ -1316,7 +1330,7 @@ async function main(): Promise<void> {
     // 64 KiB pipe buffer finishes writing, cutting the single JSON line
     // mid-string exactly when a repo has enough findings to matter. This also
     // keeps the lock-release ordering above intact (#75).
-    process.exitCode = exitCode;
+    settleExit(exitCode);
 }
 
 if (import.meta.main) {
