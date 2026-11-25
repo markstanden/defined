@@ -21,6 +21,7 @@ import {
     runPass,
     runSmoke,
     SCOPED_STEP_IDS,
+    settleExit,
     STEP_IDS,
 } from "./comply.mts";
 import { STEP_IDS as EXPLAIN_STEP_IDS } from "./lib/explain.mts";
@@ -1549,4 +1550,22 @@ test("runGate_scan passes the review files to the pass", async () => {
 
     // Assert
     assert.deepEqual(seen, [["src/a.test.ts"]]);
+});
+
+test("settleExit records the status without ending the process", () => {
+    // Arrange — node:test shares this process, so the previous status is
+    // restored afterwards rather than leaking a failing status onto the suite.
+    const previous = process.exitCode;
+
+    try {
+        for (const exitCode of [0, 1, 2]) {
+            // Act
+            settleExit(exitCode);
+
+            // Assert
+            assert.equal(process.exitCode, exitCode);
+        }
+    } finally {
+        process.exitCode = previous;
+    }
 });

@@ -744,6 +744,12 @@ function noAssertionFindings({
  */
 const ASYNC_ASSERTION = /\b(?:ThrowsAsync|ThrowAsync)\s*[<(]|\.rejects\b/g;
 
+/**
+ * Moq configuration calls. `ThrowsAsync`/`ThrowAsync` chained to one of these
+ * arranges mock behaviour; it is not an assertion and is never awaited.
+ */
+const MOQ_CONFIGURATION = /\.(?:Setup|SetupSet|SetupSequence)\s*\(/u;
+
 /** Start of the statement containing `index`: after the last statement end. */
 function statementStart(body: string, index: number): number {
     return (
@@ -791,6 +797,14 @@ function unawaitedAssertionFindings({
                 const index = match.index ?? 0;
                 const start = statementStart(body, index);
                 const prefix = body.slice(start, index);
+                // A ThrowsAsync/ThrowAsync chained to a Moq setup call is mock
+                // configuration, not an assertion.
+                if (
+                    /ThrowsAsync|ThrowAsync/u.test(match[0]) &&
+                    MOQ_CONFIGURATION.test(prefix)
+                ) {
+                    return [];
+                }
                 if (
                     /(?:^|[^A-Za-z0-9_$])await\b/u.test(prefix) ||
                     /\breturn\b/u.test(prefix)
