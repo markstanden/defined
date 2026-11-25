@@ -622,6 +622,7 @@ const DOTNET_ASSERTION_CALLS: readonly RegExp[] = [
     /\bAssert\.\w+/u,
     /\bStringAssert\.\w+/u,
     /\bCollectionAssert\.\w+/u,
+    /\b\w*Assert\.\w+\s*\(/u,
     /\b(?:Assert|Verify|Expect)(?:[A-Z]\w*)?\s*[(<]/u,
     /\.Should\s*\(/u,
     /\bAnd\.\w+\s*\(/u,
@@ -641,7 +642,7 @@ const ASSERTION_CALLS: Readonly<Record<TestFramework, readonly RegExp[]>> = {
 
 /** An assertion call shape inside comment text. */
 const ASSERTION_CALL =
-    /\b(?:Assert|assert|expect|should|verify)(?:\.\w+\s*\(|\s*\()/;
+    /\b(?:Assert|assert|expect|should|verify)(?:\.\w+\s*\(|\()/;
 
 /**
  * Assertion calls left behind in comments inside one source's declarations.
