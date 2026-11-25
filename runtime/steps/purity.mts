@@ -7,19 +7,23 @@
 // and "eslint": { "disable": true } does not turn this check off.
 //
 // Public surface:
-//   runPurityStep({ ctx, trackedFiles, runner }) — skip, pass, fail or error
+//   runPurityStep({ ctx, trackedFiles, reviewFiles, runner }) — skip, pass, fail
+//     or error
 //   purityVerdict({ result, selected, repoRoot }) — classify one ESLint run
 //
 // Fix mode skips the step: it is a policy check, never a repair pass. A missing
 // declaration skips before any parser work. A stale selector, or one pointing
 // outside the declared content scope, is an execution error, not a silent pass.
-// Findings carry the stable rule id, file, line, column and an actionable
-// message.
+// A `scan --files` run judges exactly the named JS/TS files under the same
+// declared policy; config selectors are validated against the whole inventory,
+// because a review selection is not a content scope. Findings carry the stable
+// rule id, file, line, column and an actionable message.
 
 import { relative } from "node:path";
 
 import { gateConfigPath } from "../lib/config-path.mts";
 import { loadConfig } from "../lib/config.mts";
+import { hasJsTsExtension } from "../lib/js-files.mts";
 import {
     purityPolicyEnv,
     selectPurityPolicy,
@@ -90,6 +94,46 @@ function selectedFiles(policy: PurityPolicy): string[] {
     return [...new Set([...policy.pure, ...Object.keys(policy.cqs)])].sort(
         compareStrings,
     );
+}
+
+/**
+ * The files one run needs a verdict for: the policy's own files on a
+ * whole-repository run, or the supported named files of a `scan --files`
+ * selection.
+ */
+function judgeFiles({
+    policy,
+    reviewFiles,
+}: {
+    policy: PurityPolicy;
+    reviewFiles?: readonly string[];
+}): string[] {
+    if (reviewFiles === undefined) {
+        return selectedFiles(policy);
+    }
+    return [...new Set(reviewFiles)]
+        .filter((file) => hasJsTsExtension({ file }))
+        .sort(compareStrings);
+}
+
+/**
+ * An empty judge list: a policy that selects nothing is a configuration error,
+ * while a selection with no supported file is a clean skip, like shell and yaml
+ * on a selection with none of their files.
+ */
+function emptyJudgeResult({
+    reviewFiles,
+}: {
+    reviewFiles?: readonly string[];
+}): StepResult {
+    return reviewFiles === undefined
+        ? errored({ message: "purity: policy selected no files" })
+        : skipped({ notice: "purity: no JS/TS file in the selection" });
+}
+
+/** One line from a caught value, never a raw stack. */
+function errorMessage(err: unknown): string {
+    return err instanceof Error ? err.message : String(err);
 }
 
 /** First non-empty line of a result's output, for a one-line error. */
@@ -316,16 +360,24 @@ export async function runPurityStep({
     ctx,
     trackedFiles,
     scratchFiles = trackedFiles,
+    reviewFiles,
     runner = run,
 }: {
     ctx: PurityRunContext;
-    /** The content-check scope: the files purity judges. */
+    /** The content-check scope: the files a whole-repository run judges. */
     trackedFiles: string[];
     /**
-     * The whole git inventory, used only to tell a stale selector or target
-     * from one pointing outside the declared content scope.
+     * The whole git inventory, used to tell a stale selector or target from one
+     * pointing outside the declared content scope and, on a `scan --files` run,
+     * to validate the policy (a review selection is not a content scope).
      */
     scratchFiles?: string[];
+    /**
+     * `scan --files` only: the named files. ESLint judges exactly these, with
+     * the declared policy still applying to any that it covers, instead of the
+     * policy's own file list.
+     */
+    reviewFiles?: readonly string[];
     runner?: Runner;
 }): Promise<StepResult> {
     if (ctx.mode === "fix") {
@@ -341,17 +393,15 @@ export async function runPurityStep({
     try {
         policy = selectPurityPolicy({
             config: config.purity,
-            files: trackedFiles,
+            files: reviewFiles === undefined ? trackedFiles : scratchFiles,
             allFiles: scratchFiles,
         });
     } catch (err) {
-        return errored({
-            message: err instanceof Error ? err.message : String(err),
-        });
+        return errored({ message: errorMessage(err) });
     }
-    const selected = selectedFiles(policy);
+    const selected = judgeFiles({ policy, reviewFiles });
     if (selected.length === 0) {
-        return errored({ message: "purity: policy selected no files" });
+        return emptyJudgeResult({ reviewFiles });
     }
     let result: CommandResult;
     try {
@@ -374,9 +424,7 @@ export async function runPurityStep({
         });
     } catch (err) {
         return errored({
-            message: `purity: eslint could not run: ${
-                err instanceof Error ? err.message : String(err)
-            }`,
+            message: `purity: eslint could not run: ${errorMessage(err)}`,
         });
     }
     return purityVerdict({ result, selected, repoRoot: ctx.repoRoot });

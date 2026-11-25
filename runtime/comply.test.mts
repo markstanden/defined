@@ -21,8 +21,10 @@ import {
     runPass,
     runSmoke,
     SCOPED_STEP_IDS,
+    selectReviewFiles,
     settleExit,
     STEP_IDS,
+    WHOLE_REPO_STEP_IDS,
 } from "./comply.mts";
 import { STEP_IDS as EXPLAIN_STEP_IDS } from "./lib/explain.mts";
 import type { AcquireLockResult, LockInfo } from "./lib/lock.mts";
@@ -1385,6 +1387,23 @@ test("the run plan scopes exactly the content checks", async () => {
     assert.deepEqual(actual, expected);
 });
 
+test("every run-plan step is scoped, whole-repo judging or machinery", () => {
+    // Arrange — a new step must be classified here, so the `--files` notice
+    // cannot claim to name every step that still judges the repository.
+    const machinery = ["node-deps", "smoke"];
+    const classified = new Set([
+        ...SCOPED_STEP_IDS,
+        ...WHOLE_REPO_STEP_IDS,
+        ...machinery,
+    ]);
+
+    // Act
+    const actual = [...classified].sort();
+
+    // Assert
+    assert.deepEqual(actual, [...STEP_IDS].sort());
+});
+
 /**
  * A temp repo whose `.defined.json` declares `scope.include: ["src/**"]`, so a
  * gate run can resolve a real config without a bootstrap phase.
@@ -1491,26 +1510,31 @@ test("runGate_scan_surfacesTheConsumerConfigDriftWithoutBootstrap", async () => 
     );
 });
 
-test("runPass gives the review files to steps beside the content scope", async () => {
+test("runPass narrows every scoped step to the review files", async () => {
     // Arrange
-    const seen: Array<{
-        checkFiles: string[];
-        reviewFiles?: readonly string[];
-    }> = [];
+    const scoped: string[][] = [];
+    const whole: string[][] = [];
 
     // Act
     await runPass({
         mode: "no-fix",
         repoRoot: "/repo",
-        files: ["src/a.ts", "src/b.ts"],
+        files: ["src/a.ts", "src/b.mts", "docs/c.md"],
         scope: ["src/**"],
-        reviewFiles: ["src/b.ts"],
+        reviewFiles: ["docs/c.md", "src/b.mts"],
         steps: [
             {
-                id: "probe",
+                id: "scoped-probe",
                 scoped: true,
-                run: async ({ checkFiles, reviewFiles }) => {
-                    seen.push({ checkFiles, reviewFiles });
+                run: async ({ checkFiles }) => {
+                    scoped.push(checkFiles);
+                    return passed({});
+                },
+            },
+            {
+                id: "whole-probe",
+                run: async ({ files: inventory }) => {
+                    whole.push(inventory);
                     return passed({});
                 },
             },
@@ -1518,12 +1542,77 @@ test("runPass gives the review files to steps beside the content scope", async (
     });
 
     // Assert
-    assert.deepEqual(seen, [
-        {
-            checkFiles: ["src/a.ts", "src/b.ts"],
-            reviewFiles: ["src/b.ts"],
-        },
-    ]);
+    assert.deepEqual(
+        scoped,
+        [["src/b.mts", "docs/c.md"]],
+        "the selection replaces scope.include and keeps inventory order",
+    );
+    assert.deepEqual(
+        whole,
+        [["src/a.ts", "src/b.mts", "docs/c.md"]],
+        "unscoped steps keep the whole inventory",
+    );
+});
+
+test("runPass fails the scoped steps when the review files match no inventory", async () => {
+    // Arrange
+    const touched: string[] = [];
+
+    // Act
+    const results = await runPass({
+        mode: "no-fix",
+        repoRoot: "/repo",
+        files: ["src/a.ts"],
+        reviewFiles: ["src/ignored.log"],
+        steps: [
+            {
+                id: "scoped-probe",
+                scoped: true,
+                run: async () => {
+                    touched.push("scoped-probe");
+                    return passed({});
+                },
+            },
+            {
+                id: "whole-probe",
+                run: async () => {
+                    touched.push("whole-probe");
+                    return passed({});
+                },
+            },
+        ],
+    });
+
+    // Assert
+    assert.deepEqual(touched, ["whole-probe"], "machinery still reports");
+    assert.match(
+        results.get("scoped-probe")?.errors[0]?.message ?? "",
+        /files: --files selection matches no file in the git scope \(1 path\(s\)\)/u,
+    );
+    assert.equal(results.get("whole-probe")?.status, "pass");
+});
+
+test("selectReviewFiles keeps inventory order and drops duplicates", () => {
+    // Act
+    const selected = selectReviewFiles({
+        files: ["src/a.ts", "src/b.mts", "src/c.md"],
+        selection: ["src/c.md", "src/a.ts", "src/a.ts"],
+    });
+
+    // Assert
+    assert.deepEqual(selected, ["src/a.ts", "src/c.md"]);
+});
+
+test("selectReviewFiles rejects a path outside the git inventory", () => {
+    // Act & Assert — dropping it would narrow the run behind the operator's back.
+    assert.throws(
+        () =>
+            selectReviewFiles({
+                files: ["src/a.ts"],
+                selection: ["src/a.ts", "src/b.ts"],
+            }),
+        /--files: no such file in the git scope: src\/b\.ts/u,
+    );
 });
 
 test("runGate_scan passes the review files to the pass", async () => {
@@ -1550,6 +1639,53 @@ test("runGate_scan passes the review files to the pass", async () => {
 
     // Assert
     assert.deepEqual(seen, [["src/a.test.ts"]]);
+});
+
+test("runGate_scan discloses the steps a file selection leaves whole", async () => {
+    // Arrange
+    const printed: string[] = [];
+
+    // Act
+    await runGate({
+        verb: "scan",
+        repoRoot: "/repo",
+        files: ["src/a.ts"],
+        reviewFiles: ["src/a.ts"],
+        deps: {
+            runPassFn: async () => allGreen(),
+            printFn: (line) => printed.push(line),
+            exitFn: () => undefined,
+        },
+    });
+
+    // Assert
+    const result = parsePrinted(printed);
+    assert.equal(result.notices?.length, 1);
+    assert.equal(result.notices?.[0]?.kind, "selection");
+    assert.match(
+        result.notices?.[0]?.message ?? "",
+        /still judging the whole repository: dotnet, dotnet-coverage, naming, node-checks, node-coverage, workflow$/u,
+    );
+});
+
+test("runGate_scan has no selection notice without a file list", async () => {
+    // Arrange
+    const printed: string[] = [];
+
+    // Act
+    await runGate({
+        verb: "scan",
+        repoRoot: "/repo",
+        files: ["src/a.ts"],
+        deps: {
+            runPassFn: async () => allGreen(),
+            printFn: (line) => printed.push(line),
+            exitFn: () => undefined,
+        },
+    });
+
+    // Assert
+    assert.equal(parsePrinted(printed).notices, undefined);
 });
 
 test("settleExit records the status without ending the process", () => {

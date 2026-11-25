@@ -108,17 +108,19 @@ interface StepInput {
     /** Git-tracked files relative to repoRoot (lib/git.mts). */
     files: string[];
     /**
-     * The git inventory narrowed by `.defined.json` `scope.include`: the files
-     * a content check may report on. Everything that must see the whole tree
-     * (the scratch copy, config and ignore discovery) uses `files` instead.
+     * The files a content check may report on: the git inventory narrowed by
+     * `.defined.json` `scope.include`, or, on a `scan --files` run, by the
+     * named files (the selection replaces the configured scope for that run).
+     * Everything that must see the whole tree (the scratch copy, config and
+     * ignore discovery) uses `files` instead.
      */
     checkFiles: string[];
     /**
-     * `scan --files` only: exactly the named files, handed to the steps that
-     * can honour a named-file list (the test-hygiene rules). Explicit beats
-     * `scope.include` for those rules, and an untracked path is read from the
-     * working tree. `checkFiles` keeps the configured content scope, so a
-     * selector-driven step is never narrowed out from under its declaration.
+     * `scan --files` only: the named files, already validated against the git
+     * inventory. Scoped steps receive them through `checkFiles`; the
+     * test-hygiene step also reads this list for its review tier, so the
+     * reviewer judges exactly the named files. Untracked paths are read from
+     * the working tree.
      */
     reviewFiles?: readonly string[];
     /** Shared scratch box: the write-capable steps (node/dotnet families, tofu) work in /tmp for no-fix (findings #10, #20; issue #43). */
@@ -163,10 +165,11 @@ interface Step {
      */
     uses?: readonly string[];
     /**
-     * True when the step judges consumer content, so `.defined.json`
-     * `scope.include` narrows the files it is handed (`StepInput.checkFiles`).
-     * Declared beside the wiring that consumes `checkFiles`; `SCOPED_STEP_IDS`
-     * is derived from these flags, so the two cannot drift apart.
+     * True when the step judges consumer content, so a content selection —
+     * `.defined.json` `scope.include`, or a `scan --files` selection — narrows
+     * the files it is handed (`StepInput.checkFiles`). Declared beside the
+     * wiring that consumes `checkFiles`; `SCOPED_STEP_IDS` is derived from
+     * these flags, so the two cannot drift apart.
      */
     scoped?: true;
 }
@@ -264,11 +267,12 @@ const STEPS: Step[] = [
         // repair), so comply's verification pass is the only judge.
         id: "purity",
         scoped: true,
-        run: ({ mode, repoRoot, files, checkFiles, runner }) =>
+        run: ({ mode, repoRoot, files, checkFiles, reviewFiles, runner }) =>
             runPurityStep({
                 ctx: { mode, repoRoot },
                 trackedFiles: checkFiles,
                 scratchFiles: files,
+                ...(reviewFiles === undefined ? {} : { reviewFiles }),
                 runner,
             }),
     },
@@ -387,6 +391,134 @@ export const STEP_IDS: readonly string[] = STEPS.map((step) => step.id);
 export const SCOPED_STEP_IDS: ReadonlySet<string> = new Set(
     STEPS.filter((step) => step.scoped === true).map((step) => step.id),
 );
+
+/**
+ * Steps that judge the repository but cannot honour a named-file list, so a
+ * `scan --files` run leaves them whole and discloses that in a notice. This is
+ * a declared list, not a derivation: a new step must be classified here, in
+ * `SCOPED_STEP_IDS` or as machinery, so the notice cannot silently misdescribe
+ * what the run judged (a unit test enforces the partition).
+ */
+export const WHOLE_REPO_STEP_IDS: readonly string[] = [
+    "dotnet",
+    "dotnet-coverage",
+    "naming",
+    "node-checks",
+    "node-coverage",
+    "workflow",
+];
+
+/**
+ * Intersect a named-file selection with the git inventory, in inventory order
+ * and without duplicates.
+ */
+function intersectInventory({
+    files,
+    selection,
+}: {
+    files: string[];
+    selection: readonly string[];
+}): string[] {
+    const named = new Set(selection);
+    return files.filter((file) => named.has(file));
+}
+
+/**
+ * Validate a `scan --files` selection against the git inventory and return the
+ * narrowed list. A named path outside the inventory (ignored, or generated
+ * after the inventory was taken) is a usage error: dropping it would narrow the
+ * run behind the operator's back, and adding it would widen it.
+ */
+export function selectReviewFiles({
+    files,
+    selection,
+}: {
+    files: string[];
+    selection: readonly string[];
+}): string[] {
+    const inventory = new Set(files);
+    const outside = selection.find((file) => !inventory.has(file));
+    if (outside !== undefined) {
+        throw new Error(`--files: no such file in the git scope: ${outside}`);
+    }
+    return intersectInventory({ files, selection });
+}
+
+/**
+ * The pass-level failure for a content selection that gates nothing: the
+ * `--files` selection when one is active (it replaces the configured scope),
+ * otherwise `scope.include`. `null` when an active selection matched at least
+ * one file, and when neither a selection nor a scope is declared.
+ */
+function emptySelectionFailure({
+    scope,
+    scopeFiles,
+    narrowed,
+    selectionSize,
+}: {
+    scope?: string[];
+    scopeFiles: string[];
+    narrowed?: string[];
+    selectionSize: number;
+}): string | null {
+    if (narrowed !== undefined) {
+        return narrowed.length === 0
+            ? `files: --files selection matches no file in the git scope (${selectionSize} path(s))`
+            : null;
+    }
+    return scope !== undefined && scopeFiles.length === 0
+        ? `scope: scope.include matches no file in the git scope (${scope.length} selector(s))`
+        : null;
+}
+
+/**
+ * Resolve the files this pass may report on and, when the selection gates
+ * nothing, the failure every scoped step must carry. A `--files` selection
+ * replaces the configured content scope for the run; without one,
+ * `scope.include` narrows the inventory as declared.
+ */
+function resolveContentSelection({
+    files,
+    scope,
+    reviewFiles,
+}: {
+    files: string[];
+    scope?: string[];
+    reviewFiles?: readonly string[];
+}): { checkFiles: string[]; failure: string | null } {
+    const scoped = resolveScope({ files, include: scope });
+    const narrowed =
+        reviewFiles === undefined
+            ? undefined
+            : intersectInventory({ files, selection: reviewFiles });
+    const failure = emptySelectionFailure({
+        scope,
+        scopeFiles: scoped,
+        narrowed,
+        selectionSize: reviewFiles?.length ?? 0,
+    });
+    if (failure !== null) {
+        return { checkFiles: files, failure };
+    }
+    return { checkFiles: narrowed ?? scoped, failure: null };
+}
+
+/**
+ * The `scan --files` disclosure: which content steps honoured the named files
+ * and which steps still judge the whole repository. The exit code keeps its
+ * whole-repository meaning, so the notice is what tells a caller how much of
+ * the verdict came from outside their selection.
+ */
+export function fileSelectionNotice({
+    files,
+}: {
+    files: readonly string[];
+}): DriftNotice {
+    return {
+        kind: "selection",
+        message: `scan --files: narrowed ${[...SCOPED_STEP_IDS].join(", ")} to ${files.length} file(s); still judging the whole repository: ${WHOLE_REPO_STEP_IDS.join(", ")}`,
+    };
+}
 
 /**
  * Resolve the concurrency bound: an explicit override wins, then the
@@ -788,9 +920,9 @@ export async function runPass({
      */
     scope?: string[];
     /**
-     * `scan --files` only: the exact files the rule step judges. Named files
-     * are handed to the steps that can honour them; the rest of the pass keeps
-     * its configured content scope.
+     * `scan --files` only: the exact files the pass is narrowed to. The named
+     * files replace `scope.include` for the run; the CLI rejects a path outside
+     * the git inventory before the pass starts.
      */
     reviewFiles?: readonly string[];
     steps?: readonly Step[];
@@ -807,14 +939,11 @@ export async function runPass({
     /** Opt-in cache metric sink (`--timings`); silent without it. */
     notify?: (line: string) => void;
 }): Promise<Map<string, StepResult>> {
-    const scoped = resolveScope({ files, include: scope });
-    // A scope that matches nothing is a *valid* config that would gate nothing,
-    // so it fails every step it would have narrowed rather than letting an
-    // empty run read clean. The gate's own machinery still reports.
-    const failure =
-        scope !== undefined && scoped.length === 0
-            ? `scope: scope.include matches no file in the git scope (${scope.length} selector(s))`
-            : null;
+    const { checkFiles, failure } = resolveContentSelection({
+        files,
+        scope,
+        reviewFiles,
+    });
     const activeSteps: readonly Step[] =
         failure === null
             ? steps
@@ -833,7 +962,7 @@ export async function runPass({
         mode,
         repoRoot,
         files,
-        checkFiles: failure === null ? scoped : files,
+        checkFiles,
         ...(reviewFiles === undefined ? {} : { reviewFiles }),
         scratch,
         repoWritable,
@@ -1017,9 +1146,18 @@ async function runVerify({
     );
     // `scan` never adopts, so the bootstrap check belongs to the run plan as a
     // clean skip: nothing is compared against gate copies it never installed.
-    // The consumer's own config drift still surfaces: a narrowed scope is the
-    // operator's decision and must be visible where they run the gate.
-    const notices = setup === undefined ? context.notices : [];
+    // The consumer's own config drift still surfaces, and so do the steps a
+    // `--files` selection left whole: a narrowed scope is the operator's
+    // decision and must be visible where they run the gate.
+    const notices =
+        setup === undefined
+            ? [
+                  ...context.notices,
+                  ...(reviewFiles === undefined
+                      ? []
+                      : [fileSelectionNotice({ files: reviewFiles })]),
+              ]
+            : [];
     const steps: ReportedStep[] = [
         ...(setup === undefined
             ? [
@@ -1282,6 +1420,21 @@ async function main(): Promise<void> {
         return;
     }
     const files = await trackedFiles({ repoRoot: ctx.repoRoot });
+    // A `--files` path outside the inventory (ignored, or generated since the
+    // inventory was taken) is a usage error, reported before any step runs so
+    // it never silently narrows or widens the run.
+    let reviewFiles: string[] | undefined;
+    if (ctx.files !== undefined) {
+        try {
+            reviewFiles = selectReviewFiles({
+                files,
+                selection: ctx.files,
+            });
+        } catch (err) {
+            console.error(String(err));
+            process.exit(2);
+        }
+    }
     // A cancellation (Ctrl-C / SIGTERM) stops pending steps and kills running
     // children through the runner's AbortSignal (#70); the gate then reports and
     // exits non-zero rather than dying mid-run.
@@ -1307,7 +1460,7 @@ async function main(): Promise<void> {
             verb: ctx.verb,
             repoRoot: ctx.repoRoot,
             files,
-            ...(ctx.files === undefined ? {} : { reviewFiles: ctx.files }),
+            ...(reviewFiles === undefined ? {} : { reviewFiles }),
             presentation: ctx.presentation,
             timings: ctx.timings,
             signal: controller.signal,

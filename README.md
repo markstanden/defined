@@ -87,6 +87,24 @@ Consumer commands are never guessed and never taken from argv: `node.checks`,
 declares them. With no config those steps report `skip`; `scan` runs the
 gate's own lint/scan checks only.
 
+`scan` accepts `--files <paths…>` to narrow the content checks to the named
+files, for a review pass over what you just changed:
+
+```bash
+defined scan --files src/order.ts tests/order.test.ts
+```
+
+The named files replace `scope.include` for that run and are handed to the
+seven content steps (`node`, `eslint`, `purity`, `test-hygiene`, `shell`,
+`yaml`, `tofu`); `test-hygiene` also runs its review tier over exactly those
+files. Every other step still judges the whole repository: `dotnet`,
+`dotnet-coverage`, `naming`, `node-checks`, `node-coverage` and `workflow`
+(actionlint, zizmor, gitleaks). The report carries a `selection` notice naming
+those steps, because the exit code keeps its whole-repository meaning: a
+narrowed run can still fail, or pass, on files you did not name. A path must be
+in the git scope (tracked, or untracked and not ignored); one that is not is a
+usage error, so a typo or an ignored file never silently narrows the run.
+
 `scan` needs an image that knows the verb: an unpinned repo rides `latest`
 (always current), while a repo pinned to an older gate image reports that
 image's usage error until `defined update`.
@@ -121,18 +139,20 @@ the plan and noise on every run after that:
 - **`errors`** — actionable diagnostics for failing checks and bootstrap drift
   (`check`, `kind`, `message`, and `file`/`line`/`column`/`rule` where known).
   Present whenever there is at least one; omitted on success, in both modes.
-- **`notices`** — advisory ownership drift, present only when found; it never
-  affects `status` or the exit code. Each entry is
-  `{ "kind": "config" | "seeded", "message", "file"? }`: `config` means a
-  `.defined.json` override weakens the house floor (an `eslint`/`dotnet`/
-  `workflow` `disable` switch, a coverage line minimum below the house default
-  of 80, or a `scope.include` that narrows what the content checks judge), and
-  `seeded` means a project-owned seeded default (`.editorconfig`,
-  `.gitattributes`, `Directory.Build.props`) differs from the image copy.
-  Managed-file drift is not a notice — that stays a bootstrap failure. `scan`
-  has no bootstrap check, so it emits no bootstrap errors, but it does report
-  `config` notices: a narrowed scope must be visible on the verb a work repo
-  actually runs.
+- **`notices`** — advisory, present only when found; it never affects `status`
+  or the exit code. Each entry is
+  `{ "kind": "config" | "seeded" | "selection", "message", "file"? }`:
+  `config` means a `.defined.json` override weakens the house floor (an
+  `eslint`/`dotnet`/`workflow` `disable` switch, a coverage line minimum below
+  the house default of 80, or a `scope.include` that narrows what the content
+  checks judge), `seeded` means a project-owned seeded default
+  (`.editorconfig`, `.gitattributes`, `Directory.Build.props`) differs from the
+  image copy, and `selection` means a `scan --files` run narrowed the content
+  checks, with the message naming the steps that still judge the whole
+  repository. Managed-file drift is not a notice — that stays a bootstrap
+  failure. `scan` has no bootstrap check, so it emits no bootstrap errors, but
+  it does report `config` notices: a narrowed scope must be visible on the verb
+  a work repo actually runs.
 - **`results`** — every check in the run plan, including skipped ones, keyed by
   stable id (`pass`, `fail`, `skip`, `error`, `blocked`). Present with `--full`
   only. On `scan`, `bootstrap` is `skip`.
@@ -447,7 +467,11 @@ parseable. The gate's own launcher mounts the repo read-only for this verb.
     cannot judge. The error says which case it is — a stale path (nothing in
     the repository matches) or a live one pointing outside a declared
     `scope.include`, in which case it names an example match and the two ways
-    to resolve it (widen the scope, or move the declaration inside it).
+    to resolve it (widen the scope, or move the declaration inside it). On a
+    `scan --files` run the named JS/TS files are linted instead of the policy
+    files: a named pure module is still judged, an undeclared file simply has
+    no rule to break, and config selectors are validated against the whole
+    inventory rather than the selection.
 
     On a host that cannot run the managed GitHub workflow (Azure DevOps, GitLab, a private server), switch off its installation and check — local `comply` still runs every in-container step:
 

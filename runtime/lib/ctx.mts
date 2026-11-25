@@ -9,9 +9,9 @@
 // contextual run and noise thereafter. `--timings` is an independent opt-in
 // (issue #71): it adds monotonic phase/step durations on stderr and never
 // changes the stdout contract. `scan` also accepts `--files <paths…>`: exactly
-// the named files replace `scope.include` for the content checks, and a path
-// that does not exist on disk is a usage error. `explain` takes exactly one
-// topic and no flags. Everything else — no verb,
+// the named files replace `scope.include` for every content check, and a path
+// that does not exist on disk or is outside the git inventory is a usage error.
+// `explain` takes exactly one topic and no flags. Everything else — no verb,
 // unknown verbs, the old public `setup`, and the retired `--fix` / `--no-fix` /
 // `--silent` flags — is a concise usage error with a non-zero exit. Never
 // imports steps.
