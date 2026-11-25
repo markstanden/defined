@@ -745,10 +745,13 @@ function noAssertionFindings({
 const ASYNC_ASSERTION = /\b(?:ThrowsAsync|ThrowAsync)\s*[<(]|\.rejects\b/g;
 
 /**
- * Moq configuration calls. `ThrowsAsync`/`ThrowAsync` chained to one of these
- * arranges mock behaviour; it is not an assertion and is never awaited.
+ * Moq configuration calls, including the generic and protected shapes such as
+ * `Protected().Setup<Task<HttpResponseMessage>>(...)`. `ThrowsAsync`/
+ * `ThrowAsync` chained to one of these arranges mock behaviour; it is not an
+ * assertion and is never awaited.
  */
-const MOQ_CONFIGURATION = /\.(?:Setup|SetupSet|SetupSequence)\s*\(/u;
+const MOQ_CONFIGURATION =
+    /\.(?:Setup|SetupSet|SetupSequence)\s*(?:<[^(]*>\s*)?\(/u;
 
 /** Start of the statement containing `index`: after the last statement end. */
 function statementStart(body: string, index: number): number {

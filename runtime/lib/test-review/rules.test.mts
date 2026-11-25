@@ -1063,6 +1063,34 @@ test("leaves a Moq ThrowsAsync setup alone", () => {
     assert.deepEqual(findings, []);
 });
 
+test("leaves a generic Moq Setup ThrowsAsync alone", () => {
+    // Arrange — the generic and protected shapes carry the mock type between
+    // Setup and its argument list, and are still mock configuration.
+    const content = xunitMethod(
+        [
+            "    [Fact]",
+            "    public async Task Sends()",
+            "    {",
+            "        _handler",
+            "            .Protected()",
+            "            .Setup<Task<HttpResponseMessage>>(",
+            '                "SendAsync",',
+            "                ItExpr.IsAny<HttpRequestMessage>(),",
+            "                ItExpr.IsAny<CancellationToken>()",
+            "            )",
+            '            .ThrowsAsync(new HttpRequestException("down"));',
+            "        await Assert.ThrowsAsync<Exception>(() => Sut.Run());",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "HandlerTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
 /** One node:test declaration whose body holds the given statement. */
 function nodeTestBody(statement: string): string {
     return `import { test } from "node:test";\ntest("case", () => {\n    ${statement}\n});`;
