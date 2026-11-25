@@ -580,3 +580,47 @@ test(
         }
     },
 );
+
+test(
+    "a piped report larger than the 64 KiB pipe buffer parses whole",
+    { skip: !hasEngine() },
+    async () => {
+        // Arrange — one unawaited assertion per file, enough findings that the
+        // single-line JSON report exceeds the 64 KiB kernel pipe buffer. The
+        // regression guards process.exit() cutting the report mid-string when
+        // stdout is not a terminal (report truncation at a pipe).
+        const files: Record<string, string> = {};
+        for (let index = 1; index <= 600; index++) {
+            const name = `Unawaited${String(index).padStart(3, "0")}Tests`;
+            files[`${name}.cs`] =
+                `using Xunit;\n\npublic class ${name}\n{\n    [Fact]\n    public async Task Case()\n    {\n        Assert.ThrowsAsync<ArgumentException>(() => Run());\n    }\n}\n`;
+        }
+        const root = await makeTemp();
+        try {
+            await createFixture({ root, files });
+
+            // Act
+            const scan = await run({
+                cmd: gateShim(),
+                args: ["scan"],
+                cwd: root,
+            });
+
+            // Assert — the consumer's view: the report must be complete JSON,
+            // and it must be large enough that the defect would have cut it.
+            const parsed = parseGate(scan.stdout);
+            assert.equal(scan.status, 1);
+            assert.ok(
+                scan.stdout.length > 65536,
+                `the fixture must produce a report over 64 KiB, got ${scan.stdout.length} bytes`,
+            );
+            assert.equal(parsed.status, "not_compliant");
+            assert.ok(
+                (parsed.errors?.length ?? 0) >= 600,
+                `every generated finding must survive, got ${parsed.errors?.length ?? 0}`,
+            );
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
+    },
+);
