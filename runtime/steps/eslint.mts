@@ -40,7 +40,7 @@ import {
     type StepResult,
 } from "../lib/step-result.mts";
 import { resolveWorkingRoot, type Scratch } from "../lib/scratch.mts";
-import { run, type CommandResult } from "../../lib/proc.mts";
+import { run, outcomeLabel, type CommandResult } from "../../lib/proc.mts";
 import { gateConfigPath, toolVersionsPath } from "../lib/config-path.mts";
 import { loadConfig, type DefinedConfig } from "../lib/config.mts";
 import { hasConsumerEslintConfig } from "../lib/eslint-config.mts";
@@ -283,13 +283,143 @@ function groupDiagnostics({
     return byFile;
 }
 
-/** First non-empty line of a result's output, for a one-line notice. */
-function firstLine({ result }: { result: CommandResult }): string {
-    const text =
-        [result.stderr, result.stdout]
-            .map((stream) => stream.trim())
-            .find((stream) => stream !== "") ?? "no output";
-    return text.split("\n")[0] ?? "";
+/** Lines of output kept in a failure notice, and its hard character bound. */
+const TAIL_LINES = 6;
+const TAIL_CHARS = 360;
+
+/** Output of a result as one trimmed block: stderr first, then stdout. */
+function outputBlock({ result }: { result: CommandResult }): string {
+    return [result.stderr, result.stdout]
+        .map((stream) => stream.trim())
+        .filter((stream) => stream !== "")
+        .join("\n");
+}
+
+/**
+ * The last few lines of a result's output on one line, bounded by count and
+ * characters — a heap dump or stack trace names its cause at the end.
+ */
+function boundedTail({ result }: { result: CommandResult }): string {
+    const text = outputBlock({ result });
+    if (text === "") {
+        return "no output";
+    }
+    const lines = text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "");
+    return boundText({ text: lines.slice(-TAIL_LINES).join(" | ") });
+}
+
+/** Truncate text to the notice byte bound, keeping its end. */
+function boundText({ text }: { text: string }): string {
+    if (Buffer.byteLength(text) <= TAIL_CHARS) {
+        return text;
+    }
+    const chars = [...text];
+    const kept: string[] = [];
+    let bytes = 0;
+    for (let index = chars.length - 1; index >= 0; index -= 1) {
+        const char = chars[index]!;
+        const width = Buffer.byteLength(char);
+        if (bytes + width > TAIL_CHARS - 3) {
+            break;
+        }
+        kept.unshift(char);
+        bytes += width;
+    }
+    return `...${kept.join("")}`;
+}
+
+/** Output markers Node prints when V8 exhausts its heap. */
+const HEAP_MARKERS = [
+    /heap out of memory/iu,
+    /Last few GCs/u,
+    /Reached heap limit/iu,
+];
+
+/** The first exit code that encodes a terminating signal (128 + signum). */
+const SIGNAL_EXIT_FLOOR = 128;
+
+/**
+ * Why a run produced no lint verdict — timeout, cancellation, signal, or an
+ * abort exit such as 134/137 — or undefined for a plain non-zero exit the tool
+ * uses for its own verdict (the config/parse path). The shared outcome label
+ * keeps a capped run's "output truncated" marker.
+ */
+function crashReason({
+    result,
+}: {
+    result: CommandResult;
+}): string | undefined {
+    const plainExit =
+        result.timedOut === false &&
+        result.cancelled === false &&
+        result.signal === null &&
+        result.status !== null &&
+        result.status >= 1 &&
+        result.status < SIGNAL_EXIT_FLOOR;
+    if (plainExit) {
+        return undefined;
+    }
+    // A plain zero exit never reaches here: the callers route 0 to a pass.
+    const label = outcomeLabel({ result });
+    const heap = HEAP_MARKERS.some((marker) =>
+        marker.test(outputBlock({ result })),
+    );
+    return heap ? `${label}, heap exhausted` : label;
+}
+
+/** The first output line naming an error type, where a config crash puts it. */
+function firstErrorLine({
+    result,
+}: {
+    result: CommandResult;
+}): string | undefined {
+    return outputBlock({ result })
+        .split("\n")
+        .map((line) => line.trim())
+        .find((line) => /^[A-Za-z]*Error:/u.test(line));
+}
+
+/**
+ * The bounded output detail for a config/parse failure: the error line when one
+ * is present (eslint prints a stack that hides it from a tail), else the tail.
+ */
+function configDetail({ result }: { result: CommandResult }): string {
+    const errorLine = firstErrorLine({ result });
+    if (errorLine !== undefined) {
+        return boundText({ text: errorLine });
+    }
+    return boundedTail({ result });
+}
+
+/** The last output line naming heap exhaustion, when the output has one. */
+function heapLine({ result }: { result: CommandResult }): string | undefined {
+    return outputBlock({ result })
+        .split("\n")
+        .map((line) => line.trim())
+        .reverse()
+        .find((line) => HEAP_MARKERS.some((marker) => marker.test(line)));
+}
+
+/**
+ * The bounded output detail for a crash: the last lines, anchored on the heap
+ * line when the marker falls outside the window (Node prints its stack after).
+ */
+function crashDetail({ result }: { result: CommandResult }): string {
+    const heap = heapLine({ result });
+    const tail = boundedTail({ result });
+    if (heap === undefined || tail.includes(heap)) {
+        return tail;
+    }
+    const prefix = `${heap} | `;
+    const budget = TAIL_CHARS - prefix.length - 3;
+    if (budget <= 0) {
+        return boundText({ text: `${prefix}${tail}` });
+    }
+    const kept = tail.length <= budget ? tail : `...${tail.slice(-budget)}`;
+    return boundText({ text: `${prefix}${kept}` });
 }
 
 /**
@@ -381,7 +511,7 @@ function houseConfigEnv(config: DefinedConfig): NodeJS.ProcessEnv | undefined {
 /**
  * The repair pass: run `eslint --fix` and report only a real execution error.
  * Exit 1 means findings were left unfixed — verification reports them — so it
- * is not a failure here; any other non-zero is a config/parse crash and is.
+ * is not a failure here; any other non-zero is a crash or config error and is.
  */
 async function repairEslint({
     kind,
@@ -408,8 +538,13 @@ async function repairEslint({
         env,
     });
     if (fix.status !== 0 && fix.status !== 1) {
+        const crash = crashReason({ result: fix });
+        const cause =
+            crash === undefined
+                ? `config/parse error: ${configDetail({ result: fix })}`
+                : `crashed (${crash}); last output: ${crashDetail({ result: fix })}`;
         return errored({
-            message: `eslint: fix failed (${KIND_LABEL[kind]}): ${firstLine({ result: fix })}`,
+            message: `eslint: fix failed (${KIND_LABEL[kind]}): ${cause}`,
         });
     }
     return passed({
@@ -690,8 +825,9 @@ function recommendedEnvValue(config: DefinedConfig): string {
 }
 
 /**
- * Turn a non-zero ESLint run into a result: a config/parse error (exit ≠ 1) is
- * an execution problem, a lint run with findings is a fail carrying one
+ * Turn a non-zero ESLint run into a result: an execution problem (timeout,
+ * signal, abort exit, or a genuine config/parse error) is an error naming a
+ * bounded output tail, a lint run with findings is a fail carrying one
  * diagnostic per finding, and anything else is a fail naming the output.
  */
 function lintFailure({
@@ -704,15 +840,27 @@ function lintFailure({
     workingRoot: string;
 }): StepResult {
     const label = KIND_LABEL[kind];
+    const crash = crashReason({ result: check });
     if (check.status !== 1) {
+        if (crash !== undefined) {
+            return errored({
+                message: `eslint: crashed (${label}): ${crash}; last output: ${crashDetail(
+                    { result: check },
+                )}`,
+            });
+        }
         return errored({
-            message: `eslint: config/parse error (${label}): ${firstLine({ result: check })}`,
+            message: `eslint: config/parse error (${label}): ${configDetail({
+                result: check,
+            })}`,
         });
     }
     const findings = parseFindings({ stdout: check.stdout });
     if (findings.length === 0) {
         return failed({
-            notice: `eslint: lint failed (${label}): ${firstLine({ result: check })}`,
+            notice: `eslint: lint failed (${label}): ${boundedTail({
+                result: check,
+            })}`,
         });
     }
     return failed({

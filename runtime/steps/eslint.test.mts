@@ -463,6 +463,353 @@ test("exit 2 is a config/parse error, distinct from a finding", async () => {
     }
 });
 
+function crashRunner(
+    result: Partial<import("../../lib/proc.mts").CommandResult>,
+): typeof import("../../lib/proc.mts").run {
+    return (() => ({
+        status: 0,
+        stdout: "",
+        stderr: "",
+        signal: null,
+        timedOut: false,
+        cancelled: false,
+        truncated: false,
+        ...result,
+    })) as typeof import("../../lib/proc.mts").run;
+}
+
+test("a signalled eslint run reports the crash and the heap tail", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-oom-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const stderr = [
+        "<--- Last few GCs --->",
+        "[12345:0x1234] 90001 ms: Mark-Compact 4095.0 (4100.0) -> 4094.0 (4100.0) MB",
+        "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory",
+    ].join("\n");
+    const runner = crashRunner({ status: null, signal: "SIGKILL", stderr });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        assert.equal(result.status, "error");
+        const notice = result.notice ?? "";
+        assert.match(notice, /crashed \(house config\)/u);
+        assert.match(notice, /SIGKILL/u);
+        assert.match(notice, /heap exhausted/u);
+        assert.match(notice, /JavaScript heap out of memory/u);
+        assert.doesNotMatch(notice, /config\/parse error/u);
+        assert.ok(
+            Buffer.byteLength(notice) < 500,
+            `notice is ${notice.length}`,
+        );
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("an abort exit with a heap tail is a crash, not a config error", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-abort-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const runner = crashRunner({
+        status: 134,
+        stderr: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory",
+    });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        const notice = result.notice ?? "";
+        assert.equal(result.status, "error");
+        assert.match(notice, /crashed \(house config\)/u);
+        assert.match(notice, /heap exhausted/u);
+        assert.doesNotMatch(notice, /config\/parse error/u);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("a crashed eslint run keeps a bounded tail, not the first line", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-tail-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const filler = Array.from(
+        { length: 40 },
+        (_, i) => `gc line ${i + 1} ${"x".repeat(200)}`,
+    );
+    const stderr = [
+        "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory",
+        ...filler,
+        "9: 0x7ce41a63ea76 [node]",
+    ].join("\n");
+    const runner = crashRunner({ status: null, signal: "SIGABRT", stderr });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        const notice = result.notice ?? "";
+        assert.match(notice, /JavaScript heap out of memory/u);
+        assert.doesNotMatch(notice, /gc line 1\b/u);
+        assert.match(notice, /\.\.\./u);
+        assert.ok(Buffer.byteLength(notice) < 500);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("a timed-out eslint run says it timed out", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-timeout-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const runner = crashRunner({ status: null, timedOut: true });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        assert.equal(result.status, "error");
+        const notice = result.notice ?? "";
+        assert.match(notice, /crashed \(house config\): timed out/u);
+        assert.doesNotMatch(notice, /config\/parse error/u);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("a crashed fix pass reports the crash cause", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-fix-crash-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const runner = crashRunner({
+        status: null,
+        signal: "SIGABRT",
+        stderr: "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory",
+    });
+
+    // Act
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        trackedFiles: ["src/a.ts"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(
+        result.notice ?? "",
+        /fix failed \(house config\): crashed \(killed by SIGABRT, heap exhausted\)/u,
+    );
+});
+
+test("a config error in the fix pass keeps the config label", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-fix-config-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const runner = crashRunner({ status: 2, stderr: "boom" });
+
+    // Act
+    const result = await runEslintStep({
+        ctx: { ...baseCtx, repoRoot: root, mode: "fix" },
+        trackedFiles: ["src/a.ts"],
+        runner,
+    });
+
+    // Assert
+    assert.equal(result.status, "error");
+    assert.match(
+        result.notice ?? "",
+        /fix failed \(house config\): config\/parse error: boom/u,
+    );
+});
+
+test("a cancelled eslint run says it was cancelled", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-cancelled-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const runner = crashRunner({ status: null, cancelled: true });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        assert.match(
+            result.notice ?? "",
+            /crashed \(house config\): cancelled/u,
+        );
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("an eslint run that never exited says so", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-noexit-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const runner = crashRunner({ status: null, stderr: "spawn ENOENT" });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        const notice = result.notice ?? "";
+        assert.match(notice, /crashed \(house config\): did not exit/u);
+        assert.match(notice, /spawn ENOENT/u);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("a multibyte tail is bounded by bytes without splitting a character", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-cjk-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const stderr = Array.from(
+        { length: 40 },
+        (_, i) => `堆栈 ${i + 1} ${"字".repeat(80)}`,
+    ).join("\n");
+    const runner = crashRunner({ status: null, signal: "SIGKILL", stderr });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        const notice = result.notice ?? "";
+        assert.ok(Buffer.byteLength(notice) < 500);
+        assert.doesNotMatch(notice, /\uFFFD/u);
+        assert.match(notice, /字/u);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("a config crash names the error line above the stack", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-syntax-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const stderr = [
+        "Oops! Something went wrong! :(",
+        "",
+        "ESLint: 10.15.0",
+        "",
+        "SyntaxError: Unexpected token ';'",
+        ...Array.from({ length: 12 }, (_, i) => `    at frame ${i + 1}`),
+    ].join("\n");
+    const runner = crashRunner({ status: 2, stderr });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        const notice = result.notice ?? "";
+        assert.match(notice, /config\/parse error \(house config\)/u);
+        assert.match(notice, /SyntaxError: Unexpected token ';'/u);
+        assert.ok(Buffer.byteLength(notice) < 500);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("a heap line outside the tail window is kept", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-anchor-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const stderr = [
+        "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory",
+        ...Array.from({ length: 8 }, (_, i) => `at frame ${i + 1}`),
+    ].join("\n");
+    const runner = crashRunner({ status: null, signal: "SIGABRT", stderr });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        const notice = result.notice ?? "";
+        assert.match(notice, /JavaScript heap out of memory/u);
+        assert.match(notice, /at frame 8/u);
+        assert.doesNotMatch(notice, /at frame 1\b/u);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
+test("an over-long heap line still names the heap exhaustion", async () => {
+    // Arrange
+    const root = await makeTempDir("quality-eslint-longheap-");
+    await writeTree(root, { "src/a.ts": "export const a = 1;\n" });
+    const scratch = { dir: null };
+    const heap = `FATAL ERROR: ${"x".repeat(400)} JavaScript heap out of memory`;
+    const runner = crashRunner({
+        status: null,
+        signal: "SIGABRT",
+        stderr: heap,
+    });
+    try {
+        // Act
+        const result = await runEslintStep({
+            ctx: { ...baseCtx, repoRoot: root, scratch },
+            trackedFiles: ["src/a.ts"],
+            runner,
+        });
+
+        // Assert
+        const notice = result.notice ?? "";
+        assert.match(notice, /heap exhausted/u);
+        assert.match(notice, /JavaScript heap out of memory/u);
+        assert.ok(Buffer.byteLength(notice) < 500);
+    } finally {
+        cleanupScratch(scratch);
+    }
+});
+
 test("a stale example is removed when the repo has no config", async () => {
     // Arrange
     const root = await makeTempDir("quality-eslint-stale-");
