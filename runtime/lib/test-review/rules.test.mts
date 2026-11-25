@@ -453,6 +453,53 @@ test("does not report a comment-led line with no assertion call", () => {
     );
 });
 
+test("does not read an AAA label as a commented-out assertion", () => {
+    // Arrange — "Assert (logging)" names the phase; the space before the
+    // bracket makes it a label, not a dead call.
+    const content = xunitMethod(
+        [
+            "    [Fact]",
+            "    public void Sends()",
+            "    {",
+            "        // Arrange",
+            "        Queue(new Message());",
+            "        // Assert (logging)",
+            "        _mock.Verify(l => l.Log(It.IsAny<string>()), Times.Once);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "SenderTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("still reports a commented-out assertion with a member call", () => {
+    // Arrange — the label exclusion must not hide a real dead assertion.
+    const content = xunitMethod(
+        [
+            "    [Fact]",
+            "    public void Adds()",
+            "    {",
+            "        // Assert.Equal(1, value);",
+            "        Sut.Add(value);",
+            "        Assert.Equal(2, Sut.Total);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "MathTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.rule),
+        ["commented-out-assertion"],
+    );
+});
+
 test("does not read rule-like text inside a same-line fixture string", () => {
     // Arrange
     const contents = [
@@ -491,6 +538,26 @@ test("reports a test whose body holds no assertion call", () => {
         [{ rule: "no-assertions", line: 2 }],
     );
     assert.match(findings[0]?.message ?? "", /works/u);
+});
+
+test("counts a generic TestAssert helper as an assertion", () => {
+    // Arrange — team helper types ending in Assert are assertion calls too.
+    const content = xunitMethod(
+        [
+            "    [Fact]",
+            "    public async Task Transforms()",
+            "    {",
+            "        var result = await Sut.Transform(input);",
+            "        await TestAssert.CustomerXml(result);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "CustomerTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
 });
 
 test("counts each assertion shape as an assertion", () => {
