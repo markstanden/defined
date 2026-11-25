@@ -12,6 +12,7 @@ import {
     buildGitleaksConfig,
     escapeRegexPath,
     gitleaksIgnoreArgs,
+    parseGitleaksFindings,
     parseIgnoredPaths,
     runWorkflowStep,
 } from "./workflow.mts";
@@ -145,11 +146,11 @@ test("actionlint runs on workflow files, then zizmor, then gitleaks", async () =
     ]);
     // git status --ignored gets --porcelain
     assert.deepEqual(calls[2]!.slice(1, 3), ["status", "--porcelain"]);
-    // gitleaks gets "dir --config <temp>" and "." last
+    // gitleaks gets "dir --config <temp>" and "." last (cwd follows it)
     assert.equal(calls[3]![1], "dir");
     assert.equal(calls[3]![2], "--config");
     assert.match(calls[3]![3]!, /defined-gitleaks\.toml$/u);
-    assert.equal(calls[3]![4], ".");
+    assert.equal(calls[3]!.at(-2), ".");
 });
 
 test("filterFixableFiles drops the gate-managed workflow", () => {
@@ -406,6 +407,209 @@ test("gitleaks failure fails the step", async () => {
     assert.ok((result.notice ?? "").includes("gitleaks"));
 });
 
+/** A gitleaks runner that writes the JSON report the way the real tool does. */
+function reportRunner(
+    report: unknown,
+    options: { status?: number; stdout?: string; stderr?: string } = {},
+): { runner: typeof import("../lib/proc.mts").run; calls: string[][] } {
+    const { runner: base, calls } = fakeRunner(
+        {
+            gitleaks: {
+                status: options.status ?? 1,
+                stdout: options.stdout ?? "",
+                stderr: options.stderr ?? "",
+            },
+        },
+        true,
+    );
+    const runner = (async (input: {
+        cmd: string;
+        args?: string[];
+        cwd?: string;
+    }) => {
+        const reportFlag = input.args?.indexOf("--report-path") ?? -1;
+        if (input.cmd === "gitleaks" && reportFlag >= 0) {
+            await writeFile(
+                input.args![reportFlag + 1]!,
+                typeof report === "string" ? report : JSON.stringify(report),
+            );
+        }
+        return base(input);
+    }) as typeof import("../lib/proc.mts").run;
+    return { runner, calls };
+}
+
+test("gitleaks findings name the file, line and rule without the banner", async () => {
+    // Arrange
+    const report = [
+        {
+            RuleID: "generic-api-key",
+            File: "AkeneoProductDurableFunction/local.settings.json",
+            StartLine: 7,
+        },
+    ];
+    const { runner } = reportRunner(report, {
+        stderr: "\u001b[90m2:21PM\u001b[0m \u001b[33mWRN\u001b[0m leaks found: 1",
+    });
+
+    // Act
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+
+    // Assert
+    const notice = result.notice ?? "";
+    assert.equal(result.status, "fail");
+    assert.match(
+        notice,
+        /AkeneoProductDurableFunction\/local\.settings\.json:7/u,
+    );
+    assert.match(notice, /generic-api-key/u);
+    assert.equal(notice.includes("\u001b"), false);
+    assert.doesNotMatch(notice, /░/u);
+    assert.ok(Buffer.byteLength(notice) < 500);
+});
+
+test("a long gitleaks report is capped with a count", async () => {
+    // Arrange
+    const report = Array.from({ length: 9 }, (_, i) => ({
+        RuleID: "generic-api-key",
+        File: `src/file${i + 1}.json`,
+        StartLine: i + 1,
+    }));
+    const { runner } = reportRunner(report);
+
+    // Act
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+
+    // Assert
+    const notice = result.notice ?? "";
+    assert.match(notice, /9 secret\(s\)/u);
+    assert.match(notice, /src\/file5\.json:5/u);
+    assert.doesNotMatch(notice, /src\/file6\.json/u);
+    assert.match(notice, /\(\+4 more\)/u);
+    assert.ok(Buffer.byteLength(notice) < 500);
+});
+
+test("a gitleaks failure without a report falls back to stripped output", async () => {
+    // Arrange
+    const { runner } = fakeRunner(
+        {
+            gitleaks: {
+                status: 1,
+                stderr: "\u001b[31mFTL\u001b[0m could not load config",
+            },
+        },
+        true,
+    );
+
+    // Act
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+
+    // Assert
+    const notice = result.notice ?? "";
+    assert.match(notice, /gitleaks failed/u);
+    assert.match(notice, /could not load config/u);
+    assert.equal(notice.includes("\u001b"), false);
+});
+
+test("an unparseable gitleaks report falls back to the failure detail", async () => {
+    // Arrange
+    const { runner } = reportRunner("not json", { stderr: "exit 1" });
+
+    // Act
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+
+    // Assert
+    assert.match(result.notice ?? "", /gitleaks failed/u);
+});
+
+test("gitleaks runs with a quiet JSON report and the scan target last", async () => {
+    // Arrange
+    const { runner, calls } = fakeRunner({}, true);
+
+    // Act
+    await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+
+    // Assert
+    const gitleaksCall = calls.find((c) => c[0] === "gitleaks")!;
+    assert.ok(gitleaksCall.includes("--no-banner"));
+    const formatFlag = gitleaksCall.indexOf("--report-format");
+    assert.deepEqual(gitleaksCall.slice(formatFlag, formatFlag + 2), [
+        "--report-format",
+        "json",
+    ]);
+    assert.ok(gitleaksCall.includes("--report-path"));
+    // fakeRunner appends cwd last; the scan target still precedes it.
+    assert.equal(gitleaksCall.at(-2), ".");
+});
+
+test("a gitleaks notice with long paths stays under the cap", async () => {
+    // Arrange
+    const report = Array.from({ length: 5 }, (_, i) => ({
+        RuleID: `rule-${i + 1}`,
+        File: `${"deep/".repeat(40)}file${i + 1}.json`,
+        StartLine: 1,
+    }));
+    const { runner } = reportRunner(report);
+
+    // Act
+    const result = await runWorkflowStep({
+        ctx: baseCtx,
+        trackedFiles: [".github/workflows/ci.yml"],
+        runner,
+    });
+
+    // Assert
+    const notice = result.notice ?? "";
+    assert.ok(Buffer.byteLength(notice) < 500);
+    assert.match(notice, /\.\.\.$/u);
+});
+
+test("parseGitleaksFindings keeps only locatable findings", () => {
+    // Arrange
+    const report = [
+        null,
+        "not a finding",
+        { RuleID: "only-rule" },
+        { File: "only-file" },
+        { RuleID: "generic-api-key", File: "a.env", StartLine: "7" },
+        { RuleID: "private-key", File: "b.key", StartLine: 3 },
+    ];
+
+    // Act
+    const findings = parseGitleaksFindings({ text: JSON.stringify(report) });
+
+    // Assert
+    assert.deepEqual(findings, [
+        "a.env:0 generic-api-key",
+        "b.key:3 private-key",
+    ]);
+});
+
+test("parseGitleaksFindings ignores a report that is not an array", () => {
+    // Act & Assert
+    assert.deepEqual(parseGitleaksFindings({ text: "{}" }), []);
+});
+
 test("gitleaks scans repo scope, not just workflow files", async () => {
     // Arrange
     const { runner, calls } = fakeRunner({}, true);
@@ -420,7 +624,7 @@ test("gitleaks scans repo scope, not just workflow files", async () => {
     // Assert
     const gitleaksCall = calls.find((c) => c[0] === "gitleaks")!;
     assert.deepEqual(gitleaksCall.slice(1, 3), ["dir", "--config"]);
-    assert.equal(gitleaksCall[4], ".");
+    assert.equal(gitleaksCall.at(-2), ".");
 });
 
 test("runWorkflowStep pins the consumer .gitleaksignore as an explicit ignore path", async () => {
@@ -437,12 +641,13 @@ test("runWorkflowStep pins the consumer .gitleaksignore as an explicit ignore pa
 
     // Assert
     const gitleaksCall = calls.find((c) => c[0] === "gitleaks")!;
-    assert.deepEqual(gitleaksCall.slice(4, 6), [
+    const ignoreFlag = gitleaksCall.indexOf("--gitleaks-ignore-path");
+    assert.deepEqual(gitleaksCall.slice(ignoreFlag, ignoreFlag + 2), [
         "--gitleaks-ignore-path",
         baseCtx.repoRoot,
     ]);
     // The scan target stays last; the ignore path is an added flag.
-    assert.equal(gitleaksCall[6], ".");
+    assert.equal(gitleaksCall.at(-2), ".");
 });
 
 test("gitleaksIgnoreArgs pins the repo root only when the baseline exists", async () => {
