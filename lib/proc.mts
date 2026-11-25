@@ -309,8 +309,12 @@ export function failureDetail({ result }: { result: CommandResult }): string {
     return label === "" ? output : `${label}: ${output}`;
 }
 
-/** The outcome prefix failureDetail uses; empty for a plain zero exit. */
-function outcomeLabel({ result }: { result: CommandResult }): string {
+/**
+ * The outcome prefix failureDetail uses; empty for a plain zero exit. Exported
+ * so a step that words its own failure (eslint) keeps the same labels —
+ * including the truncation marker — instead of re-deriving them.
+ */
+export function outcomeLabel({ result }: { result: CommandResult }): string {
     const suffix = result.truncated ? " (output truncated)" : "";
     if (result.timedOut) {
         return `timed out${suffix}`;
