@@ -95,6 +95,16 @@ exit 1
     await chmod(path, 0o755);
 }
 
+/** Write a fake git that cannot resolve a top-level, as outside a checkout. */
+async function fakeGitRefusing(bin: string): Promise<void> {
+    const script = `#!/usr/bin/env bash
+exit 1
+`;
+    const path = join(bin, "git");
+    await writeFile(path, script);
+    await chmod(path, 0o755);
+}
+
 /** Run the shim against a fresh fixture, always cleaning up. */
 /**
  * Run a test body against a fresh fixture (fake bin + repo + fake git), always
@@ -148,6 +158,26 @@ async function runShim(fixture: Fixture, args: string[]): Promise<ShimRun> {
 function repoHash(repo: string): string {
     return createHash("sha256").update(repo).digest("hex").slice(0, 12);
 }
+
+test("writes one JSON error line when run outside a git repository", async () => {
+    await withFixture(async (fixture) => {
+        // Arrange — a git that cannot resolve a top level, as outside a checkout.
+        await fakeGitRefusing(fixture.bin);
+
+        // Act
+        const r = await runShim(fixture, []);
+
+        // Assert — the stdout contract holds even when there is no repo.
+        assert.equal(r.status, 1);
+        const parsed = JSON.parse(r.stdout) as {
+            status: string;
+            errors?: { check?: string; message?: string }[];
+        };
+        assert.equal(parsed.status, "error");
+        assert.equal(parsed.errors?.[0]?.check, "git");
+        assert.match(r.stderr, /not inside a git repository/u);
+    });
+});
 
 test("creates the deps mount point as the host user, then removes it", async () => {
     await withFixture(async (fixture) => {
