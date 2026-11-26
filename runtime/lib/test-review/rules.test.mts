@@ -2405,3 +2405,128 @@ test("a why-note suppresses the property-seed lead above its declaration", () =>
         sources.map(() => []),
     );
 });
+
+/** One Replay assignment through a same-file constant declaration. */
+function replayFromConstant({
+    declaration,
+    assignment,
+}: {
+    declaration: string;
+    assignment: string;
+}): string {
+    return [
+        "public sealed class ProjectPropertyAttribute : PropertyAttribute",
+        "{",
+        `    ${declaration}`,
+        "",
+        "    public ProjectPropertyAttribute()",
+        "    {",
+        `        Replay = ${assignment};`,
+        "    }",
+        "}",
+    ].join("\n");
+}
+
+test("reports an even gamma routed through a same-file constant", () => {
+    // Arrange
+    const declarations = [
+        'private const string Pin = "20261126,100";',
+        'private static readonly string Pin = "20261126,100";',
+    ];
+    const contents = declarations.map((declaration) =>
+        replayFromConstant({ declaration, assignment: "Pin" }),
+    );
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({
+            path: "ProjectPropertyAttribute.cs",
+            content,
+        }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((rows) => rows.map((row) => [row.rule, row.line])),
+        contents.map(() => [["unrouted-property-seed", 7]]),
+    );
+    const messages = found.flatMap((rows) => rows.map((row) => row.message));
+    assert.ok(messages.every((message) => /even gamma/u.test(message)));
+    assert.ok(messages.every((message) => /20261126,100/u.test(message)));
+});
+
+test("reports an odd-gamma constant replay as a frozen replay", () => {
+    // Arrange
+    const content = replayFromConstant({
+        declaration: 'private const string Pin = "20261126,1";',
+        assignment: "Pin",
+    });
+
+    // Act
+    const [finding] = propertySeedFindingsOf({
+        path: "ProjectPropertyAttribute.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(finding?.line, 7);
+    assert.match(finding?.message ?? "", /frozen FsCheck replay/u);
+    assert.match(finding?.message ?? "", /20261126,1/u);
+});
+
+test("resolves a same-file constant through its type name", () => {
+    // Arrange
+    const content = [
+        "internal static class Seeds",
+        "{",
+        '    public const string Pin = "20261126,100";',
+        "}",
+        "",
+        "public sealed class ProjectPropertyAttribute : PropertyAttribute",
+        "{",
+        "    public ProjectPropertyAttribute()",
+        "    {",
+        "        Replay = Seeds.Pin;",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const [finding] = propertySeedFindingsOf({
+        path: "ProjectPropertyAttribute.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(finding?.line, 10);
+    assert.match(finding?.message ?? "", /even gamma/u);
+    assert.match(finding?.message ?? "", /20261126,100/u);
+});
+
+test("stays silent when the replay identifier cannot be resolved in the file", () => {
+    // Arrange
+    const contents = [
+        replayFromConstant({
+            declaration: "// no constant here",
+            assignment: "ImportedPin",
+        }),
+        replayFromConstant({
+            declaration: "private const int Pin = 20261126;",
+            assignment: "Pin",
+        }),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({
+            path: "ProjectPropertyAttribute.cs",
+            content,
+        }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});

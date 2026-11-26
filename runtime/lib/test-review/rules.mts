@@ -69,7 +69,9 @@
 // its declaration, so a why-note goes above that line (the declaration's comment
 // block already includes attribute lines); a fast-check seed takes the ordinary
 // note above its declaration. Interpolation is not judged when the gamma is a
-// runtime expression, but a literal tail is.
+// runtime expression, but a literal tail is. A `Replay = Pin` (or
+// `SomeType.Pin`) is followed to a same-file `const string`/`static readonly
+// string` literal; an identifier the file does not define is left alone.
 //
 // The tautology patterns cover the Jest/Vitest `expect` shapes and the
 // xUnit/NUnit `Assert` shapes (`Assert.Equal(3, 3)`, `Assert.True(true)`); the
@@ -671,11 +673,117 @@ function replayGamma(value: string): string | null {
     return /^\d+$/u.test(gamma) ? gamma : null;
 }
 
+/** A C# replay seed constant: `const string` or `static readonly string`. */
+const REPLAY_CONSTANT =
+    /\b(?:const|static\s+readonly)\s+string\s+([A-Za-z_]\w*)\s*=/gu;
+
+/** An identifier chain naming a same-file constant. */
+const REPLAY_IDENTIFIER = /^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*/u;
+
+/** What may follow a resolved identifier in its expression. */
+const EXPRESSION_END = /^[;,)\]}]*$/u;
+
+/**
+ * Same-file replay constants by name. A `const string`/`static readonly string`
+ * counts only when its initialiser is a literal tuple (never an interpolated
+ * string, which a `const` cannot be). A name declared twice with different
+ * values is ambiguous and resolves to nothing.
+ */
+function replayConstants({
+    masked,
+    raw,
+}: {
+    masked: string;
+    raw: string;
+}): Map<string, ReplayValue | null> {
+    const constants = new Map<string, ReplayValue | null>();
+    for (const match of masked.matchAll(REPLAY_CONSTANT)) {
+        const name = match[1] ?? "";
+        const value = replayValue({
+            raw,
+            from: (match.index ?? 0) + match[0].length,
+        });
+        const literal = value !== null && !value.interpolated ? value : null;
+        if (!constants.has(name)) {
+            constants.set(name, literal);
+            continue;
+        }
+        if (constants.get(name)?.value !== literal?.value) {
+            constants.set(name, null);
+        }
+    }
+    return constants;
+}
+
+/**
+ * Resolve a `Replay = Pin` or `Replay = SomeType.Pin` identifier against the
+ * same-file constants, or `null` when the file does not define it or the
+ * expression continues past a bare name (a call, member access, indexer).
+ *
+ * ponytail: the final chain segment is matched by name, so `SomeType.Pin` is
+ * not scoped to its type. Cross-file and imported symbols are never resolved;
+ * the gate reads one file at a time. Upgrade to a symbol table if a same-name
+ * collision ever turns up.
+ */
+function replayIdentifier({
+    raw,
+    from,
+    constants,
+}: {
+    raw: string;
+    from: number;
+    constants: ReadonlyMap<string, ReplayValue | null>;
+}): ReplayValue | null {
+    const start = skipSpaces({ raw, from });
+    const chain = REPLAY_IDENTIFIER.exec(raw.slice(start))?.[0];
+    if (chain === undefined) {
+        return null;
+    }
+    const end = skipSpaces({ raw, from: start + chain.length });
+    if (!EXPRESSION_END.test(raw[end] ?? "")) {
+        return null;
+    }
+    const name = chain.slice(chain.lastIndexOf(".") + 1);
+    return constants.get(name) ?? null;
+}
+
+/** The finding shape for one replay value, or `[]` when it cannot be judged. */
+function replayValueMatches({
+    index,
+    replay,
+}: {
+    index: number;
+    replay: ReplayValue;
+}): PropertySeedMatch[] {
+    const gamma = replayGamma(replay.value);
+    if (gamma !== null && /[02468]$/u.test(gamma)) {
+        return [
+            {
+                index,
+                kind: "even-gamma" as const,
+                evidence: replay.value,
+                gamma,
+            },
+        ];
+    }
+    if (replay.interpolated) {
+        return [];
+    }
+    return [
+        {
+            index,
+            kind: "frozen-replay" as const,
+            evidence: replay.value,
+        },
+    ];
+}
+
 /**
  * C# Replay values that cannot be the project channel: a literal replay that
  * never rotates, and an even gamma, which FsCheck rejects by crashing the test
  * host. The gamma branch is read first, so an even literal reports once. An
- * interpolated replay is judged only when its gamma is a literal tail.
+ * interpolated replay is judged only when its gamma is a literal tail. An
+ * identifier is followed to a same-file literal constant, or left alone.
  */
 function replayMatches({
     masked,
@@ -684,33 +792,14 @@ function replayMatches({
     masked: string;
     raw: string;
 }): PropertySeedMatch[] {
+    const constants = replayConstants({ masked, raw });
     return [...masked.matchAll(REPLAY_ASSIGNMENT)].flatMap((match) => {
         const index = match.index ?? 0;
-        const replay = replayValue({ raw, from: index + match[0].length });
-        if (replay === null) {
-            return [];
-        }
-        const gamma = replayGamma(replay.value);
-        if (gamma !== null && /[02468]$/u.test(gamma)) {
-            return [
-                {
-                    index,
-                    kind: "even-gamma" as const,
-                    evidence: replay.value,
-                    gamma,
-                },
-            ];
-        }
-        if (replay.interpolated) {
-            return [];
-        }
-        return [
-            {
-                index,
-                kind: "frozen-replay" as const,
-                evidence: replay.value,
-            },
-        ];
+        const from = index + match[0].length;
+        const replay =
+            replayValue({ raw, from }) ??
+            replayIdentifier({ raw, from, constants });
+        return replay === null ? [] : replayValueMatches({ index, replay });
     });
 }
 
