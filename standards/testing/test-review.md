@@ -145,7 +145,10 @@ An always-on defect has no escape even though the note parses.
   itself a finding. `computed-title` has no escape at all.
 - **Placement.** The note sits in the contiguous comment block immediately above
   the test declaration, with no blank line between. A note further up the file,
-  or above an unrelated declaration, does not apply.
+  or above an unrelated declaration, does not apply. The one exception:
+  `unrouted-property-seed` also reads the block above the finding's own line,
+  because a C# replay sits in an attribute or a constructor that is not a test
+  declaration.
 - **Exact id.** The token is the rule id, case-sensitive. A misspelt id
   suppresses nothing and is reported as an unknown suppression. `property` is the
   one accepted alias for `property-trigger-unmet`; there are no other aliases.
@@ -183,7 +186,8 @@ An always-on defect has no escape even though the note parses.
 - A vacuous reason is a pinned stop-list, not a judgement: empty, `legitimate`,
   `intentional`, `required`, `by design` and their siblings report. A reason
   outside the list always passes, even a bad one.
-- Notes are read only in the contiguous comment block above a test declaration.
-  A note above production code, a suite or a file is neither applied nor
-  reported.
+- Notes are read in the contiguous comment block above a test declaration, and
+  for `unrouted-property-seed` above the finding's own line (an attribute or
+  constructor replay). A note above unrelated production code, a suite or a
+  file is neither applied nor reported.
 - The engine never measures coverage and never estimates it.
