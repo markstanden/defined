@@ -59,6 +59,18 @@
 // comment never runs, so nothing is checked at that point. The oracle's rules
 // for other stacks (PHPUnit, Python) land with those declaration layers.
 //
+// `unrouted-property-seed` (review tier) reads a property test's seed, which is
+// the one input a project channel must own. It reports a numeric `seed:` literal
+// in an `fc.assert` options object — an identifier or call is the channel — a
+// C# `Replay = "<literal>"` with no `$` interpolation, which freezes and never
+// rotates, and a C# replay whose gamma is even, which FsCheck rejects by
+// crashing the test host; that branch is highest-value and reported once, ahead
+// of the frozen-replay wording. The C# replay usually sits in an attribute above
+// its declaration, so a why-note goes above that line (the declaration's comment
+// block already includes attribute lines); a fast-check seed takes the ordinary
+// note above its declaration. Interpolation is not judged when the gamma is a
+// runtime expression, but a literal tail is.
+//
 // The tautology patterns cover the Jest/Vitest `expect` shapes and the
 // xUnit/NUnit `Assert` shapes (`Assert.Equal(3, 3)`, `Assert.True(true)`); the
 // first pattern to claim a position wins, so a literal compared with itself
@@ -161,6 +173,7 @@ export const REVIEW_RULES = [
     "real-filesystem",
     "process-spawn",
     "debug-output",
+    "unrouted-property-seed",
 ] as const;
 
 /** The Bucket C intent leads the gate reports and never owns. */
@@ -503,6 +516,294 @@ function determinismFindings({
             );
         },
     );
+}
+
+/** A fast-check property assertion, whose options can pin a seed. */
+const FAST_CHECK_ASSERT = /\bfc\.assert\s*\(/gu;
+
+/** A literal seed inside a fast-check options object. */
+const FAST_CHECK_SEED = /\bseed\s*:\s*\d[\d_]*/gu;
+
+/** A C# Replay assignment; its raw value decides literal versus interpolated. */
+const REPLAY_ASSIGNMENT = /\bReplay\s*=/gu;
+
+/** One property seed the rule reports. */
+interface PropertySeedMatch {
+    /** Offset of the seed, replay value or assignment in the masked source. */
+    readonly index: number;
+    readonly kind: "seed" | "frozen-replay" | "even-gamma";
+    /** The matched text as written. */
+    readonly evidence: string;
+    /** The even gamma, when the match is a gamma fault. */
+    readonly gamma?: string;
+}
+
+/** Bracket characters that nest inside a call's argument list. */
+const OPENERS = new Set(["(", "[", "{"]);
+const CLOSERS = new Set([")", "]", "}"]);
+
+/**
+ * The comma-separated argument slices of a call body, with their offsets.
+ * Bracket depth keeps a nested call's commas inside one slice.
+ */
+function argumentSlices(
+    text: string,
+): Array<{ readonly start: number; readonly text: string }> {
+    const slices: Array<{ start: number; text: string }> = [];
+    let depth = 0;
+    let start = 0;
+    for (let index = 0; index < text.length; index++) {
+        const character = text[index] ?? "";
+        if (OPENERS.has(character)) {
+            depth++;
+        } else if (CLOSERS.has(character)) {
+            depth = Math.max(0, depth - 1);
+        } else if (character === "," && depth === 0) {
+            slices.push({ start, text: text.slice(start, index) });
+            start = index + 1;
+        }
+    }
+    slices.push({ start, text: text.slice(start) });
+    return slices;
+}
+
+/**
+ * Literal seeds on `fc.assert` options arguments. Only an object-literal
+ * argument is read, so a `seed:` key elsewhere in the property never fires.
+ */
+function fastCheckSeedMatches({
+    masked,
+    raw,
+}: {
+    masked: string;
+    raw: string;
+}): PropertySeedMatch[] {
+    return [...masked.matchAll(FAST_CHECK_ASSERT)].flatMap((call) => {
+        const open = (call.index ?? 0) + call[0].length - 1;
+        const close = matchingClose(masked, open);
+        const args = masked.slice(open + 1, close);
+        return argumentSlices(args).flatMap((argument) => {
+            if (!argument.text.trim().startsWith("{")) {
+                return [];
+            }
+            return [...argument.text.matchAll(FAST_CHECK_SEED)].map((seed) => {
+                const index = open + 1 + argument.start + (seed.index ?? 0);
+                return {
+                    index,
+                    kind: "seed" as const,
+                    evidence: raw.slice(index, index + seed[0].length),
+                };
+            });
+        });
+    });
+}
+
+/** One raw C# Replay value: interpolation and text, or `null` when not literal. */
+interface ReplayValue {
+    readonly interpolated: boolean;
+    readonly value: string;
+}
+
+/** Index of the first non-whitespace character at or after `from`. */
+function skipSpaces({ raw, from }: { raw: string; from: number }): number {
+    let index = from;
+    while (index < raw.length && /\s/u.test(raw[index] ?? "")) {
+        index++;
+    }
+    return index;
+}
+
+/** The quote after any `$`/`@` prefixes, and whether `$` appeared. */
+function replayQuote({
+    raw,
+    from,
+}: {
+    raw: string;
+    from: number;
+}): { readonly interpolated: boolean; readonly quote: number } | null {
+    let index = skipSpaces({ raw, from });
+    let interpolated = false;
+    while (raw[index] === "$" || raw[index] === "@") {
+        interpolated = interpolated || raw[index] === "$";
+        index++;
+    }
+    return raw[index] === '"' ? { interpolated, quote: index } : null;
+}
+
+/** Index of the closing quote of the literal opened at `quote`, or `-1`. */
+function closingQuote({ raw, quote }: { raw: string; quote: number }): number {
+    let index = quote + 1;
+    while (index < raw.length && raw[index] !== '"' && raw[index] !== "\n") {
+        index += raw[index] === "\\" ? 2 : 1;
+    }
+    return raw[index] === '"' ? index : -1;
+}
+
+/** Read the quoted value assigned at `from`, looking past `$`/`@` prefixes. */
+function replayValue({
+    raw,
+    from,
+}: {
+    raw: string;
+    from: number;
+}): ReplayValue | null {
+    const opening = replayQuote({ raw, from });
+    if (opening === null) {
+        return null;
+    }
+    const close = closingQuote({ raw, quote: opening.quote });
+    if (close === -1) {
+        return null;
+    }
+    return {
+        interpolated: opening.interpolated,
+        value: raw.slice(opening.quote + 1, close),
+    };
+}
+
+/** The numeric gamma after the last comma, when the replay carries one. */
+function replayGamma(value: string): string | null {
+    const comma = value.lastIndexOf(",");
+    if (comma === -1) {
+        return null;
+    }
+    const gamma = value.slice(comma + 1).trim();
+    return /^\d+$/u.test(gamma) ? gamma : null;
+}
+
+/**
+ * C# Replay values that cannot be the project channel: a literal replay that
+ * never rotates, and an even gamma, which FsCheck rejects by crashing the test
+ * host. The gamma branch is read first, so an even literal reports once. An
+ * interpolated replay is judged only when its gamma is a literal tail.
+ */
+function replayMatches({
+    masked,
+    raw,
+}: {
+    masked: string;
+    raw: string;
+}): PropertySeedMatch[] {
+    return [...masked.matchAll(REPLAY_ASSIGNMENT)].flatMap((match) => {
+        const index = match.index ?? 0;
+        const replay = replayValue({ raw, from: index + match[0].length });
+        if (replay === null) {
+            return [];
+        }
+        const gamma = replayGamma(replay.value);
+        if (gamma !== null && /[02468]$/u.test(gamma)) {
+            return [
+                {
+                    index,
+                    kind: "even-gamma" as const,
+                    evidence: replay.value,
+                    gamma,
+                },
+            ];
+        }
+        if (replay.interpolated) {
+            return [];
+        }
+        return [
+            {
+                index,
+                kind: "frozen-replay" as const,
+                evidence: replay.value,
+            },
+        ];
+    });
+}
+
+/** Whether a declaration's body covers a 1-based line. */
+function bodyCovers(declaration: TestDeclaration, line: number): boolean {
+    return (
+        declaration.body !== null &&
+        line >= declaration.bodyLine &&
+        line < declaration.bodyLine + declaration.body.split("\n").length
+    );
+}
+
+/** Whether a why-note in the contiguous block above `line` names `rule`. */
+function noteSuppresses({
+    content,
+    line,
+    rule,
+}: {
+    content: string;
+    line: number;
+    rule: ReviewRule;
+}): boolean {
+    return commentBlockAbove({ content, line }).some((entry) => {
+        const note = readNote(entry.text);
+        return (
+            note !== null &&
+            resolveRule(note.rule) === rule &&
+            !isVacuous(note.reason)
+        );
+    });
+}
+
+/** One message for a property-seed match, in the gate's vocabulary. */
+function propertySeedMessage(
+    match: PropertySeedMatch,
+    testName: string | null,
+): string {
+    if (match.kind === "seed") {
+        const test = testName === null ? "" : ` in test "${testName}"`;
+        return `literal fast-check seed "${match.evidence}"${test}: a pinned seed cannot route through the project channel`;
+    }
+    if (match.kind === "even-gamma") {
+        return `FsCheck replay "${match.evidence}" has an even gamma (${match.gamma}): FsCheck requires an odd gamma and crashes the test host`;
+    }
+    return `frozen FsCheck replay "${match.evidence}": a pinned replay never rotates and cannot route through the project channel`;
+}
+
+/**
+ * Property seeds that cannot be the project channel. The seed lives in a test
+ * body for fast-check but in an attribute above the declaration for FsCheck,
+ * so a finding is suppressed by a note above its declaration or above the
+ * finding's own line. Review tier only.
+ */
+function propertySeedFindings({
+    source,
+    masked,
+    entries,
+}: {
+    source: TestReviewSource;
+    masked: string;
+    entries: readonly ReviewedDeclaration[];
+}): TestHygieneFinding[] {
+    const rule: ReviewRule = "unrouted-property-seed";
+    const raw = source.content;
+    const matches = [
+        ...(source.path.endsWith(".cs")
+            ? []
+            : fastCheckSeedMatches({ masked, raw })),
+        ...(source.path.endsWith(".cs") ? replayMatches({ masked, raw }) : []),
+    ];
+    return matches.flatMap((match): TestHygieneFinding[] => {
+        const line = lineAt({ content: raw, index: match.index });
+        const owner = entries.find(({ declaration }) =>
+            bodyCovers(declaration, line),
+        );
+        const suppressed =
+            owner?.suppressed.has(rule) === true ||
+            noteSuppresses({ content: raw, line, rule });
+        if (suppressed) {
+            return [];
+        }
+        return [
+            {
+                rule,
+                file: source.path,
+                line,
+                message: propertySeedMessage(
+                    match,
+                    owner?.declaration.name ?? null,
+                ),
+            },
+        ];
+    });
 }
 
 const TAUTOLOGY_RULES: ReadonlyArray<{
@@ -1556,6 +1857,7 @@ function sourceFindings(
                   ...elseBranchFindings({ entries }),
                   ...compoundAssertionFindings({ entries }),
                   ...determinismFindings({ source, entries }),
+                  ...propertySeedFindings({ source, masked, entries }),
               ]
             : []),
     ];
