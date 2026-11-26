@@ -66,12 +66,14 @@
 // rotates, and a C# replay whose gamma is even, which FsCheck rejects by
 // crashing the test host; that branch is highest-value and reported once, ahead
 // of the frozen-replay wording. The C# replay usually sits in an attribute above
-// its declaration, so a why-note goes above that line (the declaration's comment
-// block already includes attribute lines); a fast-check seed takes the ordinary
-// note above its declaration. Interpolation is not judged when the gamma is a
-// runtime expression, but a literal tail is. A `Replay = Pin` (or
-// `SomeType.Pin`) is followed to a same-file `const string`/`static readonly
-// string` literal; an identifier the file does not define is left alone.
+// its declaration, so a why-note goes above that line; a fast-check seed takes
+// the ordinary note above its declaration. A finding outside any declaration's
+// body (an attribute or a constructor replay) reads the note block above its own
+// line, which is why the replay sites are covered at all. Interpolation is not
+// judged when the gamma is a runtime expression, but a literal tail is. A
+// `Replay = Pin` (or `SomeType.Pin`) is followed to a same-file `const
+// string`/`static readonly string` literal; an identifier the file does not
+// define is left alone.
 //
 // The tautology patterns cover the Jest/Vitest `expect` shapes and the
 // xUnit/NUnit `Assert` shapes (`Assert.Equal(3, 3)`, `Assert.True(true)`); the
@@ -812,26 +814,6 @@ function bodyCovers(declaration: TestDeclaration, line: number): boolean {
     );
 }
 
-/** Whether a why-note in the contiguous block above `line` names `rule`. */
-function noteSuppresses({
-    content,
-    line,
-    rule,
-}: {
-    content: string;
-    line: number;
-    rule: ReviewRule;
-}): boolean {
-    return commentBlockAbove({ content, line }).some((entry) => {
-        const note = readNote(entry.text);
-        return (
-            note !== null &&
-            resolveRule(note.rule) === rule &&
-            !isVacuous(note.reason)
-        );
-    });
-}
-
 /** One message for a property-seed match, in the gate's vocabulary. */
 function propertySeedMessage(
     match: PropertySeedMatch,
@@ -877,7 +859,11 @@ function propertySeedFindings({
         );
         const suppressed =
             owner?.suppressed.has(rule) === true ||
-            noteSuppresses({ content: raw, line, rule });
+            readSuppressions({
+                file: source.path,
+                content: raw,
+                line,
+            }).suppressed.has(rule);
         if (suppressed) {
             return [];
         }
