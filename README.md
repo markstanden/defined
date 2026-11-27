@@ -149,7 +149,9 @@ the plan and noise on every run after that:
   the house default of 80, or a `scope.include` that narrows what the content
   checks judge), `seeded` means a project-owned seeded default
   (`.editorconfig`, `.gitattributes`, `Directory.Build.props`) differs from the
-  image copy, and `selection` means a `scan --files` run narrowed the content
+  image copy in more than comments, blank lines, trailing whitespace or line
+  endings — those carry no setting and are not drift — and `selection` means a
+  `scan --files` run narrowed the content
   checks, with the message naming the steps that still judge the whole
   repository. Managed-file drift is not a notice — that stays a bootstrap
   failure. `scan` has no bootstrap check, so it emits no bootstrap errors, but
