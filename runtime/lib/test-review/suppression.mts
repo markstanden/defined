@@ -14,10 +14,11 @@
 // read as a note and then rejected by the exact-case catalogue lookup, so it
 // reports as misspelt instead of vanishing.
 //
-// Deliberate ceiling (ponytail): notes are read only above a test declaration.
-// A note above production code, a suite or a file suppresses nothing and is
-// not reported; the review pass names the declaration, so that is its scope.
-// Upgrade if a file-level note is ever wanted.
+// Deliberate ceiling (ponytail): a note is read above the anchor line the
+// caller supplies — the test declaration, or a finding's own line where the
+// finding sits outside any declaration. A note above unrelated production
+// code, a suite or a file suppresses nothing and is not reported. Upgrade if a
+// file-level note is ever wanted.
 
 /** The one accepted alias, mapped to the rule id it names. */
 export const NOTE_ALIASES: Readonly<Record<string, string>> = {

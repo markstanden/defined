@@ -74,24 +74,25 @@ These leads fail the `--files` pass until they are fixed or suppressed. A
 legitimate shape carries a why-note (see Suppression); the reviewer still owns
 the judgement.
 
-| rule id                 | lead to read                                                                                                                                                                                                                                                                |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `missing-structure`     | the phase labels do not cover the body's phases: `Act` and `Assert` labelled separately or as `// Act & Assert`; `Arrange` only when statements precede the first label. Confirm the labels are absent; a single-expression arrow body and a body with no setup are exempt. |
-| `multi-statement-act`   | the act region, from its label to the next label or the body's end, holds more than one depth-0 statement: two outcomes pinned, or an act and an assert sharing a label.                                                                                                    |
-| `compound-assertion`    | one assertion joins two conditions (`Assert.True(a && b)`): the failure message cannot say which broke. Usually two assertions.                                                                                                                                             |
-| `conditional-assertion` | an assertion inside an `if`/`else` or a braceless guard: it may never run, let alone fail. A branch the test itself controls can be fine; a branch decided by the code under test is the lead.                                                                              |
-| `assertion-in-loop`     | an assertion inside a `for`/`foreach`/`while` body or a `.forEach` callback: several cases reported as one test, with only the first failure visible. Looping one returned collection to assert each element is one behaviour.                                              |
-| `else-branch-assertion` | an `else` branch that asserts: both branches asserting is two tests in one.                                                                                                                                                                                                 |
-| `ambient-clock`         | a read of the wall clock: the result depends on when the test ran.                                                                                                                                                                                                          |
-| `sleep`                 | a sleep or delay: the test races the clock instead of controlling it.                                                                                                                                                                                                       |
-| `randomness`            | a random value or identifier: the input is not reproducible.                                                                                                                                                                                                                |
-| `ambient-environment`   | an environment variable, working directory or machine name read.                                                                                                                                                                                                            |
-| `ambient-locale`        | the current culture or locale read.                                                                                                                                                                                                                                         |
-| `real-network`          | a real network client: the test needs a reachable peer.                                                                                                                                                                                                                     |
-| `real-filesystem`       | real file, directory or temp-path access: the test needs a writable host.                                                                                                                                                                                                   |
-| `process-spawn`         | a child process started: the test needs the host's binaries.                                                                                                                                                                                                                |
-| `debug-output`          | console or debug output left in a test.                                                                                                                                                                                                                                     |
-| `suppression-note`      | a why-note that names an always-on defect, an unknown or wrong-case id, or gives a vacuous reason: it suppresses nothing.                                                                                                                                                   |
+| rule id                  | lead to read                                                                                                                                                                                                                                                                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `missing-structure`      | the phase labels do not cover the body's phases: `Act` and `Assert` labelled separately or as `// Act & Assert`; `Arrange` only when statements precede the first label. Confirm the labels are absent; a single-expression arrow body and a body with no setup are exempt. |
+| `multi-statement-act`    | the act region, from its label to the next label or the body's end, holds more than one depth-0 statement: two outcomes pinned, or an act and an assert sharing a label.                                                                                                    |
+| `compound-assertion`     | one assertion joins two conditions (`Assert.True(a && b)`): the failure message cannot say which broke. Usually two assertions.                                                                                                                                             |
+| `conditional-assertion`  | an assertion inside an `if`/`else` or a braceless guard: it may never run, let alone fail. A branch the test itself controls can be fine; a branch decided by the code under test is the lead.                                                                              |
+| `assertion-in-loop`      | an assertion inside a `for`/`foreach`/`while` body or a `.forEach` callback: several cases reported as one test, with only the first failure visible. Looping one returned collection to assert each element is one behaviour.                                              |
+| `else-branch-assertion`  | an `else` branch that asserts: both branches asserting is two tests in one.                                                                                                                                                                                                 |
+| `ambient-clock`          | a read of the wall clock: the result depends on when the test ran.                                                                                                                                                                                                          |
+| `sleep`                  | a sleep or delay: the test races the clock instead of controlling it.                                                                                                                                                                                                       |
+| `randomness`             | a random value or identifier: the input is not reproducible.                                                                                                                                                                                                                |
+| `ambient-environment`    | an environment variable, working directory or machine name read.                                                                                                                                                                                                            |
+| `ambient-locale`         | the current culture or locale read.                                                                                                                                                                                                                                         |
+| `real-network`           | a real network client: the test needs a reachable peer.                                                                                                                                                                                                                     |
+| `real-filesystem`        | real file, directory or temp-path access: the test needs a writable host.                                                                                                                                                                                                   |
+| `process-spawn`          | a child process started: the test needs the host's binaries.                                                                                                                                                                                                                |
+| `debug-output`           | console or debug output left in a test.                                                                                                                                                                                                                                     |
+| `unrouted-property-seed` | a property seed that cannot be the project channel: a numeric `seed:` literal in an `fc.assert` options object, a C# `Replay = "<literal>"` with no `$` interpolation, or a C# replay gamma that is even (FsCheck rejects an even gamma and crashes the test host).         |
+| `suppression-note`       | a why-note that names an always-on defect, an unknown or wrong-case id, or gives a vacuous reason: it suppresses nothing.                                                                                                                                                   |
 
 A determinism lead is legitimate when the effect is the subject: a clock
 boundary, a serialisation test over a real temporary file. Control it and say so
@@ -146,7 +147,10 @@ An always-on defect has no escape even though the note parses.
   itself a finding. `computed-title` has no escape at all.
 - **Placement.** The note sits in the contiguous comment block immediately above
   the test declaration, with no blank line between. A note further up the file,
-  or above an unrelated declaration, does not apply.
+  or above an unrelated declaration, does not apply. The one exception:
+  `unrouted-property-seed` also reads the block above the finding's own line,
+  because a C# replay sits in an attribute or a constructor that is not a test
+  declaration.
 - **Exact id.** The token is the rule id, case-sensitive. A misspelt id
   suppresses nothing and is reported as an unknown suppression. `property` is the
   one accepted alias for `property-trigger-unmet`; there are no other aliases.
@@ -184,7 +188,8 @@ An always-on defect has no escape even though the note parses.
 - A vacuous reason is a pinned stop-list, not a judgement: empty, `legitimate`,
   `intentional`, `required`, `by design` and their siblings report. A reason
   outside the list always passes, even a bad one.
-- Notes are read only in the contiguous comment block above a test declaration.
-  A note above production code, a suite or a file is neither applied nor
-  reported.
+- Notes are read in the contiguous comment block above a test declaration, and
+  for `unrouted-property-seed` above the finding's own line (an attribute or
+  constructor replay). A note above unrelated production code, a suite or a
+  file is neither applied nor reported.
 - The engine never measures coverage and never estimates it.

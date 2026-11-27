@@ -2180,3 +2180,353 @@ test("a note above one declaration does not suppress another", () => {
         ["sleep"],
     );
 });
+
+/** One fc.assert over an integer domain, with the given options argument. */
+function integerProperty(options: string): string {
+    return declaredBody(
+        `    fc.assert(fc.property(fc.integer(), (value) => value === value)${options});`,
+    );
+}
+
+/** One C# FsCheck property attribute carrying the given Replay expression. */
+function replayAttribute(expression: string): string {
+    return [
+        "public class MathTests",
+        "{",
+        `    [Property(Replay = ${expression})]`,
+        "    public bool Roundtrips(int value) => value == value;",
+        "}",
+    ].join("\n");
+}
+
+/** One C# property attribute whose constructor assigns the given Replay. */
+function replayConstructor(expression: string): string {
+    return [
+        "public sealed class ProjectPropertyAttribute : PropertyAttribute",
+        "{",
+        "    public ProjectPropertyAttribute()",
+        "    {",
+        `        Replay = ${expression};`,
+        "    }",
+        "}",
+    ].join("\n");
+}
+
+/** A replay constructor with a why-note in the contiguous block above it. */
+function replayConstructorWithNote(expression: string): string {
+    return replayConstructor(expression).replace(
+        "    {\n        Replay =",
+        "    {\n        // Why use unrouted-property-seed here: the replay pins the reported counterexample\n        Replay =",
+    );
+}
+
+/** The property-seed findings one source reports in review mode. */
+function propertySeedFindingsOf({
+    path,
+    content,
+}: {
+    path: string;
+    content: string;
+}): ReturnType<typeof reviewTestSources> {
+    return reviewTestSources([{ path, content }], { review: true }).filter(
+        (finding) => finding.rule === "unrouted-property-seed",
+    );
+}
+
+test("reports a numeric literal seed on an fc.assert options argument", () => {
+    // Arrange
+    const contents = [
+        declaredBody(
+            [
+                "    fc.assert(",
+                "        fc.property(fc.integer(), (value) => value === value),",
+                "        { seed: 20261129 },",
+                "    );",
+            ].join("\n"),
+        ),
+        integerProperty(", { seed: 20_261_126 }"),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({ path: "a.test.ts", content }).map(
+            (finding) => [finding.rule, finding.line],
+        ),
+    );
+
+    // Assert
+    assert.deepEqual(found, [
+        [["unrouted-property-seed", 5]],
+        [["unrouted-property-seed", 3]],
+    ]);
+});
+
+test("stays silent when the property seed can be a project channel", () => {
+    // Arrange
+    const contents = [
+        integerProperty(", { seed: PROPERTY_SEED }"),
+        integerProperty(", { seed: resolveSeed() }"),
+        integerProperty(""),
+        declaredBody("    fc.sample(fc.integer(), { seed: 42 });"),
+        declaredBody("    const options = { seed: 42 };"),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({ path: "a.test.ts", content }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
+
+test("reports a frozen C# replay literal at its line", () => {
+    // Arrange
+    const path = "MathTests.cs";
+    const content = replayAttribute('"20261126,99"');
+
+    // Act
+    const findings = propertySeedFindingsOf({ path, content });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.rule, "unrouted-property-seed");
+    assert.equal(findings[0]?.line, 3);
+    assert.match(findings[0]?.message ?? "", /frozen FsCheck replay/u);
+    assert.match(findings[0]?.message ?? "", /20261126,99/u);
+});
+
+test("stays silent for an interpolated C# replay with an odd literal tail", () => {
+    // Arrange
+    const contents = [
+        replayConstructor('$"{seed},1"'),
+        replayConstructor('$"{seed},11400714819323198485"'),
+        replayConstructor('$"{seed},{gamma}"'),
+        replayConstructor("PropertySeed.Resolve()"),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({
+            path: "ProjectPropertyAttribute.cs",
+            content,
+        }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
+
+test("reports a C# replay whose gamma is even once, naming the gamma", () => {
+    // Arrange
+    const contents = [
+        replayAttribute('"20261126,100"'),
+        replayConstructor('$"{seed},100"'),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({
+            path: "ProjectPropertyAttribute.cs",
+            content,
+        }).map((finding) => [finding.rule, finding.line, finding.message]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((rows) => rows.map(([rule, line]) => [rule, line])),
+        [[["unrouted-property-seed", 3]], [["unrouted-property-seed", 5]]],
+    );
+    assert.ok(found.every(([message]) => /even gamma/u.test(message ?? "")));
+    assert.ok(found.every(([message]) => /100/u.test(message ?? "")));
+});
+
+test("reports the property-seed lead in review mode only", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: integerProperty(", { seed: 20261129 }"),
+    };
+
+    // Act
+    const tracked = reviewTestSources([source]);
+
+    // Assert
+    assert.deepEqual(tracked, []);
+});
+
+test("adds the property-seed lead when the pass is a review", () => {
+    // Arrange
+    const source = {
+        path: "a.test.ts",
+        content: integerProperty(", { seed: 20261129 }"),
+    };
+
+    // Act
+    const reviewed = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(
+        reviewed
+            .map((finding) => finding.rule)
+            .filter((rule) => rule === "unrouted-property-seed"),
+        ["unrouted-property-seed"],
+    );
+});
+
+test("a why-note suppresses the property-seed lead above its declaration", () => {
+    // Arrange
+    const sources = [
+        {
+            path: "a.test.ts",
+            content: notedTest(
+                "// Why use unrouted-property-seed here: the replay pins the reported counterexample",
+                "    fc.assert(fc.property(fc.integer(), (value) => value === value), { seed: 20261129 });",
+            ),
+        },
+        {
+            path: "ProjectPropertyAttribute.cs",
+            content: replayConstructorWithNote('"20261126,100"'),
+        },
+    ];
+
+    // Act
+    const found = sources.map((source) => propertySeedFindingsOf(source));
+
+    // Assert
+    assert.deepEqual(
+        found,
+        sources.map(() => []),
+    );
+});
+
+/** One Replay assignment through a same-file constant declaration. */
+function replayFromConstant({
+    declaration,
+    assignment,
+}: {
+    declaration: string;
+    assignment: string;
+}): string {
+    return [
+        "public sealed class ProjectPropertyAttribute : PropertyAttribute",
+        "{",
+        `    ${declaration}`,
+        "",
+        "    public ProjectPropertyAttribute()",
+        "    {",
+        `        Replay = ${assignment};`,
+        "    }",
+        "}",
+    ].join("\n");
+}
+
+test("reports an even gamma routed through a same-file constant", () => {
+    // Arrange
+    const declarations = [
+        'private const string Pin = "20261126,100";',
+        'private static readonly string Pin = "20261126,100";',
+    ];
+    const contents = declarations.map((declaration) =>
+        replayFromConstant({ declaration, assignment: "Pin" }),
+    );
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({
+            path: "ProjectPropertyAttribute.cs",
+            content,
+        }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((rows) => rows.map((row) => [row.rule, row.line])),
+        contents.map(() => [["unrouted-property-seed", 7]]),
+    );
+    const messages = found.flatMap((rows) => rows.map((row) => row.message));
+    assert.ok(messages.every((message) => /even gamma/u.test(message)));
+    assert.ok(messages.every((message) => /20261126,100/u.test(message)));
+});
+
+test("reports an odd-gamma constant replay as a frozen replay", () => {
+    // Arrange
+    const content = replayFromConstant({
+        declaration: 'private const string Pin = "20261126,1";',
+        assignment: "Pin",
+    });
+
+    // Act
+    const [finding] = propertySeedFindingsOf({
+        path: "ProjectPropertyAttribute.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(finding?.line, 7);
+    assert.match(finding?.message ?? "", /frozen FsCheck replay/u);
+    assert.match(finding?.message ?? "", /20261126,1/u);
+});
+
+test("resolves a same-file constant through its type name", () => {
+    // Arrange
+    const content = [
+        "internal static class Seeds",
+        "{",
+        '    public const string Pin = "20261126,100";',
+        "}",
+        "",
+        "public sealed class ProjectPropertyAttribute : PropertyAttribute",
+        "{",
+        "    public ProjectPropertyAttribute()",
+        "    {",
+        "        Replay = Seeds.Pin;",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const [finding] = propertySeedFindingsOf({
+        path: "ProjectPropertyAttribute.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(finding?.line, 10);
+    assert.match(finding?.message ?? "", /even gamma/u);
+    assert.match(finding?.message ?? "", /20261126,100/u);
+});
+
+test("stays silent when the replay identifier cannot be resolved in the file", () => {
+    // Arrange
+    const contents = [
+        replayFromConstant({
+            declaration: "// no constant here",
+            assignment: "ImportedPin",
+        }),
+        replayFromConstant({
+            declaration: "private const int Pin = 20261126;",
+            assignment: "Pin",
+        }),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        propertySeedFindingsOf({
+            path: "ProjectPropertyAttribute.cs",
+            content,
+        }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
