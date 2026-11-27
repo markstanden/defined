@@ -7,7 +7,7 @@ and determinism leads in a named-file review pass. It does **not** mechanically
 check every structure, name or pattern below: treat those as the agreed
 convention for reviews and agent work.
 
-**Stack**: xUnit, Moq, Shouldly.
+**Stack**: xUnit, Moq, Shouldly; FsCheck for property tests.
 
 ## Test class shape
 

@@ -3,7 +3,9 @@
 This is the shape to write when a contract states a law. It is written for an
 engineer who has used `[Fact]` and `[Theory]` and is new to generated inputs.
 The worked example is a round-trip law; the rules it applies are in
-[`test-review.md`](test-review.md).
+[`test-review.md`](test-review.md). The snippets use FsCheck 3's Fluent API:
+add the `FsCheck` package and `FsCheck.Xunit` (or `FsCheck.Xunit.v3` on xUnit
+v3).
 
 > One law per method; the generated input is a typed parameter; the generator
 > and the seed stay outside the law; a named example stays beside it. The rest
@@ -136,12 +138,13 @@ one-way pair is a production problem, not a property problem.
 ## The generator
 
 ```csharp
+using System.Collections.Generic;
 using FsCheck;
 using FsCheck.Fluent;
 
 public static class CustomerArbitraries
 {
-    /// <summary>Every customer the documented XML contract accepts.</summary>
+    /// <summary>A representative customer from the documented XML contract.</summary>
     public static Arbitrary<Customer> ValidCustomer()
     {
         Gen<string> name = Gen.Elements("Ada", "Grace", "Alan");
@@ -149,7 +152,16 @@ public static class CustomerArbitraries
         Gen<Customer> customer = from customerName in name
                                  from customerId in id
                                  select new Customer(customerId, customerName);
-        return Arb.From(customer);
+        return Arb.From(customer, ShrinkCustomer);
+    }
+
+    /// <summary>Shrinks the id to the documented minimum, staying inside the domain.</summary>
+    private static IEnumerable<Customer> ShrinkCustomer(Customer customer)
+    {
+        if (customer.Id > 1)
+        {
+            yield return customer with { Id = 1 };
+        }
     }
 }
 ```
@@ -160,6 +172,11 @@ public static class CustomerArbitraries
 - `Gen<string>` and `Gen<int>` show the pieces; the query composes them into a
   `Customer`. The reader can see the documented domain without opening another
   file.
+- `Arb.From(customer, ShrinkCustomer)` is the two-argument overload; the second
+  argument is the shrinker. `Arb.From(customer)` alone registers no shrinker —
+  FsCheck's API says so — and a property built on it never minimises a failure.
+- `ShrinkCustomer` yields only values the contract accepts (`Id` of at least
+  1), so shrinking never leaves the documented domain.
 - `ValidCustomer` names the contract domain, not the type. If the contract also
   documents rejected values, a separate `InvalidCustomer` generator sits beside
   it and the test that expects rejection names that domain.
@@ -180,6 +197,7 @@ it never appears in the law.
 ```csharp
 using FsCheck.Xunit;
 
+#pragma warning disable xUnit3003 // FsCheck's PropertyAttribute has no constructor for source information
 public sealed class ProjectPropertyAttribute : PropertyAttribute
 {
     public ProjectPropertyAttribute() : this([]) { }
@@ -190,6 +208,7 @@ public sealed class ProjectPropertyAttribute : PropertyAttribute
         Replay = $"{PropertySeed.Value},1";
     }
 }
+#pragma warning restore xUnit3003
 ```
 
 ```csharp
@@ -208,7 +227,7 @@ internal static class PropertySeed
         Environment.GetEnvironmentVariable("CI") is not null ||
         Environment.GetEnvironmentVariable("TF_BUILD") is not null;
 
-    private static int Resolve(string? overrideSeed, bool isCi, Func<int> nextRandom)
+    internal static int Resolve(string? overrideSeed, bool isCi, Func<int> nextRandom)
     {
         if (overrideSeed is not null)
         {
@@ -227,12 +246,23 @@ internal static class PropertySeed
 - `PropertySeed` resolves once per test assembly: the `PROPERTY_SEED` override
   first, then the committed `Pin` on CI (`CI` or `TF_BUILD` is set), then a
   fresh random seed locally. CI replays a known world; local runs keep
-  exploring.
+  exploring. The trade is coverage: every CI run generates the same 100 cases
+  per property, so a long-tail defect surfaces there only if a local draw found
+  it first. Rotate the pin periodically, or keep one unpinned job, where CI
+  should explore too; reproduction does not depend on the pin because FsCheck
+  prints the replay tuple.
 - Attribute arguments must be compile-time constants, which is why the
   attribute's constructor sets `Replay` at runtime. A per-site
   `Replay = "20261122,1"` freezes the world and never rotates.
 - The seed belongs in test support, not in the test file. The environment read
   is the suite's one allowed ambient read, and it is confined to this helper.
+- `Resolve` is `internal` so the helper's own tests can pin the precedence
+  without reflection: the override, the CI pin, a local draw and a malformed
+  override.
+- `xUnit3003` fires on an attribute derived from `FactAttribute` that cannot
+  take the caller's source information; FsCheck's `PropertyAttribute` has no
+  such constructor, so the pragma carries the reason instead of a warning under
+  a warnings-as-errors build.
 - A malformed `PROPERTY_SEED` fails loudly rather than silently falling back to
   a different world.
 
@@ -242,6 +272,7 @@ internal static class PropertySeed
 tests/
   Support/ProjectPropertyAttribute.cs   seed routing, once per test project
   Support/PropertySeed.cs               the pin, the override and the local draw
+  Support/PropertySeedTests.cs          the channel's precedence tests
   Support/CustomerArbitraries.cs        the documented domains
   CustomerXmlTests.cs                   named examples
   CustomerXmlPropertyTests.cs           laws only
@@ -256,29 +287,32 @@ The split is the readability rule made physical. A reader who opens
 A deliberate defect in `Parse` (uppercasing the name) produces:
 
 ```text
-Falsifiable, after 1 test (0 shrinks) (20261122,1).
+Falsifiable, after 1 test (1 shrink) (20261122,1).
 Original:
-Customer { Id = 38560, Name = Alan }
+Customer { Id = 35276, Name = Alan }
+Shrunk:
+Customer { Id = 1, Name = Alan }
 
 Shouldly.ShouldAssertException : reparsed
     should be
-Customer { Id = 38560, Name = Alan }
+Customer { Id = 1, Name = Alan }
     but was
-Customer { Id = 38560, Name = ALAN }
+Customer { Id = 1, Name = ALAN }
 ```
 
 This run stopped after one case because the first generated value already
-failed; a healthy run completes all 100 cases (the test runner still reports one
-test method). The replay shown is the CI pin; locally the helper draws a fresh
-seed, and the failure prints that seed.
+failed; FsCheck then shrank it to the smallest failing customer, and a healthy
+run completes all 100 cases (the test runner still reports one test method). The
+replay shown is the CI pin; locally the helper draws a fresh seed, and the
+failure prints that seed.
 
 Read it in three parts:
 
 1. **the replay** — `(20261122,1)` is the seed and gamma. Reproduce with
    `PROPERTY_SEED=20261122 dotnet test`.
-2. **the failing input** — `Customer { Id = 38560, Name = Alan }` is the case
-   FsCheck settled on after shrinking. `Original:` is its label; when shrinking
-   changes the value, FsCheck shows the shrunken form too.
+2. **the failing input** — `Original:` is the first failing case; `Shrunk:` is
+   the smallest case that still fails: the id at the documented minimum. The
+   assertion shows the shrunken values, so the promotion below uses `Id = 1`.
 3. **the assertion** — the law and the two values, not a generic "property
    failed".
 
@@ -293,7 +327,7 @@ example is the durable regression evidence.
 public void RenderThenParse_WithMixedCaseName_RestoresOriginal()
 {
     // Arrange
-    Customer original = new Customer(38560, "Alan");
+    Customer original = new Customer(1, "Alan");
 
     // Act
     Customer reparsed = CustomerXml.Parse(CustomerXml.Render(original));
@@ -321,7 +355,8 @@ it never shrinks.
 
 Keep named examples where the contract is a list of cases: permissions, status
 transitions, error mapping. If a trigger fires and a property is not the right
-instrument, leave a why-not note beside the example table:
+instrument, leave a why-not note immediately above the test declaration — the
+gate reads only the contiguous comment block above it:
 
 ```csharp
 // Why not use property here: the contract is a fixed list of status transitions
