@@ -212,9 +212,9 @@ public readonly record struct SeedCase(string Seed, DateOnly Found, string Ticke
 
 public static class CustomerXmlSeeds
 {
-    public static readonly SeedCase[] All =
+    public static readonly TheoryDataRow<SeedCase>[] All =
     [
-        new("1234567890,987654321", new DateOnly(2026, 11, 27), "AB#1234", "name uppercased")
+        new(new("1234567890,987654321", new DateOnly(2026, 11, 27), "AB#1234", "name uppercased"))
     ];
 }
 ```
@@ -223,7 +223,6 @@ Replay every entry through the same law body from one `[Theory]` beside the
 random properties:
 
 ```csharp
-using System.Globalization;
 using FsCheck;
 using FsCheck.Fluent;
 using Microsoft.FSharp.Core;
@@ -235,17 +234,17 @@ public void RenderThenParse_WhenReplayingARecordedSeed_RestoresOriginal(SeedCase
 {
     // Arrange
     string[] parts = seed.Seed.Split(',');
-    Replay replay = new(
-        new Rnd(
-            ulong.Parse(parts[0], CultureInfo.InvariantCulture),
-            ulong.Parse(parts[1], CultureInfo.InvariantCulture)),
-        null);
+    Replay replay = new(new Rnd(ulong.Parse(parts[0]), ulong.Parse(parts[1])), null);
     Property law = Prop.ForAll(
-        CustomerArbitraries.ValidCustomer().Generator,
-        (Customer original) => RestoresOriginal(original));
+        CustomerArbitraries.ValidCustomer(),
+        (Customer original) =>
+        {
+            RestoresOriginal(original);
+            return true;
+        });
 
     // Act / Assert
-    Check.One(Config.Quick.WithReplay(FSharpOption<Replay>.Some(replay)), law);
+    Check.One(Config.QuickThrowOnFailure.WithReplay(FSharpOption<Replay>.Some(replay)), law);
 }
 ```
 
@@ -254,11 +253,18 @@ public void RenderThenParse_WhenReplayingARecordedSeed_RestoresOriginal(SeedCase
   `long.MaxValue`. Record the two-element pair FsCheck prints first; a
   multi-test failure also prints a three-element last-step tuple, which adds the
   size and is not needed for this ledger.
+- The ledger is `TheoryDataRow<SeedCase>[]` on xUnit v3, not `SeedCase[]`:
+  xunit.v3's xUnit1019 analyzer rejects a plain struct array as `MemberData`.
+  xUnit v2 has no `TheoryDataRow`; use `SeedCase[]` there.
+- `Prop.ForAll` takes the `Arbitrary<T>` values, not their `.Generator`;
+  `QuickThrowOnFailure` makes a replay failure throw so xUnit reports it.
 - The property carries no `Replay`. A per-site literal freezes one property; the
   ledger holds every recorded seed and is the one place to add another.
 - `RestoresOriginal` is the law body extracted from the `[Property]` method
   above, so the random property and the replay theory run the same assertions
-  and a recorded seed cannot drift from the live law.
+  and a recorded seed cannot drift from the live law. The lambda returns `true`
+  after the body because `Prop.ForAll` needs a testable result; the assertions
+  throw on failure.
 - The ledger sits beside the class it guards, not in `Support/`; a central list
   keyed by law name silently orphans entries on a rename.
 - A ledger entry can go once a promoted example covers the same input and the
