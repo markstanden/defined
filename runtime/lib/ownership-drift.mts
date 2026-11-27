@@ -94,9 +94,31 @@ export function configDrift(config: DefinedConfig): DriftNotice[] {
 }
 
 /**
+ * The cosmetic channels a seeded default can differ by without changing a
+ * setting: comments (`#`, `;`, `<!--`), blank lines (including a missing or
+ * extra final newline), trailing whitespace and CRLF line endings. A repo may
+ * reword a comment or let an editor touch the file; neither is drift.
+ *
+ * ponytail: line-oriented, not a per-format settings parser. A reordered or
+ * re-wrapped line still reports, which is the conservative direction — a real
+ * setting change is never silenced. Upgrade path: parse settings per format
+ * (editorconfig, gitattributes, MSBuild props) if reordering ever becomes
+ * noisy.
+ */
+function withoutCosmetics(text: string): string {
+    return text
+        .replaceAll("\r\n", "\n")
+        .split("\n")
+        .map((line) => line.trimEnd())
+        .filter((line) => line !== "" && !/^\s*(?:#|;|<!--)/u.test(line))
+        .join("\n");
+}
+
+/**
  * Seeded defaults the repo has replaced with its own copy. Absence is the
  * repo's choice, not drift, and a managed file is excluded — the bootstrap
- * check owns that verdict.
+ * check owns that verdict. A cosmetic-only difference is not a replacement:
+ * the file still carries the house settings.
  */
 async function seededDrift({
     sourceDir,
@@ -114,13 +136,17 @@ async function seededDrift({
             const existing = await readContentsOrEmpty({
                 filePath: join(repoRoot, target),
             });
-            if (existing === "" || existing === desired) {
+            if (
+                existing === "" ||
+                withoutCosmetics(existing) === withoutCosmetics(desired)
+            ) {
                 return null;
             }
             return {
                 kind: "seeded",
                 file: target,
-                message: `${target}: repo copy differs from the house default (project-owned)`,
+                message:
+                    "repo copy differs from the house default (project-owned)",
             };
         }),
     );

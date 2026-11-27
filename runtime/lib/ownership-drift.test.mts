@@ -8,10 +8,15 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import fc from "fast-check";
 
 import type { DefinedConfig } from "./config.mts";
 import type { ManagedFile } from "./managed-files.mts";
-import { configDrift, ownershipDrift } from "./ownership-drift.mts";
+import {
+    configDrift,
+    ownershipDrift,
+    type DriftNotice,
+} from "./ownership-drift.mts";
 
 const EMPTY_CONFIG: DefinedConfig = { version: "" };
 
@@ -49,6 +54,31 @@ async function withRepo(
     } finally {
         await rm(repoRoot, { recursive: true, force: true });
     }
+}
+
+/**
+ * The notices a repo gets when its `.editorconfig` holds `existing` against a
+ * house copy holding `desired`.
+ */
+async function editorconfigDrift({
+    desired,
+    existing,
+}: {
+    desired: string;
+    existing: string;
+}): Promise<DriftNotice[]> {
+    let notices: DriftNotice[] = [];
+    await withSourceDir({ ".editorconfig": desired }, async (sourceDir) => {
+        await withRepo({ ".editorconfig": existing }, async (repoRoot) => {
+            notices = await ownershipDrift({
+                config: EMPTY_CONFIG,
+                sourceDir,
+                files: [seededFile(".editorconfig", ".editorconfig")],
+                repoRoot,
+            });
+        });
+    });
+    return notices;
 }
 
 test("ownershipDrift_cleanConfigAndIdenticalSeeds_isEmpty", async () => {
@@ -271,10 +301,64 @@ test("ownershipDrift_seededFileDiffers_reportsProjectOwnedDrift", async () => {
                     assert.equal(notices.length, 1);
                     assert.equal(notices[0].kind, "seeded");
                     assert.equal(notices[0].file, ".editorconfig");
-                    assert.match(notices[0].message, /house default/u);
+                    assert.equal(
+                        notices[0].message,
+                        "repo copy differs from the house default (project-owned)",
+                    );
                 },
             );
         },
+    );
+});
+
+test("a seeded default that differs only cosmetically is not drift", async () => {
+    // Contract: the notice is about the house floor, not the file's bytes — a
+    // repo may reword a comment or let an editor touch the file without being
+    // reported on every run. One law over the four documented cosmetic
+    // channels (comments, blank lines, trailing whitespace, line endings); the
+    // generator sweeps their mix, so named examples would only restate it.
+    // Arrange
+    const setting = fc.constantFrom(
+        "root = true",
+        "end_of_line = lf",
+        "indent_size = 4",
+        "dotnet_diagnostic.CA1707.severity = none",
+    );
+    const comment = fc.constantFrom(
+        "# indentation is house-owned",
+        "; semicolon comment",
+        "<!-- xml comment -->",
+        "   # indented comment",
+    );
+    const decoration = fc.record({
+        before: fc.array(fc.oneof(comment, fc.constant("")), { maxLength: 2 }),
+        trailing: fc.constantFrom("", " ", "  ", "\t"),
+        eol: fc.constantFrom("\n", "\r\n"),
+    });
+    const decoratedSettings = fc.array(fc.tuple(setting, decoration), {
+        minLength: 1,
+        maxLength: 5,
+    });
+
+    // Act & Assert
+    await fc.assert(
+        fc.asyncProperty(decoratedSettings, async (decorated) => {
+            // Arrange
+            const desired = decorated.map(([line]) => line).join("\n");
+            const existing = decorated
+                .flatMap(([line, decor]) => [
+                    ...decor.before.map((text) => [text, decor.eol] as const),
+                    [line + decor.trailing, decor.eol] as const,
+                ])
+                .map(([text, eol]) => `${text}${eol}`)
+                .join("");
+
+            // Act
+            const notices = await editorconfigDrift({ desired, existing });
+
+            // Assert
+            assert.deepEqual(notices, []);
+        }),
     );
 });
 
