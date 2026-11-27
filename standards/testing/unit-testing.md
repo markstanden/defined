@@ -7,7 +7,7 @@ and determinism leads in a named-file review pass. It does **not** mechanically
 check every structure, name or pattern below: treat those as the agreed
 convention for reviews and agent work.
 
-**Stack**: xUnit, Moq, Shouldly.
+**Stack**: xUnit, Moq, Shouldly; FsCheck for property tests.
 
 ## Test class shape
 
@@ -78,3 +78,9 @@ public async Task AddRunHistory_WithInvalidEntraId_ThrowsArgumentException(strin
 - Every `Setup` belongs in Arrange, before Act.
 - `It.IsAny<T>()` when the specific value does not matter; a specific value when
   the test is about the exact argument passed.
+
+## Property-based tests
+
+When the contract states a law rather than a list of cases, the readable shape,
+the generator and the seed channel are in
+[`property-testing.md`](property-testing.md).
