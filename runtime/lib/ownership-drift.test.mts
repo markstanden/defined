@@ -312,12 +312,19 @@ test("ownershipDrift_seededFileDiffers_reportsProjectOwnedDrift", async () => {
 });
 
 test("a seeded default that differs only cosmetically is not drift", async () => {
-    // Contract: the notice is about the house floor, not the file's bytes — a
-    // repo may reword a comment or let an editor touch the file without being
-    // reported on every run. One law over the four documented cosmetic
-    // channels (comments, blank lines, trailing whitespace, line endings); the
-    // generator sweeps their mix, so named examples would only restate it.
+    // Contract: the notice is about the house floor, not the file's bytes. One
+    // law over the four documented cosmetic channels (comments, blank lines,
+    // trailing whitespace, line endings), applied to both sides — a repo may
+    // reword a comment, and a new image copy may gain one. The generator
+    // sweeps the mix, so named examples would only restate it.
     // Arrange
+    type Decoration = {
+        before: string[];
+        trailing: string;
+        eol: string;
+        finalNewline: boolean;
+    };
+    type Row = { line: string; desired: Decoration; existing: Decoration };
     const setting = fc.constantFrom(
         "root = true",
         "end_of_line = lf",
@@ -334,27 +341,38 @@ test("a seeded default that differs only cosmetically is not drift", async () =>
         before: fc.array(fc.oneof(comment, fc.constant("")), { maxLength: 2 }),
         trailing: fc.constantFrom("", " ", "  ", "\t"),
         eol: fc.constantFrom("\n", "\r\n"),
+        finalNewline: fc.boolean(),
     });
-    const decoratedSettings = fc.array(fc.tuple(setting, decoration), {
-        minLength: 1,
-        maxLength: 5,
+    const row = fc.record({
+        line: setting,
+        desired: decoration,
+        existing: decoration,
     });
+    const rows = fc.array(row, { minLength: 1, maxLength: 5 });
+
+    const render = (held: Row[], side: "desired" | "existing"): string => {
+        const text = held
+            .flatMap((entry) => [
+                ...entry[side].before.map(
+                    (line) => [line, entry[side].eol] as const,
+                ),
+                [entry.line + entry[side].trailing, entry[side].eol] as const,
+            ])
+            .map(([line, eol]) => `${line}${eol}`)
+            .join("");
+        return held.at(-1)?.[side].finalNewline === true
+            ? text
+            : text.replace(/\r?\n$/u, "");
+    };
 
     // Act & Assert
     await fc.assert(
-        fc.asyncProperty(decoratedSettings, async (decorated) => {
-            // Arrange
-            const desired = decorated.map(([line]) => line).join("\n");
-            const existing = decorated
-                .flatMap(([line, decor]) => [
-                    ...decor.before.map((text) => [text, decor.eol] as const),
-                    [line + decor.trailing, decor.eol] as const,
-                ])
-                .map(([text, eol]) => `${text}${eol}`)
-                .join("");
-
+        fc.asyncProperty(rows, async (held) => {
             // Act
-            const notices = await editorconfigDrift({ desired, existing });
+            const notices = await editorconfigDrift({
+                desired: render(held, "desired"),
+                existing: render(held, "existing"),
+            });
 
             // Assert
             assert.deepEqual(notices, []);
