@@ -119,7 +119,7 @@ oracle independence, boundary and null/whitespace coverage, parameterisation and
 shared-setup decisions, test naming, AND/WITH reading, property-test
 judgement, coverage interpretation and the report shape. Those belong to the
 review skills and `UNIT_TESTS.md`. The creation shape for a property — law,
-generator, seed channel and promoted example — is
+generator, seed policy and promoted example — is
 [`property-testing.md`](property-testing.md).
 
 Owned elsewhere, pointed at rather than restated: coverage minimums and

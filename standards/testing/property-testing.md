@@ -33,8 +33,7 @@ under test.
 
 ## What FsCheck does
 
-`[ProjectProperty]` is an FsCheck `[Property]` with the project seed channel
-attached. When the test runner sees it:
+`[Property]` is FsCheck's test attribute. When the test runner sees it:
 
 1. it reads the method's parameters and generates a value for each one;
 2. it calls the method once per generated case (100 cases by default), plus
@@ -78,11 +77,12 @@ Read the shape below as a sentence: for any valid customer, rendering and then
 parsing returns the original customer.
 
 ```csharp
+using FsCheck.Xunit;
 using Shouldly;
 
 public sealed class CustomerXmlPropertyTests
 {
-    [ProjectProperty(typeof(CustomerArbitraries))]
+    [Property(Arbitrary = [typeof(CustomerArbitraries)])]
     public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)
     {
         // Act
@@ -167,8 +167,8 @@ public static class CustomerArbitraries
 ```
 
 - `Arbitrary<Customer>` is the type FsCheck looks for when the method has a
-  `Customer` parameter. `[ProjectProperty(typeof(CustomerArbitraries))]`
-  registers it for the test class.
+  `Customer` parameter. `[Property(Arbitrary = [typeof(CustomerArbitraries)])]`
+  registers it for the test method.
 - `Gen<string>` and `Gen<int>` show the pieces; the query composes them into a
   `Customer`. The reader can see the documented domain without opening another
   file.
@@ -189,105 +189,108 @@ Without the attribute's `typeof(...)`, FsCheck would invent a `Customer` from
 its members. That is not the documented domain, so it does not prove the
 contract.
 
-## The seed channel
+## The seed
 
 The seed is how a failing run is reproduced. It is routing, not evidence, and
 it never appears in the law.
 
+The suite does not pin a seed. FsCheck draws a fresh one on every run, local and
+CI alike, and prints it with the shrunk case when a property fails.
+
+A failure is a signal, not a flake: investigate it. Either the code is wrong,
+the generator admits inputs the contract does not, or the law is too weak. Fix
+that cause. Then record the seed and the promoted case so the same input guards
+the suite forever. Pinning the seed to get green hides the defect and freezes
+the sample; reproducibility comes from the printed seed and the recorded case,
+not from a frozen run.
+
+When a property fails, record the `(seed,gamma)` pair in a per-class ledger
+beside the law, with the date, ticket and symptom:
+
 ```csharp
-using FsCheck.Xunit;
+public readonly record struct SeedCase(string Seed, DateOnly Found, string Ticket, string Symptom);
 
-#pragma warning disable xUnit3003 // FsCheck's PropertyAttribute has no constructor for source information
-public sealed class ProjectPropertyAttribute : PropertyAttribute
+public static class CustomerXmlSeeds
 {
-    public ProjectPropertyAttribute() : this([]) { }
-
-    public ProjectPropertyAttribute(params Type[] arbitraryTypes)
-    {
-        Arbitrary = arbitraryTypes;
-        Replay = $"{PropertySeed.Value},1";
-    }
+    public static readonly TheoryDataRow<SeedCase>[] All =
+    [
+        new(new("1234567890,987654321", new DateOnly(2026, 11, 27), "AB#1234", "name uppercased"))
+    ];
 }
-#pragma warning restore xUnit3003
 ```
 
+Replay every entry through the same law body from one `[Theory]` beside the
+random properties:
+
 ```csharp
-using System.Globalization;
+using FsCheck;
+using FsCheck.Fluent;
+using Microsoft.FSharp.Core;
+using Xunit;
 
-internal static class PropertySeed
+[Theory]
+[MemberData(nameof(CustomerXmlSeeds.All), MemberType = typeof(CustomerXmlSeeds))]
+public void RenderThenParse_WhenReplayingARecordedSeed_RestoresOriginal(SeedCase seed)
 {
-    public const int Pin = 20261122;
-
-    public static int Value { get; } = Resolve(
-        Environment.GetEnvironmentVariable("PROPERTY_SEED"),
-        IsCi,
-        Random.Shared.Next);
-
-    private static bool IsCi =>
-        Environment.GetEnvironmentVariable("CI") is not null ||
-        Environment.GetEnvironmentVariable("TF_BUILD") is not null;
-
-    internal static int Resolve(string? overrideSeed, bool isCi, Func<int> nextRandom)
-    {
-        if (overrideSeed is not null)
+    // Arrange
+    string[] parts = seed.Seed.Split(',');
+    Replay replay = new(new Rnd(ulong.Parse(parts[0]), ulong.Parse(parts[1])), null);
+    Property law = Prop.ForAll(
+        CustomerArbitraries.ValidCustomer(),
+        (Customer original) =>
         {
-            return int.Parse(overrideSeed, CultureInfo.InvariantCulture);
-        }
+            RestoresOriginal(original);
+            return true;
+        });
 
-        int seed = isCi ? Pin : nextRandom();
-        Console.Error.WriteLine($"property seed: {seed}");
-        return seed;
-    }
+    // Act / Assert
+    Check.One(Config.QuickThrowOnFailure.WithReplay(FSharpOption<Replay>.Some(replay)), law);
 }
 ```
 
-- `Replay` is `"seed,gamma"`; the gamma must be odd, because FsCheck rejects an
-  even one. `1` is the simplest valid gamma.
-- `PropertySeed` resolves once per test assembly: the `PROPERTY_SEED` override
-  first, then the committed `Pin` on CI (`CI` or `TF_BUILD` is set), then a
-  fresh random seed locally. CI replays a known world; local runs keep
-  exploring. The trade is coverage: every CI run generates the same 100 cases
-  per property, so a long-tail defect surfaces there only if a local draw found
-  it first. Rotate the pin periodically, or keep one unpinned job, where CI
-  should explore too; reproduction does not depend on the pin because FsCheck
-  prints the replay tuple.
-- Attribute arguments must be compile-time constants, which is why the
-  attribute's constructor sets `Replay` at runtime. A per-site
-  `Replay = "20261122,1"` freezes the world and never rotates.
-- The seed belongs in test support, not in the test file. The environment read
-  is the suite's one allowed ambient read, and it is confined to this helper.
-- `Resolve` is `internal` so the helper's own tests can pin the precedence
-  without reflection: the override, the CI pin, a local draw and a malformed
-  override.
-- `xUnit3003` fires on an attribute derived from `FactAttribute` that cannot
-  take the caller's source information; FsCheck's `PropertyAttribute` has no
-  such constructor, so the pragma carries the reason instead of a warning under
-  a warnings-as-errors build.
-- A malformed `PROPERTY_SEED` fails loudly rather than silently falling back to
-  a different world.
+- `Replay` is `"seed,gamma"` and the gamma must be odd, because FsCheck rejects
+  an even one. Parse both parts as `ulong`: a printed seed can exceed
+  `long.MaxValue`. Record the two-element pair FsCheck prints first; a
+  multi-test failure also prints a three-element last-step tuple, which adds the
+  size and is not needed for this ledger.
+- The ledger is `TheoryDataRow<SeedCase>[]` on xUnit v3, not `SeedCase[]`:
+  xunit.v3's xUnit1019 analyzer rejects a plain struct array as `MemberData`.
+  xUnit v2 has no `TheoryDataRow`; use `SeedCase[]` there.
+- `Prop.ForAll` takes the `Arbitrary<T>` values, not their `.Generator`;
+  `QuickThrowOnFailure` makes a replay failure throw so xUnit reports it.
+- The property carries no `Replay`. A per-site literal freezes one property; the
+  ledger holds every recorded seed and is the one place to add another.
+- `RestoresOriginal` is the law body extracted from the `[Property]` method
+  above, so the random property and the replay theory run the same assertions
+  and a recorded seed cannot drift from the live law. The lambda returns `true`
+  after the body because `Prop.ForAll` needs a testable result; the assertions
+  throw on failure.
+- The ledger sits beside the class it guards, not in `Support/`; a central list
+  keyed by law name silently orphans entries on a rename.
+- A ledger entry can go once a promoted example covers the same input and the
+  law is unchanged. Otherwise the list grows without bound and stops being
+  readable.
 
 ## Where the files live
 
 ```text
 tests/
-  Support/ProjectPropertyAttribute.cs   seed routing, once per test project
-  Support/PropertySeed.cs               the pin, the override and the local draw
-  Support/PropertySeedTests.cs          the channel's precedence tests
   Support/CustomerArbitraries.cs        the documented domains
   CustomerXmlTests.cs                   named examples
-  CustomerXmlPropertyTests.cs           laws only
+  CustomerXmlPropertyTests.cs           laws and the replay theory
+  CustomerXmlSeeds.cs                   the per-class seed ledger
 ```
 
 The split is the readability rule made physical. A reader who opens
-`CustomerXmlPropertyTests.cs` sees laws and nothing else; the machinery is in
-`Support/` and has its own tests.
+`CustomerXmlPropertyTests.cs` sees laws and the ledger's replay theory; the
+generator is in `Support/`, and the seed ledger sits beside the class it guards.
 
 ## What a failure looks like
 
-A deliberate defect in `Parse` (uppercasing the name) produces:
+A deliberate defect in `Parse` (uppercasing the name) produces something like:
 
 ```text
-Falsifiable, after 1 test (1 shrink) (20261122,1).
+Falsifiable, after 1 test (1 shrink) (1234567890,987654321).
 Original:
 Customer { Id = 35276, Name = Alan }
 Shrunk:
@@ -303,13 +306,12 @@ Customer { Id = 1, Name = ALAN }
 This run stopped after one case because the first generated value already
 failed; FsCheck then shrank it to the smallest failing customer, and a healthy
 run completes all 100 cases (the test runner still reports one test method). The
-replay shown is the CI pin; locally the helper draws a fresh seed, and the
-failure prints that seed.
+seed is drawn per run; the failure prints it.
 
 Read it in three parts:
 
-1. **the replay** — `(20261122,1)` is the seed and gamma. Reproduce with
-   `PROPERTY_SEED=20261122 dotnet test`.
+1. **the replay** — `(1234567890,987654321)` is the seed and gamma. Record the
+   pair in the ledger; the replay theory runs the same law from it.
 2. **the failing input** — `Original:` is the first failing case; `Shrunk:` is
    the smallest case that still fails: the id at the documented minimum. The
    assertion shows the shrunken values, so the promotion below uses `Id = 1`.
@@ -318,8 +320,8 @@ Read it in three parts:
 
 Then promote the shrunk case into a plain `[Fact]` beside the property. The
 example is readable without FsCheck, fails against the pre-fix code, and does
-not depend on a generator or a seed. The property keeps the long tail; the
-example is the durable regression evidence.
+not depend on a generator or a seed. The ledger keeps the exact input
+replayable; the named example is the durable regression evidence.
 
 ```csharp
 // Promoted from the failure: a mixed-case name must survive the round trip.
@@ -371,10 +373,11 @@ property. Surface it to the owner; do not let a generated test settle it.
 
 - This page is the creation shape; [`test-review.md`](test-review.md) is the
   review catalogue. The review skill judges a property against the shape above;
-  the gate's review tier checks the seed channel.
-- The seed channel is a gate review concern: the `unrouted-property-seed` rule
-  catches a literal `Replay`, an even gamma, or a seed that cannot be the
-  project channel. That rule is in review separately from this page.
+  the gate's review tier will enforce the seed rule once it lands.
+- The seed policy is a gate review concern: the `unrouted-property-seed` rule
+  catches a per-site `Replay` literal and an even gamma. This page keeps
+  `Replay` out of the properties, so a recorded seed lives in the ledger
+  instead. That rule is in review separately from this page.
 - The gate does not yet read a `[Property]` as a test declaration, so the
   always-on hygiene rules do not inspect these bodies. Treat the shape above as
   the review baseline until that lands.
