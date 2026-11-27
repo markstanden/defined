@@ -78,3 +78,9 @@ public async Task AddRunHistory_WithInvalidEntraId_ThrowsArgumentException(strin
 - Every `Setup` belongs in Arrange, before Act.
 - `It.IsAny<T>()` when the specific value does not matter; a specific value when
   the test is about the exact argument passed.
+
+## Property-based tests
+
+When the contract states a law rather than a list of cases, the readable shape,
+the generator and the seed channel are in
+[`property-testing.md`](property-testing.md).
