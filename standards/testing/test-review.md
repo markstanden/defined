@@ -91,7 +91,7 @@ the judgement.
 | `real-filesystem`        | real file, directory or temp-path access: the test needs a writable host.                                                                                                                                                                                                   |
 | `process-spawn`          | a child process started: the test needs the host's binaries.                                                                                                                                                                                                                |
 | `debug-output`           | console or debug output left in a test.                                                                                                                                                                                                                                     |
-| `unrouted-property-seed` | a property seed that cannot be the project channel: a numeric `seed:` literal in an `fc.assert` options object, a C# `Replay = "<literal>"` with no `$` interpolation, or a C# replay gamma that is even (FsCheck rejects an even gamma and crashes the test host).         |
+| `unrouted-property-seed` | a property seed that freezes the run: a numeric `seed:` literal in an `fc.assert` options object, a C# `Replay = "<literal>"` with no `$` interpolation, or a C# replay gamma that is even (FsCheck rejects an even gamma and crashes the test host).                       |
 | `suppression-note`       | a why-note that names an always-on defect, an unknown or wrong-case id, or gives a vacuous reason: it suppresses nothing.                                                                                                                                                   |
 
 A determinism lead is legitimate when the effect is the subject: a clock
@@ -120,8 +120,10 @@ oracle independence, boundary and null/whitespace coverage, parameterisation and
 shared-setup decisions, test naming, AND/WITH reading, property-test
 judgement, coverage interpretation and the report shape. Those belong to the
 review skills and `UNIT_TESTS.md`. The creation shape for a property — law,
-generator, seed policy and promoted example — is
-[`property-testing.md`](property-testing.md).
+generator, shrinker, fresh seed, per-class ledger, canary and promoted example
+— is [`property-testing.md`](property-testing.md). A missing shrinker, an
+unrecorded failing seed and an absent canary are review-only: no gate rule can
+see them.
 
 Owned elsewhere, pointed at rather than restated: coverage minimums and
 evidence (`node-coverage`, `dotnet-coverage`), formatting (prettier), lint and

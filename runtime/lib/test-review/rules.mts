@@ -59,9 +59,9 @@
 // comment never runs, so nothing is checked at that point. The oracle's rules
 // for other stacks (PHPUnit, Python) land with those declaration layers.
 //
-// `unrouted-property-seed` (review tier) reads a property test's seed, which is
-// the one input a project channel must own. It reports a numeric `seed:` literal
-// in an `fc.assert` options object — an identifier or call is the channel — a
+// `unrouted-property-seed` (review tier) reads a property test's seed, which
+// freezes the run when it is a literal. It reports a numeric `seed:` literal in
+// an `fc.assert` options object — an identifier or call is not a literal — a
 // C# `Replay = "<literal>"` with no `$` interpolation, which freezes and never
 // rotates, and a C# replay whose gamma is even, which FsCheck rejects by
 // crashing the test host; that branch is highest-value and reported once, ahead
@@ -781,11 +781,11 @@ function replayValueMatches({
 }
 
 /**
- * C# Replay values that cannot be the project channel: a literal replay that
- * never rotates, and an even gamma, which FsCheck rejects by crashing the test
- * host. The gamma branch is read first, so an even literal reports once. An
- * interpolated replay is judged only when its gamma is a literal tail. An
- * identifier is followed to a same-file literal constant, or left alone.
+ * C# Replay values that freeze the run: a literal replay that never rotates,
+ * and an even gamma, which FsCheck rejects by crashing the test host. The gamma
+ * branch is read first, so an even literal reports once. An interpolated replay
+ * is judged only when its gamma is a literal tail. An identifier is followed to
+ * a same-file literal constant, or left alone.
  */
 function replayMatches({
     masked,
@@ -821,19 +821,19 @@ function propertySeedMessage(
 ): string {
     if (match.kind === "seed") {
         const test = testName === null ? "" : ` in test "${testName}"`;
-        return `literal fast-check seed "${match.evidence}"${test}: a pinned seed cannot route through the project channel`;
+        return `literal fast-check seed "${match.evidence}"${test}: a pinned seed freezes the run; replay the printed seed locally and promote the counterexample`;
     }
     if (match.kind === "even-gamma") {
         return `FsCheck replay "${match.evidence}" has an even gamma (${match.gamma}): FsCheck requires an odd gamma and crashes the test host`;
     }
-    return `frozen FsCheck replay "${match.evidence}": a pinned replay never rotates and cannot route through the project channel`;
+    return `frozen FsCheck replay "${match.evidence}": a pinned replay never rotates; record the failing seed in the per-class ledger instead`;
 }
 
 /**
- * Property seeds that cannot be the project channel. The seed lives in a test
- * body for fast-check but in an attribute above the declaration for FsCheck,
- * so a finding is suppressed by a note above its declaration or above the
- * finding's own line. Review tier only.
+ * Property seeds that freeze the run. The seed lives in a test body for
+ * fast-check but in an attribute above the declaration for FsCheck, so a finding
+ * is suppressed by a note above its declaration or above the finding's own
+ * line. Review tier only.
  */
 function propertySeedFindings({
     source,

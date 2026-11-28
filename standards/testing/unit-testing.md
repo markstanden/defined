@@ -82,5 +82,5 @@ public async Task AddRunHistory_WithInvalidEntraId_ThrowsArgumentException(strin
 ## Property-based tests
 
 When the contract states a law rather than a list of cases, the readable shape,
-the generator and the seed policy are in
-[`property-testing.md`](property-testing.md).
+the generator and its shrinker, the fresh seed and per-class ledger, and the
+canary are in [`property-testing.md`](property-testing.md).
