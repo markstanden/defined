@@ -2261,10 +2261,10 @@ test("reports a numeric literal seed on an fc.assert options argument", () => {
     ]);
 });
 
-test("stays silent when the property seed can be a project channel", () => {
+test("stays silent when the property seed is not a literal", () => {
     // Arrange
     const contents = [
-        integerProperty(", { seed: PROPERTY_SEED }"),
+        integerProperty(", { seed: runnerSeed }"),
         integerProperty(", { seed: resolveSeed() }"),
         integerProperty(""),
         declaredBody("    fc.sample(fc.integer(), { seed: 42 });"),
@@ -2297,6 +2297,7 @@ test("reports a frozen C# replay literal at its line", () => {
     assert.equal(findings[0]?.line, 3);
     assert.match(findings[0]?.message ?? "", /frozen FsCheck replay/u);
     assert.match(findings[0]?.message ?? "", /20261126,99/u);
+    assert.match(findings[0]?.message ?? "", /per-class ledger/u);
 });
 
 test("stays silent for an interpolated C# replay with an odd literal tail", () => {

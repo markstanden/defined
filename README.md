@@ -296,15 +296,17 @@ the filesystem (`prettier`, `gitleaks`) are pointed at the tracked list instead.
 defined explain shell       # a step id from the run plan
 defined explain SC2086      # a rule id from an error's `rule` field
 defined explain complexity
+defined explain property-testing   # a house guide
 ```
 
 `explain` answers "what does this check mean?" from the house guidance **inside
 the pinned image** — no network, no repo writes — so the answer always matches
 the revision actually gating you (upstream `main` may be newer). It takes one
 topic, a **step id** (`naming`, `eslint`, `purity`, `yaml`, … the ids in
-`results`) or a **rule id** (shellcheck `SC…`, a yamllint rule name, or an eslint
+`results`), a **rule id** (shellcheck `SC…`, a yamllint rule name, or an eslint
 rule such as `complexity` / `regexp/*` / `jsdoc/*`, or a purity rule such as
-`defined/pure-module` / `defined/cqs-query`), and prints one compact JSON object:
+`defined/pure-module` / `defined/cqs-query`), or a **house guide**
+(`property-testing`), and prints one compact JSON object:
 
 ```json
 {
@@ -318,8 +320,9 @@ rule such as `complexity` / `regexp/*` / `jsdoc/*`, or a purity rule such as
 
 `owner` says whether the effective configuration is **house** or **consumer**
 (overridden in this repo), so you can tell the gate's default from your own
-tailoring. `doc`/`guidance` carry the governing house document verbatim; a step
-with no house document carries a one-line `notice` instead. An unknown topic is
+tailoring. `kind` is `step`, `rule` or `guide`. `doc`/`guidance` carry the
+governing house document verbatim; a step with no house document carries a
+one-line `notice` instead. An unknown topic is
 a concise error on stderr and exit 2, so a successful `explain` is always
 parseable. The gate's own launcher mounts the repo read-only for this verb.
 
@@ -753,7 +756,7 @@ image tag and `defined update latest` always resolves to a pullable SHA.
 - [`standards/yaml.md`](standards/yaml.md) — YAML lint/format behaviour (`yamllint -s` + prettier)
 - [`standards/shell.md`](standards/shell.md) — shell script rules (bash shebang, `[[ ]]`, explicit `return`)
 - [`standards/testing/unit-testing.md`](standards/testing/unit-testing.md) — C#/xUnit testing patterns (reviewer guidance)
-- [`standards/testing/property-testing.md`](standards/testing/property-testing.md) — the readable C#/FsCheck property shape, generator and seed policy
+- [`standards/testing/property-testing.md`](standards/testing/property-testing.md) — the readable C#/FsCheck property shape: law, generator and shrinker, seed ledger, canary and file layout
 - [`standards/testing/node-testing.md`](standards/testing/node-testing.md) — Node/TypeScript testing + module conventions (reviewer guidance)
 - [`standards/testing/test-review.md`](standards/testing/test-review.md) — test-hygiene rule ids, the always-on and review tiers, and the suppression grammar
 - [`standards/node-eslint.md`](standards/node-eslint.md) — the house ESLint step: what it owns, how to override, the v1→v2 growth plan

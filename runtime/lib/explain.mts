@@ -1,10 +1,10 @@
 // lib/explain.mts — read-only, offline guidance for `defined explain` (#74).
 //
-// Resolves a step id (the keys of the run plan) or a rule id (the `rule` field
-// a diagnostic carries) to the house doc that governs it, served straight from
-// the *pinned* image (standards/ is baked and, in source checkouts, bind-mounted
-// over the baked copy). No network, no repo mutation, no excerpting: the whole
-// doc verbatim keeps this zero-drift.
+// Resolves a step id (the keys of the run plan), a rule id (the `rule` field
+// a diagnostic carries), or a house guide to the doc that governs it, served
+// straight from the *pinned* image (standards/ is baked and, in source
+// checkouts, bind-mounted over the baked copy). No network, no repo mutation, no
+// excerpting: the whole doc verbatim keeps this zero-drift.
 //
 // It also reports who owns the effective configuration — house or consumer —
 // from .defined.json plus a filesystem probe, never inferred from command text.
@@ -40,8 +40,8 @@ export interface Owner {
 export interface Explanation {
     /** The topic as (normally trimmed) the caller asked it. */
     topic: string;
-    /** A run-plan step id or a rule id. */
-    kind: "step" | "rule";
+    /** A run-plan step id, a rule id, or a house guide. */
+    kind: "step" | "rule" | "guide";
     /** House or consumer governance of this topic. */
     owner: Owner;
     /** The governing standards doc path; null when none covers the topic. */
@@ -82,7 +82,7 @@ interface OwnerContext {
 }
 
 interface TopicEntry {
-    kind: "step" | "rule";
+    kind: "step" | "rule" | "guide";
     /** Path relative to standards/, or null when no house doc covers it. */
     docRel: string | null;
     notice?: string;
@@ -273,6 +273,20 @@ const STEP_ENTRIES: Record<string, TopicEntry> = {
     },
 };
 
+/**
+ * House guides that are neither a run-plan step nor a rule id: whole-document
+ * guidance a reader asks for by name. Synthetic like `bootstrap`, but never part
+ * of the run plan.
+ */
+const GUIDE_ENTRIES: Record<string, TopicEntry> = {
+    "property-testing": {
+        kind: "guide",
+        docRel: "testing/property-testing.md",
+        notice: "the C#/FsCheck property shape: law, generator and shrinker, seed ledger, canary and layout",
+        owner: house("standards/testing/property-testing.md"),
+    },
+};
+
 /** yamllint rule names the gate recognises (house overrides + common defaults). */
 const YAMLLINT_RULES = new Set([
     "line-length",
@@ -342,13 +356,19 @@ const RULE_ENTRIES: Record<string, TopicEntry> = {
     },
 };
 
+/** The step or guide entry named directly by a topic, if any. */
+function directEntry(topic: string): TopicEntry | undefined {
+    return STEP_ENTRIES[topic] ?? GUIDE_ENTRIES[topic];
+}
+
 /** Resolve a raw topic to its entry, or null when nothing recognises it. */
 function resolveTopic(
     raw: string,
 ): { topic: string; entry: TopicEntry } | null {
     const topic = raw.trim();
-    if (topic in STEP_ENTRIES) {
-        return { topic, entry: STEP_ENTRIES[topic]! };
+    const direct = directEntry(topic);
+    if (direct !== undefined) {
+        return { topic, entry: direct };
     }
     if (SHELLCHECK_RE.test(topic)) {
         return { topic, entry: RULE_ENTRIES.shellcheck! };
@@ -381,6 +401,7 @@ function resolveTopic(
 function unknownTopic(raw: string): Error {
     return new Error(
         `unknown topic '${raw}' — known steps: ${STEP_IDS.join(", ")}; ` +
+            "house guides: property-testing; " +
             "known rules: shellcheck SC<code>, yamllint rules " +
             "(line-length, document-start, truthy, comments, …), eslint " +
             "complexity, regexp/<rule>, jsdoc/<rule>, " +
