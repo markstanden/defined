@@ -79,6 +79,9 @@ parsing returns the original customer. The law body is a bool predicate that
 takes the operation, so the property, the canary and the seed ledger replay all
 call the same code.
 
+The class declares the family and opens with its docblock; the law and the
+shared body sit inside it:
+
 ```csharp
 using FsCheck.Xunit;
 using Shouldly;
@@ -90,6 +93,13 @@ using Shouldly;
 /// </summary>
 public sealed class CustomerXmlPropertyTests
 {
+    // the law, the shared body, the canary and the replay theory
+}
+```
+
+<!-- snippet: law -->
+
+```csharp
     /// <summary>
     /// The documented round trip: every valid customer survives render then
     /// parse unchanged.
@@ -103,7 +113,11 @@ public sealed class CustomerXmlPropertyTests
         // Assert
         restored.ShouldBeTrue($"render then parse must restore {original}");
     }
+```
 
+<!-- snippet: round-trips -->
+
+```csharp
     /// <summary>
     /// The round-trip law: for any customer the pair admits, rendering and
     /// parsing returns the original.
@@ -113,7 +127,6 @@ public sealed class CustomerXmlPropertyTests
         Func<string, Customer> parse,
         Customer original) =>
         parse(render(original)) == original;
-}
 ```
 
 Every part earns its place:
@@ -145,6 +158,8 @@ to see what is generated and what is parsed.
 
 ## The domain type
 
+<!-- snippet: domain-type -->
+
 ```csharp
 public sealed record Customer(int Id, string Name);
 ```
@@ -164,6 +179,8 @@ xml)`. They are omitted here because the page is about the test; a missing or
 one-way pair is a production problem, not a property problem.
 
 ## The generator
+
+<!-- snippet: generator -->
 
 ```csharp
 using System.Collections.Generic;
@@ -261,6 +278,8 @@ not from a frozen run.
 When a property fails, record the `(seed,gamma)` pair in a per-class ledger
 beside the law, with the date, ticket and symptom:
 
+<!-- snippet: seed-ledger -->
+
 ```csharp
 public readonly record struct SeedCase(string Seed, DateOnly Found, string Ticket, string Symptom);
 
@@ -274,35 +293,36 @@ public static class CustomerXmlSeeds
 ```
 
 Replay every entry through the same law body from one `[Theory]` beside the
-random properties:
+random properties. It needs `FsCheck`, `FsCheck.Fluent`, `Microsoft.FSharp.Core`,
+`System.Globalization` and `Xunit`:
+
+<!-- snippet: replay-theory -->
 
 ```csharp
-using FsCheck;
-using FsCheck.Fluent;
-using Microsoft.FSharp.Core;
-using Xunit;
+    [Theory]
+    [MemberData(nameof(CustomerXmlSeeds.All), MemberType = typeof(CustomerXmlSeeds))]
+    public void RenderThenParse_WhenReplayingARecordedSeed_RestoresOriginal(SeedCase seed)
+    {
+        // Arrange
+        string[] parts = seed.Seed.Split(',');
+        ulong seedValue = ulong.Parse(parts[0], CultureInfo.InvariantCulture);
+        ulong gamma = ulong.Parse(parts[1], CultureInfo.InvariantCulture);
+        Replay replay = new(new Rnd(seedValue, gamma), null);
+        Property law = Prop.ForAll(
+            CustomerArbitraries.ValidCustomer(),
+            (Customer original) => RoundTrips(CustomerXml.Render, CustomerXml.Parse, original));
 
-[Theory]
-[MemberData(nameof(CustomerXmlSeeds.All), MemberType = typeof(CustomerXmlSeeds))]
-public void RenderThenParse_WhenReplayingARecordedSeed_RestoresOriginal(SeedCase seed)
-{
-    // Arrange
-    string[] parts = seed.Seed.Split(',');
-    Replay replay = new(new Rnd(ulong.Parse(parts[0]), ulong.Parse(parts[1])), null);
-    Property law = Prop.ForAll(
-        CustomerArbitraries.ValidCustomer(),
-        (Customer original) => RoundTrips(CustomerXml.Render, CustomerXml.Parse, original));
-
-    // Act / Assert
-    Check.One(Config.QuickThrowOnFailure.WithReplay(FSharpOption<Replay>.Some(replay)), law);
-}
+        // Act / Assert
+        Check.One(Config.QuickThrowOnFailure.WithReplay(FSharpOption<Replay>.Some(replay)), law);
+    }
 ```
 
 - `Replay` is `"seed,gamma"` and the gamma must be odd, because FsCheck rejects
-  an even one. Parse both parts as `ulong`: a printed seed can exceed
-  `long.MaxValue`. Record the two-element pair FsCheck prints first; a
-  multi-test failure also prints a three-element last-step tuple, which adds the
-  size and is not needed for this ledger.
+  an even one. Parse both parts as `ulong` with `CultureInfo.InvariantCulture`:
+  a printed seed can exceed `long.MaxValue`, and the pair is a wire format, not
+  a locale. Record the two-element pair FsCheck prints first; a multi-test
+  failure also prints a three-element last-step tuple, which adds the size and
+  is not needed for this ledger.
 - The ledger is `TheoryDataRow<SeedCase>[]` on xUnit v3. That is the house
   shape, and xunit.v3's xUnit1019 analyzer accepts it as `MemberData`. xUnit v2
   has no `TheoryDataRow`: use `TheoryData<SeedCase>` or
@@ -327,28 +347,31 @@ A property can pass without being able to fail: a law written against the
 implementation, a clause that is always true, or a predicate that ignores its
 input. The canary proves the law can fail, and it is one `[Fact]` per law body.
 
+<!-- snippet: canary -->
+
 ```csharp
-[Fact]
-public void RenderThenParse_WhenTheImplementationIsMutated_IsFalsified()
-{
-    // Arrange
-    Customer original = new(1, "Alan");
+    // Why use multi-statement-act here: the control and the mutant are the canary's two halves
+    [Fact]
+    public void RenderThenParse_WhenTheImplementationIsMutated_IsFalsified()
+    {
+        // Arrange
+        Customer original = new(1, "Alan");
 
-    // Act
-    bool realRestores = RoundTrips(CustomerXml.Render, CustomerXml.Parse, original);
-    bool uppercasingParseRestores = RoundTrips(CustomerXml.Render, UppercasingParse, original);
+        // Act
+        bool realRestores = RoundTrips(CustomerXml.Render, CustomerXml.Parse, original);
+        bool uppercasingParseRestores = RoundTrips(CustomerXml.Render, UppercasingParse, original);
 
-    // Assert
-    realRestores.ShouldBeTrue("the control proves the real implementation satisfies the law");
-    uppercasingParseRestores.ShouldBeFalse("the name clause must reject a parse that changes case");
-}
+        // Assert
+        realRestores.ShouldBeTrue("the control proves the real implementation satisfies the law");
+        uppercasingParseRestores.ShouldBeFalse("the name clause must reject a parse that changes case");
+    }
 
-/// <summary>Mutant: uppercases the name, so the name clause must reject it.</summary>
-private static Customer UppercasingParse(string xml)
-{
-    Customer parsed = CustomerXml.Parse(xml);
-    return parsed with { Name = parsed.Name.ToUpperInvariant() };
-}
+    /// <summary>Mutant: uppercases the name, so the name clause must reject it.</summary>
+    private static Customer UppercasingParse(string xml)
+    {
+        Customer parsed = CustomerXml.Parse(xml);
+        return parsed with { Name = parsed.Name.ToUpperInvariant() };
+    }
 ```
 
 - The control is not optional. An always-false law passes a canary that only
@@ -362,8 +385,10 @@ private static Customer UppercasingParse(string xml)
   non-deterministic and duplicate the property's job.
 - The canary sits beside the laws, is named
   `<Family>_WhenTheImplementationIsMutated_IsFalsified`, and docblocks each
-  mutant with the clause it proves. A canary that passes against a mutant means
-  the law is vacuous and the property is decoration.
+  mutant with the clause it proves. The control and the mutant are one act with
+  two halves, so the declaration carries a `multi-statement-act` why-note. A
+  canary that passes against a mutant means the law is vacuous and the property
+  is decoration.
 - The canary is a hard gate for new and changed property laws: a property
   without a canary in the same class is not reviewable. Enforcement is
   review-only — nothing in the build can tell a missing canary from a class that
@@ -467,20 +492,22 @@ against the pre-fix code, and does not depend on a generator or a seed. The
 ledger keeps the exact input replayable; the named example is the durable
 regression evidence.
 
+<!-- snippet: promoted-example -->
+
 ```csharp
-// Promoted from the failure: a mixed-case name must survive the round trip.
-[Fact]
-public void RenderThenParse_WithMixedCaseName_RestoresOriginal()
-{
-    // Arrange
-    Customer original = new Customer(1, "Alan");
+    // Promoted from the failure: a mixed-case name must survive the round trip.
+    [Fact]
+    public void RenderThenParse_WithMixedCaseName_RestoresOriginal()
+    {
+        // Arrange
+        Customer original = new Customer(1, "Alan");
 
-    // Act
-    Customer reparsed = CustomerXml.Parse(CustomerXml.Render(original));
+        // Act
+        Customer reparsed = CustomerXml.Parse(CustomerXml.Render(original));
 
-    // Assert
-    reparsed.ShouldBe(original);
-}
+        // Assert
+        reparsed.ShouldBe(original);
+    }
 ```
 
 ## When a property is the right tool
@@ -516,6 +543,9 @@ property. Surface it to the owner; do not let a generated test settle it.
 
 - This page is the creation shape; [`test-review.md`](test-review.md) is the
   review catalogue. The review pass judges a property against the shape above.
+- The C# shapes above compile and run in `docs/fixtures/property-testing/`, and
+  `runtime/lib/property-testing-snippets.test.mts` fails the gate when a marked
+  snippet and its compiled fixture diverge.
 - The `unrouted-property-seed` review rule enforces the no-frozen-seed half: it
   reports a numeric fast-check `seed:` literal, a C# `Replay = "<literal>"` with
   no `$` interpolation, and an even replay gamma. It runs in the

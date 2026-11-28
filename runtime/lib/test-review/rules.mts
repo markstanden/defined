@@ -89,8 +89,10 @@
 // (`assert.equal(`, `should.match(`). For .NET: `Assert.*`, `StringAssert.*`,
 // `CollectionAssert.*`, FluentAssertions `Should()`/`.Should.Be…`, Moq
 // `Verify(`, a helper named with the verb (`AssertInvariants(`), Playwright's
-// `Expect(`, and Shouldly's generic forms (`ShouldThrow<…>`). The oracle misses
-// the last three and so reports five false positives across the C# corpus. A
+// `Expect(`, and Shouldly's generic forms (`ShouldThrow<…>`). FsCheck's
+// `Check.One(` counts too: a replay throws when the law fails. The oracle
+// misses the last three and so reports five false positives across the C#
+// corpus. A
 // helper that merely delegates (`check(...)`) does not count, so a body of
 // helpers reports. A skipped declaration is left to `skipped-test`: a parked
 // skip may legitimately carry no assertion until its ticket lands, and
@@ -1005,6 +1007,7 @@ const DOTNET_ASSERTION_CALLS: readonly RegExp[] = [
     /\bAnd\.\w+\s*\(/u,
     /\bShould(?:Be|Not|Have|Contain|Match|Start|End|Equal|Satisfy|Throw)\w*\s*[(<]/u,
     /\bShould\.(?:Throw|NotThrow|CompleteIn)\w*\s*[(<]/u,
+    /\bCheck\.(?:One|All|Method|Quick)\s*[(<]/u,
 ];
 
 /** Assertion call shapes, keyed by the framework the declaration is for. */

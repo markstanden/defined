@@ -540,6 +540,27 @@ test("reports a test whose body holds no assertion call", () => {
     assert.match(findings[0]?.message ?? "", /works/u);
 });
 
+test("counts an FsCheck Check.One replay as an assertion", () => {
+    // Arrange — a replay throws when the law fails, so the check is the assertion.
+    const content = xunitMethod(
+        [
+            "    [Theory]",
+            "    [MemberData(nameof(Seeds.All), MemberType = typeof(Seeds))]",
+            "    public void Replays(SeedCase seed)",
+            "    {",
+            "        Property law = Prop.ForAll(Gen.Constant(1), value => value == value);",
+            "        Check.One(Config.QuickThrowOnFailure, law);",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([{ path: "CustomerTests.cs", content }]);
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
 test("counts a generic TestAssert helper as an assertion", () => {
     // Arrange — team helper types ending in Assert are assertion calls too.
     const content = xunitMethod(
