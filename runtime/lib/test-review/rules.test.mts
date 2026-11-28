@@ -2899,3 +2899,312 @@ test("a why-note suppresses the missing-canary lead for one law", () => {
     // Assert
     assert.deepEqual(findings, []);
 });
+
+/** The findings one source reports for one rule in review mode. */
+function propertyFindingsOf({
+    rule,
+    path,
+    content,
+}: {
+    rule: string;
+    path: string;
+    content: string;
+}): ReturnType<typeof reviewTestSources> {
+    return reviewTestSources([{ path, content }], { review: true }).filter(
+        (finding) => finding.rule === rule,
+    );
+}
+
+/** A valid law body: labelled, one act, one assertion. */
+const PROPERTY_BODY = [
+    "    {",
+    "        // Act",
+    "        Customer reparsed = CustomerXml.Parse(CustomerXml.Render(original));",
+    "",
+    "        // Assert",
+    "        reparsed.ShouldBe(original);",
+    "    }",
+].join("\n");
+
+test("reports a property in a class not named for laws", () => {
+    // Arrange
+    const content = [
+        "public sealed class UnknownCustomerLookupTests",
+        "{",
+        "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "    public void Lookup_WhenCustomerIsUnknown_ReturnsNull(Customer original)",
+        PROPERTY_BODY,
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "misplaced-property",
+        path: "UnknownCustomerLookupTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.line, 4);
+    assert.match(findings[0]?.message ?? "", /UnknownCustomerLookupTests/u);
+    assert.match(
+        findings[0]?.message ?? "",
+        /UnknownCustomerLookupPropertyTests/u,
+    );
+});
+
+test("stays silent for a property in a class named for laws", () => {
+    // Arrange
+    const content = [
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "    public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+        PROPERTY_BODY,
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "misplaced-property",
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports a property outside any class", () => {
+    // Arrange
+    const content = [
+        "[Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+        PROPERTY_BODY,
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "misplaced-property",
+        path: "Loose.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.match(findings[0]?.message ?? "", /outside any class/u);
+});
+
+test("reports the misplaced property in review mode only", () => {
+    // Arrange
+    const source = {
+        path: "UnknownCustomerLookupTests.cs",
+        content: [
+            "public sealed class UnknownCustomerLookupTests",
+            "{",
+            "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+            "    public void Lookup_WhenCustomerIsUnknown_ReturnsNull(Customer original)",
+            PROPERTY_BODY,
+            "}",
+        ].join("\n"),
+    };
+
+    // Act
+    const tracked = reviewTestSources([source]);
+    const reviewed = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(tracked, []);
+    assert.deepEqual(
+        reviewed
+            .map((finding) => finding.rule)
+            .filter((rule) => rule === "misplaced-property"),
+        ["misplaced-property"],
+    );
+});
+
+test("a why-note suppresses the misplaced-property lead", () => {
+    // Arrange
+    const content = [
+        "public sealed class UnknownCustomerLookupTests",
+        "{",
+        "    // Why not use misplaced-property here: the lookup law is this service class's contract",
+        "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "    public void Lookup_WhenCustomerIsUnknown_ReturnsNull(Customer original)",
+        PROPERTY_BODY,
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "misplaced-property",
+        path: "UnknownCustomerLookupTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports a property that registers no arbitrary", () => {
+    // Arrange
+    const content = [
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    [Property]",
+        "    public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+        PROPERTY_BODY,
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "unregistered-property-arbitrary",
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.line, 4);
+    assert.match(findings[0]?.message ?? "", /Arbitrary/u);
+    assert.doesNotMatch(findings[0]?.message ?? "", /Prop\.ForAll/u);
+});
+
+test("stays silent when the arbitrary is registered at the method or the class", () => {
+    // Arrange
+    const contents = [
+        [
+            "public sealed class CustomerXmlPropertyTests",
+            "{",
+            "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+            "    public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+            PROPERTY_BODY,
+            "}",
+        ].join("\n"),
+        [
+            "[Properties(Arbitrary = [typeof(CustomerArbitraries)])]",
+            "public sealed class CustomerXmlPropertyTests",
+            "{",
+            "    [Property]",
+            "    public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+            PROPERTY_BODY,
+            "}",
+        ].join("\n"),
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        propertyFindingsOf({
+            rule: "unregistered-property-arbitrary",
+            path: "CustomerXmlPropertyTests.cs",
+            content,
+        }),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
+
+test("reports a generator built inside the property body", () => {
+    // Arrange
+    const content = [
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "    public Property RenderThenParse_ForAnyValidCustomer_RestoresOriginal()",
+        "    {",
+        "        // Act",
+        "        Property law = Prop.ForAll(",
+        "            CustomerArbitraries.ValidCustomer(),",
+        "            (Customer original) => CustomerXml.Parse(CustomerXml.Render(original)) == original);",
+        "",
+        "        // Assert",
+        "        return law;",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "unregistered-property-arbitrary",
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.match(findings[0]?.message ?? "", /Prop\.ForAll/u);
+});
+
+test("reports the classic shape once, as the unregistered arbitrary", () => {
+    // Arrange
+    const content = [
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    [Property]",
+        "    public Property RenderThenParse_ForAnyValidCustomer_RestoresOriginal()",
+        "    {",
+        "        // Act",
+        "        Property law = Prop.ForAll(",
+        "            CustomerArbitraries.ValidCustomer(),",
+        "            (Customer original) => CustomerXml.Parse(CustomerXml.Render(original)) == original);",
+        "",
+        "        // Assert",
+        "        return law;",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "unregistered-property-arbitrary",
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.match(findings[0]?.message ?? "", /Arbitrary/u);
+    assert.doesNotMatch(findings[0]?.message ?? "", /Prop\.ForAll/u);
+});
+
+test("reports an assembly-level property registration", () => {
+    // Arrange
+    const content =
+        "[assembly: Properties(Arbitrary = [typeof(CustomerArbitraries)])]";
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "unregistered-property-arbitrary",
+        path: "AssemblyInfo.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.line, 1);
+    assert.match(findings[0]?.message ?? "", /assembly-level/u);
+});
+
+test("a why-note suppresses the assembly-level registration", () => {
+    // Arrange
+    const content = [
+        "// Why use unregistered-property-arbitrary here: the assembly default is the documented domain for every law",
+        "[assembly: Properties(Arbitrary = [typeof(CustomerArbitraries)])]",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "unregistered-property-arbitrary",
+        path: "AssemblyInfo.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(findings, []);
+});

@@ -556,6 +556,10 @@ property. Surface it to the owner; do not let a generated test settle it.
   pass when a class holds laws and no
   `<Family>_WhenTheImplementationIsMutated_IsFalsified` fact; a why-note records
   a law that legitimately needs none.
+- The `misplaced-property` and `unregistered-property-arbitrary` review leads
+  fail the same pass: a law belongs in a `<Subject>PropertyTests` class beside
+  its examples file, and its generator is registered at the method (or a
+  domain-named class), never the assembly and never inside the law's body.
 - The shrinker and the unrecorded failing seed are review-only: no gate rule can
   see a missing shrinker or an unrecorded seed; reviewers hold that line.
 - The gate reads a `[Property]` as a test declaration, so the always-on hygiene

@@ -82,6 +82,16 @@
 // law family; a law that needs none — a generator-domain property — carries a
 // why-note, because the gate can see the class's canary list but not whether
 // the canary proves the law.
+//
+// `misplaced-property` (review tier) reads the same declarations: a law in a
+// class not named `<Subject>PropertyTests` belongs beside the examples, in its
+// own law class. `unregistered-property-arbitrary` (review tier) reports a law
+// that registers no `Arbitrary` at the method or its class, a law that builds
+// its generator in the body (`Prop.ForAll`), and an assembly-level `Properties`
+// registration; a registered arbitrary is the whole point, because FsCheck's
+// invented inputs are not the documented domain. The classic inline shape
+// reports once, as the unregistered arbitrary, so one root cause is one
+// finding.
 
 //
 // The tautology patterns cover the Jest/Vitest `expect` shapes and the
@@ -193,6 +203,8 @@ export const REVIEW_RULES = [
     "debug-output",
     "unrouted-property-seed",
     "property-canary-missing",
+    "misplaced-property",
+    "unregistered-property-arbitrary",
 ] as const;
 
 /** The Bucket C intent leads the gate reports and never owns. */
@@ -948,6 +960,131 @@ function canaryFindings({
             ];
         },
     );
+}
+
+/** The law class a subject's property file takes its name from. */
+function lawClassName(container: string): string {
+    const subject = container.endsWith("Tests")
+        ? container.slice(0, -"Tests".length)
+        : container;
+    return `${subject === "" ? "Subject" : subject}PropertyTests`;
+}
+
+/**
+ * Property laws in a class not named for laws. The pair is the readability rule
+ * made physical: `<Subject>Tests` keeps the named edges and
+ * `<Subject>PropertyTests` the laws, in the same folder and namespace.
+ */
+function misplacedPropertyFindings({
+    source,
+    entries,
+}: {
+    source: TestReviewSource;
+    entries: readonly ReviewedDeclaration[];
+}): TestHygieneFinding[] {
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            if (
+                declaration.property !== true ||
+                suppressed.has("misplaced-property")
+            ) {
+                return [];
+            }
+            const container = declaration.container?.name ?? "";
+            if (container.endsWith("PropertyTests")) {
+                return [];
+            }
+            const where =
+                container === ""
+                    ? "outside any class"
+                    : `in class "${container}"`;
+            return [
+                {
+                    rule: "misplaced-property",
+                    file: source.path,
+                    line: declaration.line,
+                    message: `property "${declaration.name}" lives ${where}: laws sit in a ${lawClassName(container)} class, paired with the examples file`,
+                },
+            ];
+        },
+    );
+}
+
+/** The assembly-level FsCheck registration the standard rules out. */
+const ASSEMBLY_PROPERTIES = /\[assembly:\s*Propert(?:y|ies)\b/gu;
+
+/** Whether the method's attribute or its class registers an arbitrary. */
+function registersArbitrary(declaration: TestDeclaration): boolean {
+    return (
+        /\bArbitrary\s*=/u.test(declaration.attributes ?? "") ||
+        /\bArbitrary\s*=/u.test(declaration.container?.attributes ?? "")
+    );
+}
+
+/** A generator built inside the law's own body. */
+const INLINE_GENERATOR = /\bProp\s*\.\s*ForAll\s*\(/u;
+
+/**
+ * Laws that do not register their generator at the method. FsCheck's invented
+ * inputs are not the documented domain, and a body-built generator hides the
+ * domain from the reader; the classic inline shape reports once, as the
+ * unregistered arbitrary, so one root cause is one finding.
+ */
+function unregisteredArbitraryFindings({
+    source,
+    masked,
+    entries,
+}: {
+    source: TestReviewSource;
+    masked: string;
+    entries: readonly ReviewedDeclaration[];
+}): TestHygieneFinding[] {
+    const rule: ReviewRule = "unregistered-property-arbitrary";
+    const findings: TestHygieneFinding[] = [];
+    for (const { declaration, suppressed } of entries) {
+        if (declaration.property !== true || suppressed.has(rule)) {
+            continue;
+        }
+        if (!registersArbitrary(declaration)) {
+            findings.push({
+                rule,
+                file: source.path,
+                line: declaration.line,
+                message: `property "${declaration.name}" registers no Arbitrary at the method: FsCheck invents inputs from the members, not the documented domain — add [Property(Arbitrary = [typeof(...)])]`,
+            });
+            continue;
+        }
+        if (INLINE_GENERATOR.test(declaration.maskedBody ?? "")) {
+            findings.push({
+                rule,
+                file: source.path,
+                line: declaration.line,
+                message: `property "${declaration.name}" builds its generator in the body ("Prop.ForAll"): register the domain at the method with [Property(Arbitrary = [typeof(...)])] and take the input as a typed parameter`,
+            });
+        }
+    }
+    for (const match of masked.matchAll(ASSEMBLY_PROPERTIES)) {
+        const line = lineAt({
+            content: source.content,
+            index: match.index ?? 0,
+        });
+        const suppressed = readSuppressions({
+            file: source.path,
+            content: source.content,
+            line,
+        }).suppressed;
+        if (suppressed.has(rule)) {
+            continue;
+        }
+        findings.push({
+            rule,
+            file: source.path,
+            line,
+            message:
+                "assembly-level FsCheck registration: an arbitrary registered for the assembly hides the domain from every law; register it at the method",
+        });
+    }
+    return findings;
 }
 
 const TAUTOLOGY_RULES: ReadonlyArray<{
@@ -2016,6 +2153,8 @@ function sourceFindings(
                   ...determinismFindings({ source, entries }),
                   ...propertySeedFindings({ source, masked, entries }),
                   ...canaryFindings({ source, entries }),
+                  ...misplacedPropertyFindings({ source, entries }),
+                  ...unregisteredArbitraryFindings({ source, masked, entries }),
               ]
             : []),
     ];
