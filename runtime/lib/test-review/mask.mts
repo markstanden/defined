@@ -88,7 +88,9 @@ function blank({ out, index }: { out: string[]; index: number }): void {
 /** Replace both characters of a two-character delimiter with spaces. */
 function blankPair({ out, index }: { out: string[]; index: number }): void {
     blank({ out, index });
-    blank({ out, index: index + 1 });
+    if (index + 1 < out.length) {
+        blank({ out, index: index + 1 });
+    }
 }
 
 /**

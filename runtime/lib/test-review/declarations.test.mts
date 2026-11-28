@@ -291,6 +291,25 @@ test("scanTestDeclarations keeps the body after a nested template literal", () =
     assert.ok(declaration?.body?.includes("assert.equal(result.ok, true);"));
 });
 
+test("scanTestDeclarations reads array and tag-table .each forms", () => {
+    // Arrange — the bracket-matched table must keep every supported table form.
+    const contents = [
+        NODE_IMPORT +
+            'test.each([1, 2])("row %i", (value) => {\n    expect(value).toBeGreaterThan(0);\n});',
+        NODE_IMPORT +
+            'test.each`\n  a | b\n  ${1} | ${2}\n`("row", ({ a }) => {\n    expect(a).toBe(1);\n});',
+    ];
+
+    // Act
+    const names = contents.map(
+        (content) =>
+            scanTestDeclarations({ path: "a.test.ts", content })[0]?.name,
+    );
+
+    // Assert
+    assert.deepEqual(names, ["row %i", "row"]);
+});
+
 test("scanTestDeclarations keeps a quoted title's punctuation", () => {
     // Arrange
     const content = `${NODE_IMPORT}it('a, "b" (c)', () => {});`;

@@ -15,6 +15,8 @@ const LENGTH_CASES = [
     "/* block */ const e = 3;",
     "const g = `multi\nline`;",
     'const h = "open',
+    // A trailing escape has no pair to blank: the output must not grow.
+    'const i = "open\\',
 ];
 
 const MULTI_LINE_CASES = [
@@ -178,6 +180,20 @@ test("maskTestSource keeps a regex bracket out of the masked body span", () => {
         masked,
         "const re = " + " ".repeat(pattern.length) + ";\nconst kept = 1;",
     );
+});
+
+test("maskTestSource does not let a closing brace in an interpolation string end the template", () => {
+    // Arrange — the brace is string data, so the interpolation continues.
+    const content = 'const t = `${f("}")} tail`;\nconst kept = 1;';
+    const start = content.indexOf("`");
+    const end = content.lastIndexOf("`") + 1;
+
+    // Act
+    const masked = maskTestSource(content);
+
+    // Assert
+    assert.equal(masked.slice(start, end), " ".repeat(end - start));
+    assert.ok(masked.endsWith("const kept = 1;"));
 });
 
 test("maskTestSource masks a nested template literal inside an interpolation", () => {
