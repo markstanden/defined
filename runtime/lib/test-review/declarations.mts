@@ -567,8 +567,7 @@ const DOTNET_PROPERTY_ATTRIBUTE = /\[\s*Property\b/u;
 const DOTNET_NUNIT_PROPERTY = /\[\s*Property\s*\(\s*[$@]*["']/u;
 
 /** The attribute names an annotation block declares, combined lines included. */
-const DOTNET_ATTRIBUTE_NAME =
-    /(?:\[|,)\s*(?:[A-Za-z_]\w*\s*:\s*)?([A-Za-z_]\w*)/gu;
+const DOTNET_ATTRIBUTE_NAME = /[[,]\s*(?:[A-Za-z_]\w*\s*:\s*)?([A-Za-z_]\w*)/gu;
 
 /** A class head, which opens the container a test method sits in. */
 const DOTNET_CLASS =
