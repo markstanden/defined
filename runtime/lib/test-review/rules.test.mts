@@ -3241,3 +3241,26 @@ test("a why-note suppresses the assembly-level registration", () => {
     // Assert
     assert.deepEqual(findings, []);
 });
+
+test("stays silent when the class head cannot be read", () => {
+    // Arrange: attributes on the class's own line, which the lexical class scan
+    // does not read — a ceiling, so the law is not blamed for a missing class.
+    const content = [
+        "[Properties(Arbitrary = [typeof(CustomerArbitraries)])] public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    [Property]",
+        "    public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+        PROPERTY_BODY,
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = propertyFindingsOf({
+        rule: "misplaced-property",
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(findings, []);
+});

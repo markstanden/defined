@@ -385,3 +385,23 @@ test("leaves an expression-bodied property without a body", () => {
     assert.equal(declaration?.name, "Law");
     assert.equal(declaration?.body, null);
 });
+
+test("leaves the container absent when the class braces never close", () => {
+    // Arrange
+    const content = [
+        "public sealed class Broken",
+        "{",
+        "    [Property]",
+        "    public void Law(int value)",
+        "    {",
+        "        value.ShouldBe(value);",
+        "    }",
+    ].join("\n");
+
+    // Act
+    const [declaration] = scan(content);
+
+    // Assert
+    assert.equal(declaration?.name, "Law");
+    assert.equal(declaration?.container, undefined);
+});
