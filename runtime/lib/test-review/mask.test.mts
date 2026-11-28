@@ -180,6 +180,21 @@ test("maskTestSource keeps a regex bracket out of the masked body span", () => {
     );
 });
 
+test("maskTestSource masks a nested template literal inside an interpolation", () => {
+    // Arrange — the inner backtick must not close the outer literal.
+    const content =
+        "const payload = `${JSON.stringify({ path: `arms/${arm}/AGENTS.md` })}`;\nconst kept = 1;";
+    const start = content.indexOf("`");
+    const end = content.lastIndexOf("`") + 1;
+
+    // Act
+    const masked = maskTestSource(content);
+
+    // Assert — the whole outer template is blank and the code after it survives.
+    assert.equal(masked.slice(start, end), " ".repeat(end - start));
+    assert.ok(masked.endsWith("const kept = 1;"));
+});
+
 test("maskTestSource masks template interpolation content as literal data (documented ceiling)", () => {
     // Arrange
     const content = "const t = `x ${it.only()} y`;\nconst kept = 1;";
