@@ -285,7 +285,7 @@ function stepRegex(walk: Walk, frame: RegexFrame): number {
 
 /** Consume the character at `index` in the innermost frame. */
 function consume(walk: Walk): number {
-    const frame = walk.frames[walk.frames.length - 1] ?? { kind: "code" };
+    const frame = walk.frames.at(-1) ?? { kind: "code" };
     if (frame.kind === "line-comment") {
         return stepLineComment(walk);
     }
