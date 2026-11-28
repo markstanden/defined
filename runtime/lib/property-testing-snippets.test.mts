@@ -33,7 +33,8 @@ const FENCE_CLOSE = /^```$/u;
  *
  * @param doc The markdown page carrying the markers.
  * @returns Name → block text, without the fences or a trailing newline.
- * @throws When a marker is not followed by a `csharp` fence.
+ * @throws When a marker is declared twice, or has no `csharp` fence in its own
+ *   region before the next marker.
  */
 function snippetsFrom(doc: string): Map<string, string> {
     const lines = doc.split("\n");
@@ -44,14 +45,27 @@ function snippetsFrom(doc: string): Map<string, string> {
             continue;
         }
         const name = marker.groups?.["name"] ?? "";
+        if (snippets.has(name)) {
+            throw new Error(`snippet "${name}" is declared more than once`);
+        }
+        const nextMarker = lines.findIndex(
+            (line, candidate) => candidate > index && MARKER.test(line),
+        );
+        const regionEnd = nextMarker === -1 ? lines.length : nextMarker;
         const open = lines.findIndex(
-            (line, candidate) => candidate > index && FENCE_OPEN.test(line),
+            (line, candidate) =>
+                candidate > index &&
+                candidate < regionEnd &&
+                FENCE_OPEN.test(line),
         );
         if (open === -1) {
             throw new Error(`snippet "${name}" has no csharp fence`);
         }
         const close = lines.findIndex(
-            (line, candidate) => candidate > open && FENCE_CLOSE.test(line),
+            (line, candidate) =>
+                candidate > open &&
+                candidate < regionEnd &&
+                FENCE_CLOSE.test(line),
         );
         if (close === -1) {
             throw new Error(`snippet "${name}" has an unterminated fence`);
@@ -141,4 +155,40 @@ test("propertyTestingSnippets_mutatedBlock_isReportedAsDrift", () => {
     assert.deepEqual(drift, [
         'snippet "law" does not appear verbatim in CustomerXmlPropertyTests.cs',
     ]);
+});
+
+test("propertyTestingSnippets_duplicateMarker_isReported", () => {
+    // Arrange
+    const doc = [
+        "<!-- snippet: law -->",
+        "```csharp",
+        "one();",
+        "```",
+        "",
+        "<!-- snippet: law -->",
+        "```csharp",
+        "two();",
+        "```",
+    ].join("\n");
+
+    // Act / Assert
+    assert.throws(() => snippetsFrom(doc), /"law" is declared more than once/u);
+});
+
+test("propertyTestingSnippets_markerWithoutCsharpFence_doesNotBorrowTheNextBlock", () => {
+    // Arrange — the first marker's fence is tagged `cs`, not `csharp`.
+    const doc = [
+        "<!-- snippet: law -->",
+        "```cs",
+        "one();",
+        "```",
+        "",
+        "<!-- snippet: round-trips -->",
+        "```csharp",
+        "two();",
+        "```",
+    ].join("\n");
+
+    // Act / Assert
+    assert.throws(() => snippetsFrom(doc), /"law" has no csharp fence/u);
 });

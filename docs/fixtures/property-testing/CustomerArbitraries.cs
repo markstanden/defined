@@ -1,3 +1,7 @@
+// Fixture-only split: the generator has its own file so the marked snippet is
+// self-contained. In a real suite the placement rule in
+// standards/testing/property-testing.md decides between the law file and
+// TestData/Arbitraries/.
 using System.Linq;
 
 using System.Collections.Generic;
