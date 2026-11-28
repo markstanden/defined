@@ -2701,3 +2701,201 @@ test("judges a property body with the review tier", () => {
         ["sleep"],
     );
 });
+
+/** A property class holding one law, without a canary. */
+const UNCANNED_LAW = [
+    "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+    "    public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+    "    {",
+    "        // Act",
+    "        Customer reparsed = CustomerXml.Parse(CustomerXml.Render(original));",
+    "",
+    "        // Assert",
+    "        reparsed.ShouldBe(original);",
+    "    }",
+].join("\n");
+
+/** The canary findings one source reports in review mode. */
+function canaryFindingsOf({
+    path,
+    content,
+}: {
+    path: string;
+    content: string;
+}): ReturnType<typeof reviewTestSources> {
+    return reviewTestSources([{ path, content }], { review: true }).filter(
+        (finding) => finding.rule === "property-canary-missing",
+    );
+}
+
+test("reports a property class with no falsifiability canary", () => {
+    // Arrange
+    const content = `public sealed class CustomerXmlPropertyTests\n{\n${UNCANNED_LAW}\n}`;
+
+    // Act
+    const findings = canaryFindingsOf({
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.line, 4);
+    assert.match(findings[0]?.message ?? "", /CustomerXmlPropertyTests/u);
+    assert.match(
+        findings[0]?.message ?? "",
+        /RenderThenParse_WhenTheImplementationIsMutated_IsFalsified/u,
+    );
+});
+
+test("stays silent when the property class holds a canary", () => {
+    // Arrange
+    const content = [
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        UNCANNED_LAW,
+        "",
+        "    [Fact]",
+        "    public void RenderThenParse_WhenTheImplementationIsMutated_IsFalsified()",
+        "    {",
+        "        // Act",
+        "        bool restored = RoundTrips(CustomerXml.Render, CustomerXml.Parse);",
+        "",
+        "        // Assert",
+        '        restored.ShouldBeTrue("the control holds");',
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = canaryFindingsOf({
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("accepts one canary shared by the class's laws", () => {
+    // Arrange
+    const content = [
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        UNCANNED_LAW,
+        "",
+        "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "    public void RenderThenParse_ForAnyParsedCustomer_KeepsTheName(Customer original)",
+        "    {",
+        "        // Act",
+        "        Customer reparsed = CustomerXml.Parse(CustomerXml.Render(original));",
+        "",
+        "        // Assert",
+        "        reparsed.Name.ShouldBe(original.Name);",
+        "    }",
+        "",
+        "    [Fact]",
+        "    public void RenderThenParse_WhenTheImplementationIsMutated_IsFalsified()",
+        "    {",
+        "        // Act",
+        "        bool restored = RoundTrips(CustomerXml.Render, CustomerXml.Parse);",
+        "",
+        "        // Assert",
+        '        restored.ShouldBeTrue("the control holds");',
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = canaryFindingsOf({
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(findings, []);
+});
+
+test("reports a property whose class holds its canary in another class", () => {
+    // Arrange
+    const content = [
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        UNCANNED_LAW,
+        "}",
+        "",
+        "public sealed class RoundTripPropertyTests",
+        "{",
+        "    [Fact]",
+        "    public void RenderThenParse_WhenTheImplementationIsMutated_IsFalsified()",
+        "    {",
+        "        // Act",
+        "        bool restored = RoundTrips(CustomerXml.Render, CustomerXml.Parse);",
+        "",
+        "        // Assert",
+        '        restored.ShouldBeTrue("the control holds");',
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = canaryFindingsOf({
+        path: "CustomerXmlPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.line),
+        [4],
+    );
+});
+
+test("reports the missing canary in review mode only", () => {
+    // Arrange
+    const source = {
+        path: "CustomerXmlPropertyTests.cs",
+        content: `public sealed class CustomerXmlPropertyTests\n{\n${UNCANNED_LAW}\n}`,
+    };
+
+    // Act
+    const tracked = reviewTestSources([source]);
+    const reviewed = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(tracked, []);
+    assert.deepEqual(
+        reviewed
+            .map((finding) => finding.rule)
+            .filter((rule) => rule === "property-canary-missing"),
+        ["property-canary-missing"],
+    );
+});
+
+test("a why-note suppresses the missing-canary lead for one law", () => {
+    // Arrange
+    const content = [
+        "public sealed class ExpiryWindowPropertyTests",
+        "{",
+        "    // Why not use property-canary-missing here: the generator domain property asserts no SUT law",
+        "    [Property(Arbitrary = [typeof(ExpiryWindowArbitraries)])]",
+        "    public void ExpiryWindow_WhenAnyDateIsGenerated_StaysInsideTheDomain(DateOnly today)",
+        "    {",
+        "        // Act",
+        "        DateOnly windowStart = LoyaltyExpiryDates.Window(today, 1).Start;",
+        "",
+        "        // Assert",
+        "        windowStart.ShouldBeGreaterThanOrEqualTo(new DateOnly(2000, 1, 1));",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const findings = canaryFindingsOf({
+        path: "ExpiryWindowPropertyTests.cs",
+        content,
+    });
+
+    // Assert
+    assert.deepEqual(findings, []);
+});

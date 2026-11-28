@@ -390,9 +390,11 @@ input. The canary proves the law can fail, and it is one `[Fact]` per law body.
   canary that passes against a mutant means the law is vacuous and the property
   is decoration.
 - The canary is a hard gate for new and changed property laws: a property
-  without a canary in the same class is not reviewable. Enforcement is
-  review-only — nothing in the build can tell a missing canary from a class that
-  legitimately has none, so do not describe it as automated.
+  without a canary in the same class is not reviewable. The `--files` review
+  pass reports a property class that holds none (`property-canary-missing`); a
+  law that needs none carries a why-note. The gate sees the class's canary list,
+  not whether the canary proves the law, so the judgement stays with the
+  reviewer.
 - Mutation testing tools can complement the canary, but they do not replace a
   per-law guard that runs in the normal suite.
 
@@ -550,9 +552,12 @@ property. Surface it to the owner; do not let a generated test settle it.
   reports a numeric fast-check `seed:` literal, a C# `Replay = "<literal>"` with
   no `$` interpolation, and an even replay gamma. It runs in the
   `defined scan --files` review pass, not in `verify` or `comply`.
-- The shrinker, the seed ledger and the canary are review-only. No gate rule can
-  see a missing shrinker, an unrecorded seed or an absent canary; reviewers hold
-  that line.
+- The `property-canary-missing` review lead fails the `defined scan --files`
+  pass when a class holds laws and no
+  `<Family>_WhenTheImplementationIsMutated_IsFalsified` fact; a why-note records
+  a law that legitimately needs none.
+- The shrinker and the unrecorded failing seed are review-only: no gate rule can
+  see a missing shrinker or an unrecorded seed; reviewers hold that line.
 - The gate reads a `[Property]` as a test declaration, so the always-on hygiene
   rules judge its body like any other test. A method returning `Property` is
   exempt from `no-assertions`: FsCheck.Xunit evaluates the law and throws on a

@@ -75,6 +75,15 @@
 // string`/`static readonly string` literal; an identifier the file does not
 // define is left alone.
 //
+// `property-canary-missing` (review tier) reads the declarations: a class that
+// holds `[Property]` laws but no
+// `<Family>_WhenTheImplementationIsMutated_IsFalsified` fact has laws nothing
+// proved able to fail. The check is class-scoped because one canary guards a
+// law family; a law that needs none — a generator-domain property — carries a
+// why-note, because the gate can see the class's canary list but not whether
+// the canary proves the law.
+
+//
 // The tautology patterns cover the Jest/Vitest `expect` shapes and the
 // xUnit/NUnit `Assert` shapes (`Assert.Equal(3, 3)`, `Assert.True(true)`); the
 // first pattern to claim a position wins, so a literal compared with itself
@@ -183,6 +192,7 @@ export const REVIEW_RULES = [
     "process-spawn",
     "debug-output",
     "unrouted-property-seed",
+    "property-canary-missing",
 ] as const;
 
 /** The Bucket C intent leads the gate reports and never owns. */
@@ -884,6 +894,60 @@ function propertySeedFindings({
             },
         ];
     });
+}
+
+/** The suffix that makes a canary's role visible in the test list. */
+const CANARY_SUFFIX = "_WhenTheImplementationIsMutated_IsFalsified";
+
+/** The law family a name states: `RenderThenParse_…` is the family `RenderThenParse`. */
+function lawFamily(name: string): string {
+    return name.split("_")[0] ?? name;
+}
+
+/**
+ * Classes holding property laws with no falsifiability canary. The 2026-11-27
+ * decision makes a canary a hard gate for new and changed laws; the gate can
+ * see that a class holds none, not whether the one it holds proves the law. One
+ * canary guards the class's law family, and a law that needs none carries a
+ * why-note.
+ */
+function canaryFindings({
+    source,
+    entries,
+}: {
+    source: TestReviewSource;
+    entries: readonly ReviewedDeclaration[];
+}): TestHygieneFinding[] {
+    const canaried = new Set<string>();
+    for (const { declaration } of entries) {
+        if (declaration.name.endsWith(CANARY_SUFFIX)) {
+            canaried.add(declaration.container?.name ?? "");
+        }
+    }
+    return entries.flatMap(
+        ({ declaration, suppressed }): TestHygieneFinding[] => {
+            if (
+                declaration.property !== true ||
+                suppressed.has("property-canary-missing")
+            ) {
+                return [];
+            }
+            const container = declaration.container?.name ?? "";
+            if (canaried.has(container)) {
+                return [];
+            }
+            const where =
+                container === "" ? "in no class" : `in class "${container}"`;
+            return [
+                {
+                    rule: "property-canary-missing",
+                    file: source.path,
+                    line: declaration.line,
+                    message: `property "${declaration.name}" has no falsifiability canary ${where}: add ${lawFamily(declaration.name)}${CANARY_SUFFIX} beside the laws, or a why-note saying why this law needs none`,
+                },
+            ];
+        },
+    );
 }
 
 const TAUTOLOGY_RULES: ReadonlyArray<{
@@ -1951,6 +2015,7 @@ function sourceFindings(
                   ...compoundAssertionFindings({ entries }),
                   ...determinismFindings({ source, entries }),
                   ...propertySeedFindings({ source, masked, entries }),
+                  ...canaryFindings({ source, entries }),
               ]
             : []),
     ];
