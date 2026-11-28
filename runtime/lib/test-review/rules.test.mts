@@ -655,6 +655,33 @@ test("does not count a lookalike call as an assertion", () => {
     );
 });
 
+test("does not report no-assertions for a computed table or a nested template", () => {
+    // Arrange — both shapes were scanner false positives against the corpus.
+    const contents = [
+        `${NODE_IMPORT}test.each(items.filter((i) => i.href !== undefined))(
+    "Interests render a link when href is set",
+    async ({ href, testId }) => {
+        expect(getHref(testId)).toBe(href);
+    },
+);`,
+        `${NODE_IMPORT}it("writes the campaign", () => {
+    write(join(dir, "campaign.json"), \`\${JSON.stringify({ path: \`arms/\${arm}/AGENTS.md\` })}\\n\`);
+    assert.equal(result.ok, true);
+});`,
+    ];
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "a.test.ts", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
+
 test("leaves a skipped declaration to the skip defect", () => {
     // Arrange
     const contents = [

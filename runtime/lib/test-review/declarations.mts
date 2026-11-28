@@ -385,16 +385,74 @@ function frameworkOf(content: string): JavaScriptFramework | null {
 }
 
 /**
- * One declaration head: `it(`, `it.each(cases)(`, `test.only(` and the like.
- * A head may not follow a `.`: `regex.test(...)` is a method call, not a test
+ * One declaration head: `it`, `it.each`, `test.only` and the like. A head may
+ * not follow a `.`: `regex.test(...)` is a method call, not a test
  * declaration, and its arguments are not titles.
  *
- * Sonar S5843 (complexity 24, limit 20): the alternation is the declaration
- * grammar the oracle parity was measured against. Splitting the literal would
- * fork that grammar; kept deliberately.
+ * The head stops after its modifier; the argument list is found separately by
+ * `argumentListOpen`, because a table argument nests brackets of its own and
+ * cannot be delimited by a flat character class.
  */
-const DECLARATION_HEAD =
-    /(?<!\.)\b(it|test|specify)(?:\.\w+)?(?:\([^)]*\)|\[[^\]]*\]|`[^`]*`)?\s*\(\s*/g;
+const DECLARATION_HEAD = /(?<!\.)\b(it|test|specify)(?:\.\w+)?/g;
+
+/**
+ * Offset just past the bracket span opening at `start`, matching all three
+ * bracket kinds. Strings, comments and regex literals are blank in the mask,
+ * so their brackets cannot close the span. Returns `null` when it never
+ * closes.
+ */
+function bracketEnd(masked: string, start: number): number | null {
+    const stack: string[] = [];
+    for (let i = start; i < masked.length; i++) {
+        const char = masked[i] ?? "";
+        if (isOpener(char)) {
+            stack.push(char);
+            continue;
+        }
+        if (!isCloser(char)) {
+            continue;
+        }
+        stack.pop();
+        if (stack.length === 0) {
+            return i + 1;
+        }
+    }
+    return null;
+}
+
+/**
+ * Offset of a declaration's argument-list `(`, or `null` when the head opens
+ * no call.
+ *
+ * A head may carry one table argument before its own arguments
+ * (`it.each(cases)(…)`, `it.each([…])(…)`, `` it.each`…`(…) ``). The first
+ * bracket span is therefore only a table when another `(` follows it;
+ * otherwise it is the argument list itself.
+ */
+function argumentListOpen(
+    content: string,
+    masked: string,
+    from: number,
+): number | null {
+    const start = skipWhitespace(content, from);
+    const char = content[start] ?? "";
+    let afterTable: number;
+    if (char === "`") {
+        afterTable = skipWhitespace(content, quotedEnd(content, start, "`"));
+    } else if (char === "(" || char === "[") {
+        const end = bracketEnd(masked, start);
+        if (end === null) {
+            return null;
+        }
+        afterTable = skipWhitespace(content, end);
+    } else {
+        return null;
+    }
+    if (content[afterTable] === "(") {
+        return afterTable;
+    }
+    return char === "(" ? start : null;
+}
 
 /**
  * Read every JavaScript/TypeScript test declaration in one source.
@@ -424,13 +482,20 @@ function scanJavaScriptDeclarations({
         if (!inCode(content, masked, index)) {
             continue;
         }
-        const head = match[0];
-        const title = javascriptTitle(content, masked, index + head.length);
+        const open = argumentListOpen(content, masked, index + match[0].length);
+        if (open === null) {
+            continue;
+        }
+        const title = javascriptTitle(
+            content,
+            masked,
+            skipWhitespace(content, open + 1),
+        );
         if (title === null) {
             continue;
         }
         const line = lineAt({ content, index });
-        const span = javaScriptBodySpan(masked, index);
+        const span = javaScriptBodySpan(masked, open);
         const { body, maskedBody, bodyLine } = bodySlice(
             content,
             masked,
@@ -442,7 +507,7 @@ function scanJavaScriptDeclarations({
             line,
             name: title.name,
             framework,
-            ...modifierFlags(head),
+            ...modifierFlags(content.slice(index, open + 1)),
             body,
             maskedBody,
             bodyLine,

@@ -234,6 +234,82 @@ test("scanTestDeclarations reads the three declaration aliases", () => {
     assert.deepEqual(names, ["a", "b", "c"]);
 });
 
+test("scanTestDeclarations reads a computed .each table with nested parentheses", () => {
+    // Arrange — the table's filter call holds a `)` before the head does.
+    const content =
+        NODE_IMPORT +
+        [
+            "test.each(interests.filter((i) => i.href !== undefined))(",
+            '    "Interests ($id) renders a link when href is set",',
+            "    async ({ href, testId }) => {",
+            "        expect(getHref(testId)).toBe(href);",
+            "    },",
+            ");",
+        ].join("\n");
+
+    // Act
+    const [declaration] = scanTestDeclarations({
+        path: "a.test.ts",
+        content,
+    });
+
+    // Assert — the filter predicate is the table, not the title or the body.
+    assert.equal(
+        declaration?.name,
+        "Interests ($id) renders a link when href is set",
+    );
+    assert.ok(
+        declaration?.body?.includes("expect(getHref(testId)).toBe(href);"),
+    );
+});
+
+test("scanTestDeclarations keeps the body after a nested template literal", () => {
+    // Arrange — the interpolation holds a template literal of its own.
+    const content =
+        NODE_IMPORT +
+        [
+            'it("writes the campaign", () => {',
+            "    write(",
+            '        join(dir, "campaign.json"),',
+            "        `${JSON.stringify({",
+            '            subjects: ["before", "after"].map((arm) => ({',
+            "                path: `arms/${arm}/AGENTS.md`,",
+            "            })),",
+            "        })}\\n`,",
+            "    );",
+            "    assert.equal(result.ok, true);",
+            "});",
+        ].join("\n");
+
+    // Act
+    const [declaration] = scanTestDeclarations({
+        path: "a.test.ts",
+        content,
+    });
+
+    // Assert — the assertion after the write is inside the declaration body.
+    assert.ok(declaration?.body?.includes("assert.equal(result.ok, true);"));
+});
+
+test("scanTestDeclarations reads array and tag-table .each forms", () => {
+    // Arrange — the bracket-matched table must keep every supported table form.
+    const contents = [
+        NODE_IMPORT +
+            'test.each([1, 2])("row %i", (value) => {\n    expect(value).toBeGreaterThan(0);\n});',
+        NODE_IMPORT +
+            'test.each`\n  a | b\n  ${1} | ${2}\n`("row", ({ a }) => {\n    expect(a).toBe(1);\n});',
+    ];
+
+    // Act
+    const names = contents.map(
+        (content) =>
+            scanTestDeclarations({ path: "a.test.ts", content })[0]?.name,
+    );
+
+    // Assert
+    assert.deepEqual(names, ["row %i", "row"]);
+});
+
 test("scanTestDeclarations keeps a quoted title's punctuation", () => {
     // Arrange
     const content = `${NODE_IMPORT}it('a, "b" (c)', () => {});`;
