@@ -33,7 +33,7 @@ verification is the gate's own suite plus the self-host gate.
   the local image tag and the published tag.
 - `standards/` — seeded consumer defaults + house doctrine (consumers own their
   seeded copies after install; managed files get restored by comply).
-- `runtime/lib/explain.mts` — step/rule → house-doc map (`docRel`); `defined
+- `runtime/lib/explain.mts` — step/rule/guide → house-doc map (`docRel`); `defined
 explain` serves `standards/` docs verbatim.
 - `docs/` — knowledge: this brief, `<area>/` deep dives, `decisions/`, `issues/`.
   `docs/plans/PLAN_*.md` is session scratch, gitignored via `.git/info/exclude`

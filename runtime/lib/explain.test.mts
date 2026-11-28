@@ -252,6 +252,28 @@ test("explainTopic_everyStepIdResolves", async () => {
     );
 });
 
+test("explainTopic_propertyTestingGuide_routesToThePropertyDoc", async () => {
+    // Act
+    const e = await explainTopic({
+        topic: "property-testing",
+        repoRoot: "/repo",
+        deps: fakeDeps({ doc: "# Property testing\n" }),
+    });
+
+    // Assert
+    assert.deepEqual(e, {
+        topic: "property-testing",
+        kind: "guide",
+        owner: {
+            side: "house",
+            detail: "standards/testing/property-testing.md",
+        },
+        doc: "standards/testing/property-testing.md",
+        guidance: "# Property testing\n",
+        notice: "the C#/FsCheck property shape: law, generator and shrinker, seed ledger, canary and layout",
+    });
+});
+
 test("renderExplanation_isOneCompactJsonLine", async () => {
     // Arrange — an explanation to render.
     const e = await explainTopic({
