@@ -913,7 +913,7 @@ const CANARY_SUFFIX = "_WhenTheImplementationIsMutated_IsFalsified";
 
 /** The law family a name states: `RenderThenParse_…` is the family `RenderThenParse`. */
 function lawFamily(name: string): string {
-    return name.split("_")[0] ?? name;
+    return name.split("_")[0] || name;
 }
 
 /**
@@ -991,19 +991,17 @@ function misplacedPropertyFindings({
                 return [];
             }
             const container = declaration.container?.name ?? "";
-            if (container.endsWith("PropertyTests")) {
+            // A class the lexical scanner missed is a ceiling, not a defect:
+            // stay silent rather than report a law as outside its class.
+            if (container === "" || container.endsWith("PropertyTests")) {
                 return [];
             }
-            const where =
-                container === ""
-                    ? "outside any class"
-                    : `in class "${container}"`;
             return [
                 {
                     rule: "misplaced-property",
                     file: source.path,
                     line: declaration.line,
-                    message: `property "${declaration.name}" lives ${where}: laws sit in a ${lawClassName(container)} class, paired with the examples file`,
+                    message: `property "${declaration.name}" lives in class "${container}": laws sit in a ${lawClassName(container)} class, paired with the examples file`,
                 },
             ];
         },
@@ -1298,9 +1296,9 @@ function theoryWithoutDataFindings({
  * itself and throws on a falsified case, so the framework is the assertion.
  */
 function isPropertyReturningLaw(declaration: TestDeclaration): boolean {
-    return (
-        declaration.property === true && declaration.returnType === "Property"
-    );
+    const returnType = declaration.returnType ?? "";
+    const lastSegment = returnType.slice(returnType.lastIndexOf(".") + 1);
+    return declaration.property === true && lastSegment === "Property";
 }
 
 /** Findings for declarations whose body makes no assertion at all. */

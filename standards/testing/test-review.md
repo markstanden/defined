@@ -200,5 +200,6 @@ An always-on defect has no escape even though the note parses.
   file is neither applied nor reported.
 - The property leads read one file at a time: a class split across files
   (`partial`), a twin example file in another folder and a ledger replayed
-  elsewhere are judged only from the file named.
+  elsewhere are judged only from the file named. A class head the lexical
+  scanner misses — attributes on the class's own line — is not judged.
 - The engine never measures coverage and never estimates it.

@@ -2659,6 +2659,12 @@ test("exempts a Property-returning body from no-assertions", () => {
             "    {",
             "        return (value * 2 % 2 == 0).ToProperty();",
             "    }",
+            "",
+            "    [Property(Arbitrary = [typeof(MathArbitraries)])]",
+            "    public FsCheck.Property Doubles_WhenQualified_HoldsTheParityLaw(int value)",
+            "    {",
+            "        return (value * 2 % 2 == 0).ToProperty();",
+            "    }",
         ].join("\n"),
     );
 
@@ -2674,26 +2680,42 @@ test("exempts a Property-returning body from no-assertions", () => {
     );
 });
 
-test("judges a property body with the review tier", () => {
+/** A property whose body sleeps: a review-tier determinism lead. */
+function sleepingPropertySource() {
+    return {
+        path: "MathPropertyTests.cs",
+        content: xunitProperty(
+            [
+                "    [Property]",
+                "    public void Waits_ForAnyInteger_ReturnsTheSameValue(int value)",
+                "    {",
+                "        Thread.Sleep(10);",
+                "        value.ShouldBe(value);",
+                "    }",
+            ].join("\n"),
+        ),
+    };
+}
+
+test("stays silent for a property body in a tracked pass", () => {
     // Arrange
-    const content = xunitProperty(
-        [
-            "    [Property]",
-            "    public void Waits_ForAnyInteger_ReturnsTheSameValue(int value)",
-            "    {",
-            "        Thread.Sleep(10);",
-            "        value.ShouldBe(value);",
-            "    }",
-        ].join("\n"),
-    );
-    const source = { path: "MathPropertyTests.cs", content };
+    const source = sleepingPropertySource();
 
     // Act
     const tracked = reviewTestSources([source]);
-    const reviewed = reviewTestSources([source], { review: true });
 
     // Assert
     assert.deepEqual(tracked, []);
+});
+
+test("reports a property body's determinism lead in the review pass", () => {
+    // Arrange
+    const source = sleepingPropertySource();
+
+    // Act
+    const reviewed = reviewTestSources([source], { review: true });
+
+    // Assert
     assert.deepEqual(
         reviewed
             .map((finding) => finding.rule)
@@ -2851,7 +2873,7 @@ test("reports a property whose class holds its canary in another class", () => {
     );
 });
 
-test("reports the missing canary in review mode only", () => {
+test("stays silent for the missing canary in a tracked pass", () => {
     // Arrange
     const source = {
         path: "CustomerXmlPropertyTests.cs",
@@ -2860,10 +2882,22 @@ test("reports the missing canary in review mode only", () => {
 
     // Act
     const tracked = reviewTestSources([source]);
-    const reviewed = reviewTestSources([source], { review: true });
 
     // Assert
     assert.deepEqual(tracked, []);
+});
+
+test("reports the missing canary in the review pass", () => {
+    // Arrange
+    const source = {
+        path: "CustomerXmlPropertyTests.cs",
+        content: `public sealed class CustomerXmlPropertyTests\n{\n${UNCANNED_LAW}\n}`,
+    };
+
+    // Act
+    const reviewed = reviewTestSources([source], { review: true });
+
+    // Assert
     assert.deepEqual(
         reviewed
             .map((finding) => finding.rule)
@@ -2976,27 +3010,7 @@ test("stays silent for a property in a class named for laws", () => {
     assert.deepEqual(findings, []);
 });
 
-test("reports a property outside any class", () => {
-    // Arrange
-    const content = [
-        "[Property(Arbitrary = [typeof(CustomerArbitraries)])]",
-        "public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
-        PROPERTY_BODY,
-    ].join("\n");
-
-    // Act
-    const findings = propertyFindingsOf({
-        rule: "misplaced-property",
-        path: "Loose.cs",
-        content,
-    });
-
-    // Assert
-    assert.equal(findings.length, 1);
-    assert.match(findings[0]?.message ?? "", /outside any class/u);
-});
-
-test("reports the misplaced property in review mode only", () => {
+test("stays silent for the misplaced property in a tracked pass", () => {
     // Arrange
     const source = {
         path: "UnknownCustomerLookupTests.cs",
@@ -3012,10 +3026,29 @@ test("reports the misplaced property in review mode only", () => {
 
     // Act
     const tracked = reviewTestSources([source]);
-    const reviewed = reviewTestSources([source], { review: true });
 
     // Assert
     assert.deepEqual(tracked, []);
+});
+
+test("reports the misplaced property in the review pass", () => {
+    // Arrange
+    const source = {
+        path: "UnknownCustomerLookupTests.cs",
+        content: [
+            "public sealed class UnknownCustomerLookupTests",
+            "{",
+            "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+            "    public void Lookup_WhenCustomerIsUnknown_ReturnsNull(Customer original)",
+            PROPERTY_BODY,
+            "}",
+        ].join("\n"),
+    };
+
+    // Act
+    const reviewed = reviewTestSources([source], { review: true });
+
+    // Assert
     assert.deepEqual(
         reviewed
             .map((finding) => finding.rule)
