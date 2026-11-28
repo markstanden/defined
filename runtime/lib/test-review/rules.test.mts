@@ -2612,3 +2612,92 @@ test("stays silent when the replay identifier cannot be resolved in the file", (
         contents.map(() => []),
     );
 });
+
+/** One C# method wrapped in a property-test class; the method sits at line 4. */
+function xunitProperty(method: string): string {
+    return `public sealed class MathPropertyTests\n{\n${method}\n}`;
+}
+
+test("reports a void property whose body makes no assertion", () => {
+    // Arrange
+    const content = xunitProperty(
+        [
+            "    [Property]",
+            "    public void Doubles_ForAnyInteger_ProducesAnEvenValue(int value)",
+            "    {",
+            "        int doubled = value * 2;",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([
+        { path: "MathPropertyTests.cs", content },
+    ]).filter((finding) => finding.rule === "no-assertions");
+
+    // Assert
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0]?.line, 4);
+    assert.match(
+        findings[0]?.message ?? "",
+        /Doubles_ForAnyInteger_ProducesAnEvenValue/u,
+    );
+});
+
+test("exempts a Property-returning body from no-assertions", () => {
+    // Arrange
+    const content = xunitProperty(
+        [
+            "    [Property(Arbitrary = [typeof(MathArbitraries)])]",
+            "    public void Doubles_ForAnyInteger_ProducesAnEvenValue(int value)",
+            "    {",
+            "        int doubled = value * 2;",
+            "    }",
+            "",
+            "    [Property(Arbitrary = [typeof(MathArbitraries)])]",
+            "    public Property Doubles_WhenEvaluated_HoldsTheParityLaw(int value)",
+            "    {",
+            "        return (value * 2 % 2 == 0).ToProperty();",
+            "    }",
+        ].join("\n"),
+    );
+
+    // Act
+    const findings = reviewTestSources([
+        { path: "MathPropertyTests.cs", content },
+    ]).filter((finding) => finding.rule === "no-assertions");
+
+    // Assert
+    assert.deepEqual(
+        findings.map((finding) => finding.message.match(/"([^"]+)"/u)?.[1]),
+        ["Doubles_ForAnyInteger_ProducesAnEvenValue"],
+    );
+});
+
+test("judges a property body with the review tier", () => {
+    // Arrange
+    const content = xunitProperty(
+        [
+            "    [Property]",
+            "    public void Waits_ForAnyInteger_ReturnsTheSameValue(int value)",
+            "    {",
+            "        Thread.Sleep(10);",
+            "        value.ShouldBe(value);",
+            "    }",
+        ].join("\n"),
+    );
+    const source = { path: "MathPropertyTests.cs", content };
+
+    // Act
+    const tracked = reviewTestSources([source]);
+    const reviewed = reviewTestSources([source], { review: true });
+
+    // Assert
+    assert.deepEqual(tracked, []);
+    assert.deepEqual(
+        reviewed
+            .map((finding) => finding.rule)
+            .filter((rule) => rule === "sleep"),
+        ["sleep"],
+    );
+});

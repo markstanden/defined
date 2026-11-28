@@ -92,8 +92,10 @@
 // `Expect(`, and Shouldly's generic forms (`ShouldThrow<…>`). FsCheck's
 // throwing checks count too — `Check.QuickThrowOnFailure(`, or `Check.One(` /
 // `Check.Method(` with a `*ThrowOnFailure` config — because only those throw
-// when the law fails; `Config.Quick` just prints. The oracle misses the last
-// three and so reports five false positives across the C# corpus. A
+// when the law fails; `Config.Quick` just prints. A `[Property]` method
+// returning `Property` is exempt: FsCheck.Xunit evaluates the law and throws on
+// a falsified case. The oracle misses the last three and so reports five false
+// positives across the C# corpus. A
 // helper that merely delegates (`check(...)`) does not count, so a body of
 // helpers reports. A skipped declaration is left to `skipped-test`: a parked
 // skip may legitimately carry no assertion until its ticket lands, and
@@ -1090,6 +1092,16 @@ function theoryWithoutDataFindings({
     });
 }
 
+/**
+ * A `[Property]` method returning `Property`: FsCheck.Xunit evaluates the law
+ * itself and throws on a falsified case, so the framework is the assertion.
+ */
+function isPropertyReturningLaw(declaration: TestDeclaration): boolean {
+    return (
+        declaration.property === true && declaration.returnType === "Property"
+    );
+}
+
 /** Findings for declarations whose body makes no assertion at all. */
 function noAssertionFindings({
     source,
@@ -1103,6 +1115,7 @@ function noAssertionFindings({
         if (
             body === null ||
             declaration.skipped ||
+            isPropertyReturningLaw(declaration) ||
             ASSERTION_CALLS[declaration.framework].some((pattern) =>
                 pattern.test(body),
             )

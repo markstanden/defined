@@ -553,6 +553,7 @@ property. Surface it to the owner; do not let a generated test settle it.
 - The shrinker, the seed ledger and the canary are review-only. No gate rule can
   see a missing shrinker, an unrecorded seed or an absent canary; reviewers hold
   that line.
-- The gate does not yet read a `[Property]` as a test declaration, so the
-  always-on hygiene rules do not inspect these bodies. Treat the shape above as
-  the review baseline until that lands.
+- The gate reads a `[Property]` as a test declaration, so the always-on hygiene
+  rules judge its body like any other test. A method returning `Property` is
+  exempt from `no-assertions`: FsCheck.Xunit evaluates the law and throws on a
+  falsified case, so the framework is the assertion.
