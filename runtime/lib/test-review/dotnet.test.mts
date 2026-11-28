@@ -222,3 +222,186 @@ test("reads an inline ignore reason", () => {
     assert.equal(declaration?.skipped, true);
     assert.equal(declaration?.skipReason, "flaky until CI grid fixed");
 });
+
+test("reads an FsCheck property as an xunit declaration", () => {
+    // Arrange
+    const content = [
+        "using FsCheck.Xunit;",
+        "",
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    [Property(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "    public void RenderThenParse_ForAnyValidCustomer_RestoresOriginal(Customer original)",
+        "    {",
+        "        // Assert",
+        "        original.ShouldNotBeNull();",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const [declaration] = scan(content);
+
+    // Assert
+    assert.deepEqual(
+        declaration === undefined
+            ? null
+            : {
+                  name: declaration.name,
+                  framework: declaration.framework,
+                  line: declaration.line,
+                  bodyLine: declaration.bodyLine,
+                  property: declaration.property,
+                  returnType: declaration.returnType,
+              },
+        {
+            name: "RenderThenParse_ForAnyValidCustomer_RestoresOriginal",
+            framework: "xunit",
+            line: 6,
+            bodyLine: 7,
+            property: true,
+            returnType: "void",
+        },
+    );
+    assert.match(declaration?.maskedBody ?? "", /ShouldNotBeNull/u);
+});
+
+test("records the enclosing class and its attribute block", () => {
+    // Arrange
+    const content = [
+        "[Properties(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    [Property]",
+        "    public void Law(Customer customer)",
+        "    {",
+        "        customer.ShouldNotBeNull();",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const [declaration] = scan(content);
+
+    // Assert
+    assert.deepEqual(declaration?.container, {
+        name: "CustomerXmlPropertyTests",
+        attributes: "[Properties(Arbitrary = [typeof(CustomerArbitraries)])]",
+    });
+});
+
+test("reads the innermost class as the container of a nested property", () => {
+    // Arrange
+    const content = [
+        "public sealed class Outer",
+        "{",
+        "    public sealed class InnerPropertyTests",
+        "    {",
+        "        [Property]",
+        "        public void Law(int value)",
+        "        {",
+        "            value.ShouldBe(value);",
+        "        }",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const [declaration] = scan(content);
+
+    // Assert
+    assert.equal(declaration?.container?.name, "InnerPropertyTests");
+});
+
+test("does not read NUnit property metadata as an FsCheck property", () => {
+    // Arrange
+    const contents = [
+        [
+            "[Test]",
+            '[Property("Category", "Slow")]',
+            "public void Adds()",
+            "{",
+            "    Assert.Equal(1, 1);",
+            "}",
+        ].join("\n"),
+        [
+            '[Property("Category", "Slow")]',
+            "public void Helper()",
+            "{",
+            "    Assert.Equal(1, 1);",
+            "}",
+        ].join("\n"),
+    ];
+
+    // Act
+    const found = contents.map((content) => scan(content));
+
+    // Assert
+    assert.deepEqual(
+        found.map(([declaration]) => ({
+            framework: declaration?.framework,
+            property: declaration?.property,
+        })),
+        [
+            { framework: "nunit", property: false },
+            { framework: undefined, property: undefined },
+        ],
+    );
+});
+
+test("leaves a class-level Properties attribute out of the declarations", () => {
+    // Arrange
+    const content = [
+        "[Properties(Arbitrary = [typeof(CustomerArbitraries)])]",
+        "public sealed class CustomerXmlPropertyTests",
+        "{",
+        "    public void Helper()",
+        "    {",
+        "    }",
+        "}",
+    ].join("\n");
+
+    // Act
+    const declarations = scan(content);
+
+    // Assert
+    assert.deepEqual(declarations, []);
+});
+
+test("leaves an expression-bodied property without a body", () => {
+    // Arrange
+    const content = [
+        "public sealed class MathPropertyTests",
+        "{",
+        "    [Property]",
+        "    public bool Law(int value) => value == value;",
+        "}",
+    ].join("\n");
+
+    // Act
+    const [declaration] = scan(content);
+
+    // Assert
+    assert.equal(declaration?.name, "Law");
+    assert.equal(declaration?.body, null);
+});
+
+test("leaves the container absent when the class braces never close", () => {
+    // Arrange
+    const content = [
+        "public sealed class Broken",
+        "{",
+        "    [Property]",
+        "    public void Law(int value)",
+        "    {",
+        "        value.ShouldBe(value);",
+        "    }",
+    ].join("\n");
+
+    // Act
+    const [declaration] = scan(content);
+
+    // Assert
+    assert.equal(declaration?.name, "Law");
+    assert.equal(declaration?.container, undefined);
+});

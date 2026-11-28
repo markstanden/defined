@@ -4,9 +4,11 @@
 // Run: node --test runtime/lib/property-testing-snippets.test.mts
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
+
+import { reviewTestSources } from "./test-review/rules.mts";
 
 const REPO_ROOT = join(import.meta.dirname, "..", "..");
 const PAGE = join(REPO_ROOT, "standards", "testing", "property-testing.md");
@@ -191,4 +193,20 @@ test("propertyTestingSnippets_markerWithoutCsharpFence_doesNotBorrowTheNextBlock
 
     // Act / Assert
     assert.throws(() => snippetsFrom(doc), /"law" has no csharp fence/u);
+});
+
+test("propertyTestingFixtures_whenReviewed_reportNoFindings", () => {
+    // Arrange
+    const sources = readdirSync(FIXTURES)
+        .filter((file) => file.endsWith(".cs"))
+        .map((file) => ({
+            path: `docs/fixtures/property-testing/${file}`,
+            content: fixtureContent(file),
+        }));
+
+    // Act
+    const findings = reviewTestSources(sources, { review: true });
+
+    // Assert
+    assert.deepEqual(findings, []);
 });

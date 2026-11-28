@@ -8,7 +8,10 @@
 // source by the C# scanner. A declaration quoted inside a string or a comment
 // is data, not a test. A JS file with no vitest, Jest or node:test marker is
 // not a test file; a C# method with no test attribute block above it is not a
-// test declaration and yields nothing.
+// test declaration and yields nothing. FsCheck's `[Property]` is a test
+// attribute too — xUnit runs it through FsCheck.Xunit — so a property carries
+// its enclosing class, its own attribute block and its return type; the
+// property shape rules and the `no-assertions` exemption read those.
 //
 // Public surface:
 //   scanTestDeclarations({ path, content }) — declarations in file order
@@ -19,15 +22,27 @@
 // named `it`/`test`/`specify` on an object is not a declaration. C# supports
 // one level of generic arguments and requires at least one modifier on the
 // method; attributes are read from the contiguous lines above the signature,
-// with comment and doc lines walked over but never read as attributes. The
-// mask is JavaScript-shaped, so C# verbatim/interpolated strings may end
-// early. Upgrade to a parser if exotic styles ever earn the dependency.
+// with comment and doc lines walked over but never read as attributes. A class
+// container is read from its head line and brace-matched, so a record with a
+// semicolon body is not a container. NUnit's metadata `[Property("name", …)]`
+// is excluded by its string first argument; its named-argument form is read as
+// FsCheck — a why-note decides that ceiling. The mask is JavaScript-shaped, so
+// C# verbatim/interpolated strings may end early. Upgrade to a parser if exotic
+// styles ever earn the dependency.
 
 import { maskTestSource } from "./mask.mts";
 
 /** The test frameworks the scanner recognises. */
 export type TestFramework =
     "node-test" | "jest" | "vitest" | "xunit" | "nunit" | "mstest";
+
+/** The class a C# test method is declared in. */
+export interface TestContainer {
+    /** The class name as declared. */
+    readonly name: string;
+    /** The attribute lines above the class head, joined; empty when none. */
+    readonly attributes: string;
+}
 
 /** One JavaScript/TypeScript test declaration and the body it opens. */
 export interface TestDeclaration {
@@ -51,6 +66,14 @@ export interface TestDeclaration {
     readonly focusMarker?: string;
     /** Whether the declaration is parameterised but names no data source. */
     readonly dataSourceMissing?: boolean;
+    /** Whether the declaration is an FsCheck property. */
+    readonly property?: boolean;
+    /** The .NET return type as written, without modifiers. */
+    readonly returnType?: string;
+    /** The declaration's own attribute lines, joined; .NET only. */
+    readonly attributes?: string;
+    /** The enclosing class; .NET only, absent outside any class. */
+    readonly container?: TestContainer;
     /** Raw body text, or `null` when the declaration has no delimited body. */
     readonly body: string | null;
     /** The body with strings and comments blanked, or `null`. */
@@ -518,17 +541,54 @@ function scanJavaScriptDeclarations({
 
 /**
  * A C# method head: modifiers, a return type, a name and its argument list.
+ * The type is captured because a `Property`-returning law asserts through the
+ * framework, and the name is captured because every rule keys on it.
  *
  * Sonar S5843 (complexity 32, limit 20): the modifier run and the type/name
  * split are one grammar, pinned by the declaration tests and the corpus
  * parity. Splitting the literal would fork that grammar; kept deliberately.
  */
 const DOTNET_METHOD =
-    /^[ \t]*(?:(?:public|private|protected|internal|static|async|virtual|override|sealed|partial|new|unsafe|extern|abstract)\s+)+[A-Za-z_][\w,.?[\]]*(?:<[^>]*>)?[ \t]+([A-Za-z_]\w*)[ \t]*\(/gm;
+    /^[ \t]*(?:(?:public|private|protected|internal|static|async|virtual|override|sealed|partial|new|unsafe|extern|abstract)\s+)+([A-Za-z_][\w,.?[\]]*(?:<[^>]*>)?)[ \t]+([A-Za-z_]\w*)[ \t]*\(/gm;
 
 /** A test attribute that makes the method below it a declaration. */
 const DOTNET_TEST_ATTRIBUTE =
     /\[\s*(Fact|Theory|Test|TestCase|TestMethod|DataTestMethod|InlineData|MemberData|ClassData|DataRow)\b/u;
+
+/** An FsCheck `[Property]` attribute, bare or with named arguments. */
+const DOTNET_PROPERTY_ATTRIBUTE = /\[\s*Property\b/u;
+
+/**
+ * NUnit's metadata `[Property("Category", "Slow")]` takes a string first, so
+ * it is not FsCheck's attribute. Its named-argument form
+ * (`[Property(PropertyName = …)]`) is indistinguishable from FsCheck without a
+ * parser, so it reads as a property and a why-note decides it.
+ */
+const DOTNET_NUNIT_PROPERTY = /\[\s*Property\s*\(\s*[$@]*["']/u;
+
+/** The attribute names an annotation block declares, combined lines included. */
+const DOTNET_ATTRIBUTE_NAME = /[[,]\s*(?:[A-Za-z_]\w*\s*:\s*)?([A-Za-z_]\w*)/gu;
+
+/** A class head, which opens the container a test method sits in. */
+const DOTNET_CLASS =
+    /^[ \t]*(?:(?:public|private|protected|internal|static|abstract|sealed|partial|unsafe|new|file)\s+)*class\s+([A-Za-z_]\w*)/gmu;
+
+/** The attribute names one C# attribute block declares. */
+function attributeNames(annotations: string): Set<string> {
+    const names = new Set<string>();
+    for (const match of annotations.matchAll(DOTNET_ATTRIBUTE_NAME)) {
+        names.add(match[1] ?? "");
+    }
+    return names;
+}
+
+/** Whether an attribute block holds FsCheck's `[Property]` attribute. */
+function isFsCheckProperty(annotations: string): boolean {
+    return (
+        DOTNET_PROPERTY_ATTRIBUTE.test(annotations) &&
+        !DOTNET_NUNIT_PROPERTY.test(annotations)
+    );
+}
 
 /** A line the attribute block above a C# method can span. */
 const DOTNET_ANNOTATION_LINE = /^(?:\[|#\[|\/\*\*|\*|\*\/|\/\/)/u;
@@ -568,19 +628,66 @@ function precedingAttributes({
     return collected.filter((line) => line.startsWith("[")).join("\n");
 }
 
+/** One class and the brace span its body covers. */
+interface DotNetContainer extends TestContainer {
+    readonly start: number;
+    readonly end: number;
+}
+
+/** Every class container in one masked source, in declaration order. */
+function dotNetContainers({
+    content,
+    masked,
+}: {
+    content: string;
+    masked: string;
+}): DotNetContainer[] {
+    const containers: DotNetContainer[] = [];
+    for (const match of masked.matchAll(DOTNET_CLASS)) {
+        const index = match.index ?? 0;
+        const span = bodySpan(masked, index + match[0].length);
+        if (span === null) {
+            continue;
+        }
+        containers.push({
+            name: match[1] ?? "",
+            attributes: precedingAttributes({
+                content,
+                declarationLine: lineAt({ content, index }),
+            }),
+            start: span[0],
+            end: span[1],
+        });
+    }
+    return containers;
+}
+
+/** The innermost class whose span covers an offset. */
+function containerOf(
+    containers: readonly DotNetContainer[],
+    index: number,
+): DotNetContainer | undefined {
+    let innermost: DotNetContainer | undefined;
+    for (const container of containers) {
+        if (index > container.start && index < container.end) {
+            innermost = container;
+        }
+    }
+    return innermost;
+}
+
 /** The C# framework an attribute block names. */
 function dotNetFramework(
     annotations: string,
 ): Extract<TestFramework, "xunit" | "nunit" | "mstest"> {
-    if (
-        /\b(?:Fact|Theory|InlineData|MemberData|ClassData)\b/u.test(annotations)
-    ) {
-        return "xunit";
-    }
-    if (/\b(?:TestMethod|DataTestMethod)\b/u.test(annotations)) {
+    const names = attributeNames(annotations);
+    if (names.has("TestMethod") || names.has("DataTestMethod")) {
         return "mstest";
     }
-    return "nunit";
+    if (names.has("Test") || names.has("TestCase")) {
+        return "nunit";
+    }
+    return "xunit";
 }
 
 /**
@@ -610,6 +717,67 @@ function dotNetDataSourceMissing(annotations: string): boolean {
     );
 }
 
+/** The declaration one C# method head opens, or `null` when it is not a test. */
+function dotNetDeclaration({
+    path,
+    content,
+    masked,
+    containers,
+    match,
+}: {
+    path: string;
+    content: string;
+    masked: string;
+    containers: readonly DotNetContainer[];
+    match: RegExpExecArray;
+}): TestDeclaration | null {
+    const index = match.index ?? 0;
+    if (!inCode(content, masked, index)) {
+        return null;
+    }
+    const line = lineAt({ content, index });
+    const annotations = precedingAttributes({
+        content,
+        declarationLine: line,
+    });
+    const property = isFsCheckProperty(annotations);
+    if (!property && !DOTNET_TEST_ATTRIBUTE.test(annotations)) {
+        return null;
+    }
+    const container = containerOf(containers, index);
+    const skipReason = dotNetSkipReason(annotations);
+    const { body, maskedBody, bodyLine } = bodySlice(
+        content,
+        masked,
+        bodySpan(masked, index),
+        line,
+    );
+    return {
+        path,
+        line,
+        name: match[2] ?? "",
+        framework: dotNetFramework(annotations),
+        property,
+        returnType: match[1] ?? "",
+        attributes: annotations,
+        ...(container === undefined
+            ? {}
+            : {
+                  container: {
+                      name: container.name,
+                      attributes: container.attributes,
+                  },
+              }),
+        skipped: skipReason !== null,
+        ...(skipReason === null || skipReason === "" ? {} : { skipReason }),
+        focused: false,
+        dataSourceMissing: dotNetDataSourceMissing(annotations),
+        body,
+        maskedBody,
+        bodyLine,
+    };
+}
+
 /** Read every C# test declaration in one source. */
 function scanDotNetDeclarations({
     path,
@@ -621,45 +789,26 @@ function scanDotNetDeclarations({
     // Cheap file-level gate, like the JS framework marker: a source with no
     // test attribute anywhere cannot declare a test, so the method scan is
     // skipped for production files.
-    if (!DOTNET_TEST_ATTRIBUTE.test(content)) {
+    if (
+        !DOTNET_TEST_ATTRIBUTE.test(content) &&
+        !DOTNET_PROPERTY_ATTRIBUTE.test(content)
+    ) {
         return [];
     }
     const masked = maskTestSource(content);
+    const containers = dotNetContainers({ content, masked });
     const declarations: TestDeclaration[] = [];
-
     for (const match of content.matchAll(DOTNET_METHOD)) {
-        const index = match.index ?? 0;
-        if (!inCode(content, masked, index)) {
-            continue;
-        }
-        const line = lineAt({ content, index });
-        const annotations = precedingAttributes({
-            content,
-            declarationLine: line,
-        });
-        if (!DOTNET_TEST_ATTRIBUTE.test(annotations)) {
-            continue;
-        }
-        const skipReason = dotNetSkipReason(annotations);
-        const { body, maskedBody, bodyLine } = bodySlice(
+        const declaration = dotNetDeclaration({
+            path,
             content,
             masked,
-            bodySpan(masked, index),
-            line,
-        );
-        declarations.push({
-            path,
-            line,
-            name: match[1] ?? "",
-            framework: dotNetFramework(annotations),
-            skipped: skipReason !== null,
-            ...(skipReason === null || skipReason === "" ? {} : { skipReason }),
-            focused: false,
-            dataSourceMissing: dotNetDataSourceMissing(annotations),
-            body,
-            maskedBody,
-            bodyLine,
+            containers,
+            match,
         });
+        if (declaration !== null) {
+            declarations.push(declaration);
+        }
     }
     return declarations;
 }
