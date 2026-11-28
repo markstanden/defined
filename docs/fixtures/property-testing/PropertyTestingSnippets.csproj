@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <OutputType>Exe</OutputType>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+        <!-- The snippets show their usings explicitly, so the fixture does too
+             (the house default is implicit). -->
+        <ImplicitUsings>disable</ImplicitUsings>
+        <!-- The page's snippets are fixtures, not a public API: the docblocks it
+             teaches are shown in the markdown, and the drift test proves the
+             compiled text matches it. -->
+        <GenerateDocumentationFile>false</GenerateDocumentationFile>
+        <!-- Test naming (Method_State_Expected) and public test classes are the
+             page's own contract; the root .editorconfig relaxes the same two
+             analysers for tests/. Fixture types sit in the global namespace
+             because each marked snippet is contained verbatim, not because this
+             is a library. -->
+        <NoWarn>$(NoWarn);CA1707;CA1515;CA1050</NoWarn>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="FsCheck" Version="3.3.2" />
+        <PackageReference Include="FsCheck.Xunit.v3" Version="3.3.2" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+        <PackageReference Include="Shouldly" Version="4.3.0" />
+        <PackageReference Include="xunit.v3" Version="3.2.2" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    </ItemGroup>
+</Project>

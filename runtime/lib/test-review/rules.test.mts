@@ -540,6 +540,60 @@ test("reports a test whose body holds no assertion call", () => {
     assert.match(findings[0]?.message ?? "", /works/u);
 });
 
+/** One xUnit theory whose body's only assertion-shaped call is the given one. */
+function replayBody(call: string): string {
+    return xunitMethod(
+        [
+            "    [Theory]",
+            "    [MemberData(nameof(Seeds.All), MemberType = typeof(Seeds))]",
+            "    public void Replays(SeedCase seed)",
+            "    {",
+            "        Property law = Prop.ForAll(Gen.Constant(1), value => value == value);",
+            `        ${call}`,
+            "    }",
+        ].join("\n"),
+    );
+}
+
+test("counts a throwing FsCheck check as an assertion", () => {
+    // Arrange — only the ThrowOnFailure shapes throw, so only they assert.
+    const contents = [
+        "Check.One(Config.QuickThrowOnFailure, law);",
+        "Check.QuickThrowOnFailure(law);",
+    ].map(replayBody);
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "CustomerTests.cs", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found,
+        contents.map(() => []),
+    );
+});
+
+test("does not count a non-throwing FsCheck check as an assertion", () => {
+    // Arrange — Config.Quick prints a summary, so the test passes a failing law.
+    const contents = [
+        "Check.One(Config.Quick, law);",
+        "Check.One(Config.Verbose, law);",
+        "Check.Quick(law);",
+    ].map(replayBody);
+
+    // Act
+    const found = contents.map((content) =>
+        reviewTestSources([{ path: "CustomerTests.cs", content }]),
+    );
+
+    // Assert
+    assert.deepEqual(
+        found.map((findings) => findings.map((finding) => finding.rule)),
+        contents.map(() => ["no-assertions"]),
+    );
+});
+
 test("counts a generic TestAssert helper as an assertion", () => {
     // Arrange — team helper types ending in Assert are assertion calls too.
     const content = xunitMethod(
